@@ -3,13 +3,13 @@ import { getMessaging, getToken, onMessage } from 'firebase/messaging'
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: 'utyproject.firebaseapp.com',
-  databaseURL: 'https://utyproject-default-rtdb.firebaseio.com',
-  projectId: 'utyproject',
-  storageBucket: 'utyproject.appspot.com',
-  messagingSenderId: '647092575912',
-  appId: '1:647092575912:web:511c7600de6b1cb9092c9d',
-  measurementId: 'G-MSX0DHDKM9',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
 }
 
 // Initialize Firebase
@@ -22,7 +22,7 @@ This function allows us to get your device token from Firebase
 which is required for sending Push notifications to your device.
 */
 
-/* export const getTokenFromFirebase = (updateTokenFirebase) => {
+export const getTokenFromFirebase = (updateTokenFirebase) => {
   return getToken(messaging)
     .then((currentToken) => {
       if (currentToken) {
@@ -46,4 +46,4 @@ export const onMessageListener = () =>
       console.log(payload)
       resolve(payload)
     })
-  })*/
+  })
