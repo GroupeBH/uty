@@ -15,19 +15,85 @@ export default function TabLayout() {
         tabBarActiveTintColor: Colors[colorScheme === 'dark' ? 'dark' : 'light'].tint,
         headerShown: false,
         tabBarButton: HapticTab,
+        tabBarStyle: {
+          backgroundColor: Colors[colorScheme === 'dark' ? 'dark' : 'light'].background,
+          borderTopColor: Colors.border,
+          paddingTop: 8,
+          paddingBottom: 12,
+          height: 70,
+        },
+        tabBarLabelStyle: {
+          fontSize: 12,
+          fontWeight: '500',
+        },
+        tabBarItemStyle: {
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
+          title: 'Accueil',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={focused ? 30 : 26} 
+              name="house.fill" 
+              color={color} 
+            />
+          ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="search"
         options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
+          title: 'Recherche',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={focused ? 30 : 26} 
+              name="magnifyingglass" 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="cart"
+        options={{
+          title: 'Panier',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={focused ? 30 : 26} 
+              name="cart.fill" 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: 'Profil',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={focused ? 30 : 26} 
+              name="person.fill" 
+              color={color} 
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="orders"
+        options={{
+          title: 'Commandes',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol 
+              size={focused ? 30 : 26} 
+              name="list.bullet.rectangle.fill" 
+              color={color} 
+            />
+          ),
         }}
       />
     </Tabs>

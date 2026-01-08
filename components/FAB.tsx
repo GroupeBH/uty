@@ -20,8 +20,8 @@ export const FAB: React.FC<FABProps> = ({ onPress }) => {
         if (onPress) {
             onPress();
         } else {
-            // TODO: Navigate to publish screen
-            console.log('Navigate to publish');
+            // Navigate to publish screen
+            router.push('/(tabs)/publish');
         }
     };
 

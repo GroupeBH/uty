@@ -36,7 +36,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <TouchableOpacity
             style={styles.card}
             onPress={() => router.push({
-                pathname: '/(client)/product/[id]',
+                pathname: '/(tabs)/product/[id]',
                 params: { id: product._id }
             })}
             activeOpacity={0.9}
@@ -163,6 +163,7 @@ const styles = StyleSheet.create({
     },
     content: {
         padding: Spacing.lg,
+        minHeight: 120,
     },
     name: {
         fontSize: Typography.fontSize.md,
@@ -170,6 +171,7 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         marginBottom: Spacing.sm,
         lineHeight: Typography.fontSize.md * 1.4,
+        maxHeight: 40, // Limit height for consistency
     },
     ratingContainer: {
         flexDirection: 'row',
