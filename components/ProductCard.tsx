@@ -54,10 +54,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         <TouchableOpacity
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
-            onPress={() => router.push({
-                pathname: '/(tabs)/product/[id]',
-                params: { id: product._id }
-            })}
+            onPress={() => router.push(`/product/${product._id}`)}
             activeOpacity={1}
         >
             <Animated.View

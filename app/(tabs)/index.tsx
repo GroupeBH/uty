@@ -115,9 +115,9 @@ export default function HomeScreen() {
     };
 
     // Animations du header au scroll
-    const headerHeight = scrollY.interpolate({
+    const headerTranslateY = scrollY.interpolate({
         inputRange: [0, 80],
-        outputRange: [200, 140],
+        outputRange: [0, -20],
         extrapolate: 'clamp',
     });
 
@@ -127,15 +127,15 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    const greetingTranslateY = scrollY.interpolate({
+    const greetingScale = scrollY.interpolate({
         inputRange: [0, 40],
-        outputRange: [0, -10],
+        outputRange: [1, 0.8],
         extrapolate: 'clamp',
     });
 
     const searchBarScale = scrollY.interpolate({
         inputRange: [0, 80],
-        outputRange: [1, 0.95],
+        outputRange: [1, 0.96],
         extrapolate: 'clamp',
     });
 
@@ -156,14 +156,7 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header moderne avec animations */}
-            <Animated.View 
-                style={[
-                    styles.headerWrapper,
-                    {
-                        height: headerHeight,
-                    }
-                ]}
-            >
+            <View style={styles.headerWrapper}>
                 <LinearGradient
                     colors={[Colors.primary, Colors.primaryDark, '#001a33']}
                     start={{ x: 0, y: 0 }}
@@ -201,7 +194,7 @@ export default function HomeScreen() {
                                     styles.greetingContainer,
                                     {
                                         opacity: greetingOpacity,
-                                        transform: [{ translateY: greetingTranslateY }],
+                                        transform: [{ scale: greetingScale }],
                                     }
                                 ]}
                             >
@@ -292,7 +285,7 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                     </Animated.View>
                 </LinearGradient>
-            </Animated.View>
+            </View>
 
             <Animated.ScrollView
                 style={styles.scrollView}
@@ -570,6 +563,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 12,
         elevation: 12,
+        minHeight: 200,
     },
     headerGradient: {
         flex: 1,

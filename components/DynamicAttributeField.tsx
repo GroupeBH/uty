@@ -1,5 +1,6 @@
-import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { CategoryAttribute } from '@/types/category';
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
@@ -20,26 +21,34 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
             case 'string':
             case 'text':
                 return (
-                    <TextInput
-                        style={styles.input}
-                        value={value || ''}
-                        onChangeText={onChange}
-                        placeholder={`Entrez ${attribute?.name?.toLowerCase()}`}
-                    />
+                    <View style={styles.inputContainer}>
+                        <Ionicons name="text-outline" size={20} color={Colors.gray400} />
+                        <TextInput
+                            style={styles.input}
+                            value={value || ''}
+                            onChangeText={onChange}
+                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </View>
                 );
 
             case 'number':
                 return (
-                    <TextInput
-                        style={styles.input}
-                        value={value?.toString() || ''}
-                        onChangeText={(text) => {
-                            const num = parseFloat(text);
-                            onChange(isNaN(num) ? undefined : num);
-                        }}
-                        placeholder={`Entrez ${attribute?.name?.toLowerCase()}`}
-                        keyboardType="numeric"
-                    />
+                    <View style={styles.inputContainer}>
+                        <Ionicons name="calculator-outline" size={20} color={Colors.gray400} />
+                        <TextInput
+                            style={styles.input}
+                            value={value?.toString() || ''}
+                            onChangeText={(text) => {
+                                const num = parseFloat(text);
+                                onChange(isNaN(num) ? undefined : num);
+                            }}
+                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholderTextColor={Colors.gray400}
+                            keyboardType="numeric"
+                        />
+                    </View>
                 );
 
             case 'select':
@@ -114,12 +123,16 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
 
             default:
                 return (
-                    <TextInput
-                        style={styles.input}
-                        value={value || ''}
-                        onChangeText={onChange}
-                        placeholder={`Entrez ${attribute?.name?.toLowerCase()}`}
-                    />
+                    <View style={styles.inputContainer}>
+                        <Ionicons name="create-outline" size={20} color={Colors.gray400} />
+                        <TextInput
+                            style={styles.input}
+                            value={value || ''}
+                            onChangeText={onChange}
+                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </View>
                 );
         }
     };
@@ -127,7 +140,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
     return (
         <View style={styles.inputGroup}>
             <Text style={styles.label}>
-                {attribute?.name}
+                {attribute?.label || attribute?.name}
                 {attribute?.required && <Text style={styles.required}> *</Text>}
             </Text>
             {renderField()}
@@ -137,48 +150,62 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
 
 const styles = StyleSheet.create({
     inputGroup: {
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.xl,
     },
     label: {
         fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.bold,
+        fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
         marginBottom: Spacing.sm,
     },
     required: {
         color: Colors.error,
     },
-    input: {
-        borderWidth: 1,
-        borderColor: Colors.border,
-        borderRadius: BorderRadius.md,
-        padding: Spacing.md,
-        fontSize: Typography.fontSize.md,
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
         backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.lg,
+        gap: Spacing.md,
+        borderWidth: 2,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    input: {
+        flex: 1,
+        height: 50,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.medium,
     },
     pickerContainer: {
         flexDirection: 'row',
-        borderWidth: 1,
-        borderColor: Colors.border,
-        borderRadius: BorderRadius.md,
+        borderWidth: 2,
+        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.lg,
         overflow: 'hidden',
         flexWrap: 'wrap',
+        backgroundColor: Colors.white,
     },
     pickerOption: {
         flex: 1,
         minWidth: '30%',
         padding: Spacing.md,
         alignItems: 'center',
-        backgroundColor: Colors.gray50,
+        backgroundColor: Colors.white,
         borderRightWidth: 1,
-        borderRightColor: Colors.border,
+        borderRightColor: Colors.gray100,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
     },
     selectedPickerOption: {
         backgroundColor: Colors.primary,
     },
     pickerText: {
         color: Colors.textSecondary,
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.medium,
     },
     selectedPickerText: {
         color: Colors.white,
