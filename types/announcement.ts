@@ -58,6 +58,8 @@ export interface Announcement {
     autoModel?: string;
 
     isSold?: boolean;
+    categoryAncestors?: string[];
+    attributes?: Record<string, any>;
     specifications?: Record<string, any>;
     comments?: any[];
 
@@ -99,6 +101,7 @@ export interface CreateAnnouncementDto {
     year?: string;
     mileage?: string;
     autoModel?: string;
+    attributes?: Record<string, any>;
     specifications?: any;
     // Helper for file upload
     files?: any[];

@@ -1,9 +1,11 @@
+import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
-import { useGetCategoriesQuery, useGetSubcategoriesByCategoryQuery } from '@/store/api/categoriesApi';
-import { CreateAnnouncementDto } from '@/types/announcement';
+import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
+import { Category, CategoryAttribute } from '@/types/category';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Alert, Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -12,50 +14,82 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function PublishScreen() {
     const router = useRouter();
     const [createAnnouncement, { isLoading }] = useCreateAnnouncementMutation();
-    const { data: categories, isLoading: categoriesLoading } = useGetCategoriesQuery();
-    const [selectedCategory, setSelectedCategory] = useState<string>('');
-    const { data: subcategories, isLoading: subcategoriesLoading } = useGetSubcategoriesByCategoryQuery(selectedCategory, { skip: !selectedCategory });
-    const [step, setStep] = useState(1); // Multi-step form: Step 1: Category, Step 2: Details, Step 3: Photos
-    const [formData, setFormData] = useState<Partial<CreateAnnouncementDto>>({
+
+    // Category hierarchy navigation
+    const [categoryPath, setCategoryPath] = useState<Category[]>([]);
+    const [selectedLeafCategory, setSelectedLeafCategory] = useState<Category | null>(null);
+
+    // Fetch categories for current level
+    const currentParentId = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]._id : null;
+    const { data: currentLevelCategories, isLoading: categoriesLoading } = useGetCategoriesByParentQuery(currentParentId);
+
+    // Fetch attributes for selected leaf category
+    const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
+        selectedLeafCategory?._id || '',
+        { skip: !selectedLeafCategory }
+    );
+
+    console.log("categoryAttributes", categoryAttributes);
+
+    const [step, setStep] = useState(1);
+    const [formData, setFormData] = useState<any>({
         name: '',
         description: '',
         price: undefined,
-        category: '', // Using the correct field name from CreateAnnouncementDto
-        subcategory: '', // Using the correct field name from CreateAnnouncementDto
-        condition: '',
+        quantity: 1,
     });
+    const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [images, setImages] = useState<string[]>([]);
-    const [newImage, setNewImage] = useState('');
 
-    // Update category when selected
-    const handleCategoryChange = (category: string) => {
-        setSelectedCategory(category);
-        setFormData(prev => ({
-            ...prev,
-            category,
-            subcategory: '' // Reset subcategory when category changes
-        }));
+    const handleCategorySelect = (category: Category) => {
+        if (category.isLeaf) {
+            // This is a leaf category, we can select it
+            setSelectedLeafCategory(category);
+            setCategoryPath([...categoryPath, category]);
+        } else {
+            // Navigate deeper into the hierarchy
+            setCategoryPath([...categoryPath, category]);
+        }
     };
 
-    // Update subcategory when selected
-    const handleSubcategoryChange = (subcategory: string) => {
-        setFormData(prev => ({
-            ...prev,
-            subcategory
-        }));
+    const handleCategoryBack = () => {
+        if (categoryPath.length > 0) {
+            const newPath = categoryPath.slice(0, -1);
+            setCategoryPath(newPath);
+            setSelectedLeafCategory(null);
+        }
     };
 
-    const handleInputChange = (field: keyof CreateAnnouncementDto, value: any) => {
-        setFormData(prev => ({
+    const handleInputChange = (field: string, value: any) => {
+        setFormData((prev: any) => ({
             ...prev,
             [field]: value
         }));
     };
 
-    const addImage = () => {
-        if (newImage.trim()) {
-            setImages(prev => [...prev, newImage]);
-            setNewImage('');
+    const handleAttributeChange = (attributeName: string, value: any) => {
+        setDynamicAttributes(prev => ({
+            ...prev,
+            [attributeName]: value
+        }));
+    };
+
+    const pickImages = async () => {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour accéder à vos photos.');
+            return;
+        }
+
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsMultipleSelection: true,
+            quality: 0.8,
+        });
+
+        if (!result.canceled && result.assets) {
+            const newImages = result.assets.map(asset => asset.uri);
+            setImages(prev => [...prev, ...newImages]);
         }
     };
 
@@ -63,32 +97,58 @@ export default function PublishScreen() {
         setImages(prev => prev.filter((_, i) => i !== index));
     };
 
-    const handleSubmit = async () => {
-        if (!formData.name || !formData.category) {
+    const validateForm = (): boolean => {
+        if (!formData.name || !selectedLeafCategory) {
             Alert.alert('Erreur', 'Veuillez remplir les champs obligatoires (nom et catégorie)');
-            return;
+            return false;
         }
 
-        // Create FormData object for file uploads
-        const form = new FormData();
-        form.append('name', formData.name);
-        if (formData.description) form.append('description', formData.description);
-        if (formData.price) form.append('price', formData.price.toString());
-        if (formData.category) form.append('category', formData.category);
-        if (formData.condition) form.append('condition', formData.condition);
-        if (formData.quantity) form.append('quantity', formData.quantity.toString());
+        // Validate required dynamic attributes
+        if (categoryAttributes) {
+            for (const attr of categoryAttributes) {
+                if (attr.required && !dynamicAttributes[attr.name]) {
+                    Alert.alert('Erreur', `Le champ "${attr.name}" est obligatoire`);
+                    return false;
+                }
+            }
+        }
 
-        // Add images to form data
-        images.forEach((img, index) => {
-            form.append(`images`, {
-                uri: img,
-                type: 'image/jpeg', // This should match the actual image type
-                name: `image_${index}.jpg`
+        return true;
+    };
+
+    const handleSubmit = async () => {
+        if (!validateForm()) return;
+
+        const formDataToSend = new FormData();
+
+        // Append basic fields
+        formDataToSend.append('name', formData.name);
+        if (formData.description) formDataToSend.append('description', formData.description);
+        if (formData.price) formDataToSend.append('price', formData.price.toString());
+        if (formData.quantity) formDataToSend.append('quantity', formData.quantity.toString());
+        if (selectedLeafCategory) formDataToSend.append('category', selectedLeafCategory._id);
+
+        // Append dynamic attributes as JSON string
+        if (Object.keys(dynamicAttributes).length > 0) {
+            formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
+        }
+
+        // Append images
+        for (let i = 0; i < images.length; i++) {
+            const uri = images[i];
+            const filename = uri.split('/').pop() || `image_${i}.jpg`;
+            const match = /\.(\w+)$/.exec(filename);
+            const type = match ? `image/${match[1]}` : 'image/jpeg';
+
+            formDataToSend.append('files', {
+                uri,
+                name: filename,
+                type,
             } as any);
-        });
+        }
 
         try {
-            await createAnnouncement(form).unwrap();
+            await createAnnouncement(formDataToSend).unwrap();
             Alert.alert('Succès', 'Annonce publiée avec succès!', [
                 { text: 'OK', onPress: () => router.push('/(tabs)') }
             ]);
@@ -98,19 +158,10 @@ export default function PublishScreen() {
         }
     };
 
-    if (isLoading) {
-        return <LoadingSpinner fullScreen />;
-    }
+
 
     return (
         <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <Ionicons name="arrow-back" size={24} color={Colors.white} />
-                </TouchableOpacity>
-                <Text style={styles.headerTitle}>Publier une annonce</Text>
-            </View>
-
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.formContainer}>
                     {/* Step Indicator */}
@@ -121,13 +172,13 @@ export default function PublishScreen() {
                             </View>
                         </TouchableOpacity>
                         <View style={styles.stepLine}></View>
-                        <TouchableOpacity onPress={() => setStep(2)}>
+                        <TouchableOpacity onPress={() => setStep(2)} disabled={!selectedLeafCategory}>
                             <View style={[styles.stepCircle, step >= 2 && styles.activeStep]}>
                                 <Text style={styles.stepNumber}>2</Text>
                             </View>
                         </TouchableOpacity>
                         <View style={styles.stepLine}></View>
-                        <TouchableOpacity onPress={() => setStep(3)}>
+                        <TouchableOpacity onPress={() => setStep(3)} disabled={!selectedLeafCategory}>
                             <View style={[styles.stepCircle, step >= 3 && styles.activeStep]}>
                                 <Text style={styles.stepNumber}>3</Text>
                             </View>
@@ -138,62 +189,75 @@ export default function PublishScreen() {
                     {step === 1 && (
                         <View>
                             <Text style={styles.stepTitle}>Sélectionnez une catégorie</Text>
-                            
+
+                            {/* Breadcrumb */}
+                            {categoryPath.length > 0 && (
+                                <View style={styles.breadcrumb}>
+                                    <TouchableOpacity onPress={() => {
+                                        setCategoryPath([]);
+                                        setSelectedLeafCategory(null);
+                                    }}>
+                                        <Text style={styles.breadcrumbText}>Accueil</Text>
+                                    </TouchableOpacity>
+                                    {categoryPath.map((cat, index) => (
+                                        <React.Fragment key={cat._id}>
+                                            <Text style={styles.breadcrumbSeparator}> {'>'} </Text>
+                                            <TouchableOpacity onPress={() => {
+                                                setCategoryPath(categoryPath.slice(0, index + 1));
+                                                if (!cat.isLeaf) setSelectedLeafCategory(null);
+                                            }}>
+                                                <Text style={styles.breadcrumbText}>{cat.name}</Text>
+                                            </TouchableOpacity>
+                                        </React.Fragment>
+                                    ))}
+                                </View>
+                            )}
+
                             {categoriesLoading ? (
-                                <Text>Chargement des catégories...</Text>
-                            ) : categories ? (
+                                <LoadingSpinner size="small" color={Colors.primary} />
+                            ) : currentLevelCategories && currentLevelCategories.length > 0 ? (
                                 <View>
-                                    {categories.map((category) => (
+                                    {currentLevelCategories.map((category) => (
                                         <TouchableOpacity
                                             key={category._id}
-                                        style={[
-                                            styles.categoryOption,
-                                            formData.category === category._id && styles.selectedCategory
-                                        ]}
-                                        onPress={() => handleInputChange('category', category._id)}
+                                            style={[
+                                                styles.categoryOption,
+                                                selectedLeafCategory?._id === category._id && styles.selectedCategory
+                                            ]}
+                                            onPress={() => handleCategorySelect(category)}
                                         >
-                                            <Text style={styles.categoryText}>{category.name}</Text>
+                                            <View style={styles.categoryContent}>
+                                                <Text style={styles.categoryText}>{category.name}</Text>
+                                                {!category.isLeaf && (
+                                                    <Ionicons name="chevron-forward" size={20} color={Colors.textSecondary} />
+                                                )}
+                                                {category.isLeaf && selectedLeafCategory?._id === category._id && (
+                                                    <Ionicons name="checkmark-circle" size={20} color={Colors.primary} />
+                                                )}
+                                            </View>
                                         </TouchableOpacity>
                                     ))}
-                                    
-                                    {selectedCategory && subcategories && subcategories.length > 0 && (
-                                        <View style={styles.subcategoryContainer}>
-                                            <Text style={styles.subcategoryTitle}>Sous-catégories:</Text>
-                                            {subcategoriesLoading ? (
-                                                <Text>Chargement des sous-catégories...</Text>
-                                            ) : (
-                                                subcategories.map((subcategory) => (
-                                                    <TouchableOpacity
-                                                        key={subcategory._id}
-                                                        style={[
-                                                            styles.subcategoryOption,
-                                                            formData.subcategory === subcategory._id && styles.selectedSubcategory
-                                                        ]}
-                                                        onPress={() => handleInputChange('subcategory', subcategory._id)}
-                                                    >
-                                                        <Text style={styles.subcategoryText}>{subcategory.name}</Text>
-                                                    </TouchableOpacity>
-                                                ))
-                                            )}
-                                        </View>
-                                    )}
                                 </View>
                             ) : (
                                 <Text>Aucune catégorie disponible</Text>
                             )}
-                            
-                            <TouchableOpacity style={styles.nextButton} onPress={() => setStep(2)} disabled={!formData.category}>
+
+                            <TouchableOpacity
+                                style={[styles.nextButton, !selectedLeafCategory && styles.disabledButton]}
+                                onPress={() => setStep(2)}
+                                disabled={!selectedLeafCategory}
+                            >
                                 <Text style={styles.nextButtonText}>Suivant</Text>
                             </TouchableOpacity>
                         </View>
                     )}
 
-                    {/* Step 2: Product Details */}
+                    {/* Step 2: Product Details + Dynamic Attributes */}
                     {step === 2 && (
                         <View>
                             <Text style={styles.stepTitle}>Détails du produit</Text>
-                            
-                            {/* Name Field */}
+
+                            {/* Basic Fields */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Nom de l'annonce *</Text>
                                 <TextInput
@@ -204,7 +268,6 @@ export default function PublishScreen() {
                                 />
                             </View>
 
-                            {/* Description Field */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Description</Text>
                                 <TextInput
@@ -217,7 +280,6 @@ export default function PublishScreen() {
                                 />
                             </View>
 
-                            {/* Price Field */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Prix (€)</Text>
                                 <TextInput
@@ -229,42 +291,39 @@ export default function PublishScreen() {
                                 />
                             </View>
 
-                            {/* Condition Field */}
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.label}>État</Text>
-                                <View style={styles.pickerContainer}>
-                                    <TouchableOpacity
-                                        style={[styles.pickerOption, formData.condition === 'neuf' && styles.selectedPickerOption]}
-                                        onPress={() => handleInputChange('condition', 'neuf')}
-                                    >
-                                        <Text style={[styles.pickerText, formData.condition === 'neuf' && styles.selectedPickerText]}>Neuf</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        style={[styles.pickerOption, formData.condition === 'occasion' && styles.selectedPickerOption]}
-                                        onPress={() => handleInputChange('condition', 'occasion')}
-                                    >
-                                        <Text style={[styles.pickerText, formData.condition === 'occasion' && styles.selectedPickerText]}>Occasion</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-
-                            {/* Quantity Field */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Quantité</Text>
                                 <TextInput
                                     style={styles.input}
                                     value={formData.quantity?.toString()}
-                                    onChangeText={(value) => handleInputChange('quantity', parseInt(value) || undefined)}
+                                    onChangeText={(value) => handleInputChange('quantity', parseInt(value) || 1)}
                                     placeholder="1"
                                     keyboardType="numeric"
                                 />
                             </View>
-                            
+
+                            {/* Dynamic Attribute Fields */}
+                            {attributesLoading ? (
+                                <LoadingSpinner size="small" color={Colors.primary} />
+                            ) : categoryAttributes && categoryAttributes.length > 0 ? (
+                                <View>
+                                    <Text style={styles.sectionTitle}>Attributs spécifiques</Text>
+                                    {categoryAttributes.map((attr: CategoryAttribute) => (
+                                        <DynamicAttributeField
+                                            key={attr.name}
+                                            attribute={attr}
+                                            value={dynamicAttributes[attr.name]}
+                                            onChange={(value) => handleAttributeChange(attr.name, value)}
+                                        />
+                                    ))}
+                                </View>
+                            ) : null}
+
                             <View style={styles.navigationButtons}>
                                 <TouchableOpacity style={styles.prevButton} onPress={() => setStep(1)}>
                                     <Text style={styles.prevButtonText}>Précédent</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={styles.nextButton} onPress={() => setStep(3)}>
+                                <TouchableOpacity style={styles.nextButtonRow} onPress={() => setStep(3)}>
                                     <Text style={styles.nextButtonText}>Suivant</Text>
                                 </TouchableOpacity>
                             </View>
@@ -275,21 +334,13 @@ export default function PublishScreen() {
                     {step === 3 && (
                         <View>
                             <Text style={styles.stepTitle}>Ajouter des photos</Text>
-                            
-                            {/* Images Section */}
+
                             <View style={styles.inputGroup}>
                                 <Text style={styles.label}>Photos</Text>
-                                <View style={styles.imageInputContainer}>
-                                    <TextInput
-                                        style={styles.imageInput}
-                                        value={newImage}
-                                        onChangeText={setNewImage}
-                                        placeholder="URL de l'image ou lien"
-                                    />
-                                    <TouchableOpacity style={styles.addButton} onPress={addImage}>
-                                        <Ionicons name="add" size={24} color={Colors.white} />
-                                    </TouchableOpacity>
-                                </View>
+                                <TouchableOpacity style={styles.uploadButton} onPress={pickImages}>
+                                    <Ionicons name="camera" size={24} color={Colors.white} />
+                                    <Text style={styles.uploadButtonText}>Sélectionner des photos</Text>
+                                </TouchableOpacity>
 
                                 {/* Display added images */}
                                 {images.length > 0 && (
@@ -305,13 +356,21 @@ export default function PublishScreen() {
                                     </View>
                                 )}
                             </View>
-                            
+
                             <View style={styles.navigationButtons}>
                                 <TouchableOpacity style={styles.prevButton} onPress={() => setStep(2)}>
                                     <Text style={styles.prevButtonText}>Précédent</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity style={styles.submitButton} onPress={handleSubmit}>
-                                    <Text style={styles.submitButtonText}>Publier l'annonce</Text>
+                                <TouchableOpacity
+                                    style={[styles.submitButton, isLoading && styles.disabledButton]}
+                                    onPress={handleSubmit}
+                                    disabled={isLoading}
+                                >
+                                    {isLoading ? (
+                                        <LoadingSpinner size="small" color={Colors.white} />
+                                    ) : (
+                                        <Text style={styles.submitButtonText}>Publier l'annonce</Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -326,21 +385,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: Colors.background,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: Spacing.lg,
-        backgroundColor: Colors.primary,
-    },
-    backButton: {
-        marginRight: Spacing.md,
-    },
-    headerTitle: {
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
-        flex: 1,
     },
     scrollContent: {
         padding: Spacing.lg,
@@ -384,6 +428,32 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         marginBottom: Spacing.lg,
     },
+    sectionTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+        marginTop: Spacing.lg,
+        marginBottom: Spacing.md,
+    },
+    breadcrumb: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        marginBottom: Spacing.md,
+        padding: Spacing.sm,
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.md,
+    },
+    breadcrumbText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    breadcrumbSeparator: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        marginHorizontal: Spacing.xs,
+    },
     categoryOption: {
         padding: Spacing.md,
         borderWidth: 1,
@@ -395,32 +465,12 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primary + '20',
         borderColor: Colors.primary,
     },
+    categoryContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
     categoryText: {
-        fontSize: Typography.fontSize.md,
-        color: Colors.textPrimary,
-    },
-    subcategoryContainer: {
-        marginTop: Spacing.md,
-        paddingLeft: Spacing.md,
-    },
-    subcategoryTitle: {
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.md,
-    },
-    subcategoryOption: {
-        padding: Spacing.md,
-        borderWidth: 1,
-        borderColor: Colors.border,
-        borderRadius: BorderRadius.md,
-        marginBottom: Spacing.sm,
-    },
-    selectedSubcategory: {
-        backgroundColor: Colors.accent + '20',
-        borderColor: Colors.accent,
-    },
-    subcategoryText: {
         fontSize: Typography.fontSize.md,
         color: Colors.textPrimary,
     },
@@ -430,6 +480,9 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         alignItems: 'center',
         marginTop: Spacing.lg,
+    },
+    disabledButton: {
+        backgroundColor: Colors.gray300,
     },
     nextButtonText: {
         color: Colors.white,
@@ -457,30 +510,6 @@ const styles = StyleSheet.create({
         height: 100,
         textAlignVertical: 'top',
     },
-    pickerContainer: {
-        flexDirection: 'row',
-        borderWidth: 1,
-        borderColor: Colors.border,
-        borderRadius: BorderRadius.md,
-        overflow: 'hidden',
-    },
-    pickerOption: {
-        flex: 1,
-        padding: Spacing.md,
-        alignItems: 'center',
-        backgroundColor: Colors.gray50,
-    },
-    selectedPickerOption: {
-        backgroundColor: Colors.primary,
-    },
-    pickerText: {
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.md,
-    },
-    selectedPickerText: {
-        color: Colors.white,
-        fontWeight: Typography.fontWeight.bold,
-    },
     navigationButtons: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -499,7 +528,7 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.bold,
     },
-    nextButton: {
+    nextButtonRow: {
         flex: 1,
         backgroundColor: Colors.primary,
         padding: Spacing.lg,
@@ -507,41 +536,32 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginLeft: Spacing.sm,
     },
-    nextButtonText: {
-        color: Colors.white,
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.bold,
-    },
     submitButton: {
+        flex: 1,
         backgroundColor: Colors.primary,
         padding: Spacing.lg,
         borderRadius: BorderRadius.lg,
         alignItems: 'center',
+        marginLeft: Spacing.sm,
     },
     submitButtonText: {
         color: Colors.white,
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.bold,
     },
-    imageInputContainer: {
+    uploadButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        borderWidth: 1,
-        borderColor: Colors.border,
-        borderRadius: BorderRadius.md,
-        overflow: 'hidden',
-    },
-    imageInput: {
-        flex: 1,
-        padding: Spacing.md,
-        fontSize: Typography.fontSize.md,
-        backgroundColor: Colors.white,
-    },
-    addButton: {
-        backgroundColor: Colors.primary,
-        padding: Spacing.md,
         justifyContent: 'center',
-        alignItems: 'center',
+        backgroundColor: Colors.primary,
+        padding: Spacing.lg,
+        borderRadius: BorderRadius.md,
+        gap: Spacing.sm,
+    },
+    uploadButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.bold,
     },
     imagePreviewContainer: {
         flexDirection: 'row',

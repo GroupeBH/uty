@@ -107,6 +107,7 @@ export const BorderRadius = {
   lg: 24,    // Pour les grandes sections (Augmenté)
   xl: 32,
   xxl: 40,
+  xxxl: 48,  // Pour les très grandes sections (header, etc.)
   full: 9999,
 };
 

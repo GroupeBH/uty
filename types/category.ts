@@ -22,8 +22,10 @@ export interface Category {
     description: string;
     icon: string;
     isActive: boolean;
+    parentId?: string;
+    ancestors?: string[];
+    isLeaf: boolean;
     attributes?: CategoryAttribute[];
-    subcategories?: Subcategory[];
     createdAt: string;
     updatedAt: string;
 }

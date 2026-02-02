@@ -5,9 +5,10 @@
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { Announcement } from '@/types/announcement';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useRef } from 'react';
+import { Animated, Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 interface ProductCardProps {
     product: Announcement;
@@ -23,6 +24,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     isInWishlist = false,
 }) => {
     const router = useRouter();
+    const scaleAnim = useRef(new Animated.Value(1)).current;
 
     // Use price as default, no originalPrice field exists on Announcement yet for simple discount calculation
     // but schema has priceRange, etc. Adjusting to display basic price for now.
@@ -32,21 +34,52 @@ export const ProductCard: React.FC<ProductCardProps> = ({
         ? product.images[0]
         : 'https://via.placeholder.com/150';
 
+    const handlePressIn = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 0.96,
+            useNativeDriver: true,
+        }).start();
+    };
+
+    const handlePressOut = () => {
+        Animated.spring(scaleAnim, {
+            toValue: 1,
+            friction: 5,
+            tension: 40,
+            useNativeDriver: true,
+        }).start();
+    };
+
     return (
         <TouchableOpacity
-            style={styles.card}
+            onPressIn={handlePressIn}
+            onPressOut={handlePressOut}
             onPress={() => router.push({
                 pathname: '/(tabs)/product/[id]',
                 params: { id: product._id }
             })}
-            activeOpacity={0.9}
+            activeOpacity={1}
         >
+            <Animated.View
+                style={[
+                    styles.card,
+                    {
+                        transform: [{ scale: scaleAnim }],
+                    },
+                ]}
+            >
             {/* Image */}
             <View style={styles.imageContainer}>
                 <Image
                     source={{ uri: imageUrl }}
                     style={styles.image}
                     resizeMode="cover"
+                />
+                
+                {/* Gradient overlay pour meilleure lisibilité */}
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.05)']}
+                    style={styles.imageOverlay}
                 />
 
                 {/* Badge de stock (using quantity instead of stock) */}
@@ -59,12 +92,15 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 {onToggleWishlist && (
                     <TouchableOpacity
                         style={styles.wishlistButton}
-                        onPress={() => onToggleWishlist(product)}
+                        onPress={(e) => {
+                            e.stopPropagation();
+                            onToggleWishlist(product);
+                        }}
                     >
                         <Ionicons
                             name={isInWishlist ? 'heart' : 'heart-outline'}
                             size={20}
-                            color={isInWishlist ? Colors.error : Colors.white}
+                            color={isInWishlist ? Colors.error : Colors.gray600}
                         />
                     </TouchableOpacity>
                 )}
@@ -92,12 +128,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 {onAddToCart && (product.quantity === undefined || product.quantity > 0) && (
                     <TouchableOpacity
                         style={styles.addButton}
-                        onPress={() => onAddToCart(product)}
+                        onPress={(e) => {
+                            e.stopPropagation();
+                            onAddToCart(product);
+                        }}
                     >
-                        <Ionicons name="cart" size={18} color={Colors.primary} />
+                        <Ionicons name="cart" size={18} color={Colors.white} />
                     </TouchableOpacity>
                 )}
             </View>
+            </Animated.View>
         </TouchableOpacity>
     );
 };
@@ -119,6 +159,13 @@ const styles = StyleSheet.create({
     image: {
         width: '100%',
         height: '100%',
+    },
+    imageOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: 60,
     },
     discountBadge: {
         position: 'absolute',
@@ -142,10 +189,10 @@ const styles = StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: Colors.white,
+        backgroundColor: 'rgba(255, 255, 255, 0.95)',
         alignItems: 'center',
         justifyContent: 'center',
-        ...Shadows.md,
+        ...Shadows.lg,
     },
     outOfStockBadge: {
         position: 'absolute',
@@ -209,12 +256,12 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: Spacing.lg,
         right: Spacing.lg,
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: Colors.accent,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
-        ...Shadows.md,
+        ...Shadows.lg,
     },
 });
