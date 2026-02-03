@@ -1,103 +1,99 @@
-import { tokenService } from '@/services/tokenService';
-import {
-    AuthTokens,
-    LoginRequest,
-    RegisterRequest,
-    RequestOtpResponse,
-    VerifyOtpRequest,
-    VerifyOtpResponse
-} from '@/types/auth';
 import { baseApi } from './baseApi';
+
+export interface RequestOtpDto {
+    phone: string;
+}
+
+export interface VerifyOtpDto {
+    phone: string;
+    otp: string;
+}
+
+export interface RegisterDto {
+    phone: string;
+    firstName: string;
+    lastName: string;
+    preferredCategoryIds: string[];
+    image?: string;
+    pin: string;
+}
+
+export interface LoginDto {
+    phone: string;
+    pin: string;
+}
+
+export interface AuthResponse {
+    access_token: string;
+    refresh_token: string;
+}
+
+export interface User {
+    _id: string;
+    username: string;
+    firstName: string;
+    lastName: string;
+    phone?: string;
+    verified_phone?: string;
+    email?: string;
+    image?: string;
+    roles: string[];
+    rating?: number;
+    preferredCategories?: string[];
+}
 
 export const authApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
-        requestOtp: builder.mutation<RequestOtpResponse, string>({
-            query: (phone) => ({
+        requestOtp: builder.mutation<{ message: string; phone: string; status: string }, RequestOtpDto>({
+            query: (dto) => ({
                 url: '/auth/request-otp',
                 method: 'POST',
-                body: { phone },
+                body: dto,
             }),
         }),
-        verifyOtp: builder.mutation<VerifyOtpResponse, VerifyOtpRequest>({
-            query: (credentials) => ({
+        verifyOtp: builder.mutation<{ phone: string; status: string }, VerifyOtpDto>({
+            query: (dto) => ({
                 url: '/auth/verify-otp',
                 method: 'POST',
-                body: credentials,
+                body: dto,
             }),
-            async onQueryStarted(arg, { queryFulfilled }) {
-                try {
-                    const { data } = await queryFulfilled;
-                    if (data.tokens) {
-                        await tokenService.saveTokens(data.tokens.access_token, data.tokens.refresh_token);
-                    }
-                } catch (error) {
-                    console.error('Verify OTP error:', error);
-                }
-            },
-            invalidatesTags: ['User'],
         }),
-        register: builder.mutation<AuthTokens, RegisterRequest>({
-            query: (userData) => ({
+        register: builder.mutation<AuthResponse, RegisterDto>({
+            query: (dto) => ({
                 url: '/auth/register',
                 method: 'POST',
-                body: userData,
+                body: dto,
             }),
-            async onQueryStarted(arg, { queryFulfilled }) {
-                try {
-                    const { data } = await queryFulfilled;
-                    await tokenService.saveTokens(data.access_token, data.refresh_token);
-                } catch (error) {
-                    console.error('Register error:', error);
-                }
-            },
-            invalidatesTags: ['User'],
         }),
-        login: builder.mutation<AuthTokens, LoginRequest>({
-            query: (credentials) => ({
+        login: builder.mutation<AuthResponse, LoginDto>({
+            query: (dto) => ({
                 url: '/auth/login',
                 method: 'POST',
-                body: credentials,
+                body: dto,
             }),
-            async onQueryStarted(arg, { queryFulfilled }) {
-                try {
-                    const { data } = await queryFulfilled;
-                    await tokenService.saveTokens(data.access_token, data.refresh_token);
-                } catch (error) {
-                    console.error('Login error:', error);
-                }
-            },
-            invalidatesTags: ['User'],
         }),
-        logout: builder.mutation<void, void>({
+        logout: builder.mutation<{ message: string }, void>({
             query: () => ({
                 url: '/auth/logout',
                 method: 'POST',
             }),
-            async onQueryStarted(arg, { queryFulfilled }) {
-                try {
-                    await queryFulfilled;
-                    await tokenService.clearTokens();
-                } catch (error) {
-                    await tokenService.clearTokens();
-                }
-            },
-            invalidatesTags: ['User'],
         }),
-        refreshToken: builder.mutation<AuthTokens, string>({
-            query: (oldAccessToken) => ({
+        getProfile: builder.query<User, void>({
+            query: () => '/users/profile',
+            providesTags: ['User'],
+        }),
+        refreshToken: builder.mutation<AuthResponse, { refresh_token: string }>({
+            query: () => ({
                 url: '/auth/refresh/accessToken',
                 method: 'POST',
-                body: { oldAccessToken },
             }),
-            async onQueryStarted(arg, { queryFulfilled }) {
-                try {
-                    const { data } = await queryFulfilled;
-                    await tokenService.saveTokens(data.access_token, data.refresh_token);
-                } catch (error) {
-                    console.error('Refresh Token error:', error);
-                    // If refresh fails, we might want to logout, but baseApi logic handles 401s usually
-                }
-            },
+        }),
+        updateFcmToken: builder.mutation<void, { fcmToken: string }>({
+            query: (dto) => ({
+                url: '/auth/fcm-token',
+                method: 'PATCH',
+                body: dto,
+            }),
         }),
     }),
 });
@@ -108,5 +104,7 @@ export const {
     useRegisterMutation,
     useLoginMutation,
     useLogoutMutation,
+    useGetProfileQuery,
     useRefreshTokenMutation,
+    useUpdateFcmTokenMutation,
 } = authApi;

@@ -1,75 +1,60 @@
-/**
- * Hook personnalisé pour l'authentification
- */
-
-import { tokenService } from '@/services/tokenService';
-import { useLoginMutation, useLogoutMutation, useRegisterMutation } from '@/store/api/authApi';
-import { useGetProfileQuery } from '@/store/api/usersApi';
-import { LoginRequest, RegisterRequest } from '@/types/auth';
-// The existing code uses UserRole from '@/types' which is an enum.
-// My user.ts has `export enum Role`.
-// I should map or use consistent types. 
-// Existing RegisterScreen uses `UserRole` from '@/types'.
-// I will keep `UserRole` import from `@/types` for now to avoid breaking UI, assuming values match.
 import { useCallback } from 'react';
+import { Alert } from 'react-native';
+import { useRouter } from 'expo-router';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import {
+    selectIsAuthenticated,
+    selectCurrentUser,
+    selectIsLoading,
+    logout as logoutAction,
+} from '@/store/slices/authSlice';
+import { useLogoutMutation } from '@/store/api/authApi';
+import { tokenService } from '@/services/tokenService';
+import { storage } from '@/utils/storage';
 
 export const useAuth = () => {
-    const [login, { isLoading: isLoggingIn }] = useLoginMutation();
-    const [register, { isLoading: isRegistering }] = useRegisterMutation();
-    const [logout, { isLoading: isLoggingOut }] = useLogoutMutation();
-    // useGetProfileQuery is the new way to get user data
-    const { data: user, isLoading: isLoadingUser, refetch } = useGetProfileQuery();
+    const dispatch = useAppDispatch();
+    const router = useRouter();
+    
+    const isAuthenticated = useAppSelector(selectIsAuthenticated);
+    const user = useAppSelector(selectCurrentUser);
+    const isLoading = useAppSelector(selectIsLoading);
 
-    const handleLogin = useCallback(async (credentials: LoginRequest) => {
-        try {
-            const result = await login(credentials).unwrap();
-            return result;
-        } catch (error) {
-            throw error;
-        }
-    }, [login]);
+    const [logoutMutation] = useLogoutMutation();
 
-    const handleRegister = useCallback(async (userData: RegisterRequest) => {
+    const logout = useCallback(async () => {
         try {
-            const result = await register(userData).unwrap();
-            return result;
+            await logoutMutation().unwrap();
         } catch (error) {
-            throw error;
-        }
-    }, [register]);
-
-    const handleLogout = useCallback(async () => {
-        try {
-            await logout().unwrap();
-        } catch (error) {
-            // Même en cas d'erreur, on supprime les tokens locaux
+            console.error('Logout API error:', error);
+        } finally {
             await tokenService.clearTokens();
+            await storage.clearAuth();
+            dispatch(logoutAction());
         }
-    }, [logout]);
+    }, [dispatch, logoutMutation]);
 
-    const isAuthenticated = !!user;
-
-    const hasRole = useCallback((role: string) => {
-        // user.roles is array in my new User type (Role[]).
-        // UI expects single role comparison?
-        // Old User type had `role: UserRole` (single).
-        // New User type has `roles: Role[]`.
-        // I need to adapt.
-        if (!user || !user.roles) return false;
-        return user.roles.includes(role as any);
-    }, [user]);
+    const requireAuth = useCallback(
+        (message = 'Vous devez être connecté pour effectuer cette action') => {
+            if (!isAuthenticated) {
+                // Afficher le message si fourni
+                if (message) {
+                    Alert.alert('Connexion requise', message);
+                }
+                // Ouvrir le modal d'authentification
+                router.push('/modal');
+                return false;
+            }
+            return true;
+        },
+        [isAuthenticated, router]
+    );
 
     return {
         user,
         isAuthenticated,
-        isLoading: isLoadingUser,
-        isLoggingIn,
-        isRegistering,
-        isLoggingOut,
-        login: handleLogin,
-        register: handleRegister,
-        logout: handleLogout,
-        refetch,
-        hasRole,
+        isLoading,
+        logout,
+        requireAuth,
     };
 };

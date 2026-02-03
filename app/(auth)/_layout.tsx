@@ -1,8 +1,3 @@
-/**
- * Layout pour les écrans d'authentification
- */
-
-import { Colors } from '@/constants/theme';
 import { Stack } from 'expo-router';
 
 export default function AuthLayout() {
@@ -10,11 +5,12 @@ export default function AuthLayout() {
         <Stack
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: Colors.background },
+                animation: 'slide_from_right',
             }}
         >
             <Stack.Screen name="login" />
             <Stack.Screen name="register" />
+            <Stack.Screen name="otp" />
         </Stack>
     );
 }

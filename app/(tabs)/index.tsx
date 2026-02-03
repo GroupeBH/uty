@@ -64,9 +64,9 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
 
 const QUICK_ACTIONS = [
     { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
-    { id: '2', title: 'Rechercher', icon: 'search-outline', gradient: Gradients.cool, route: '/search' },
-    { id: '3', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
-    { id: '4', title: 'Commandes', icon: 'receipt-outline', gradient: Gradients.success, route: '/orders' },
+    { id: '2', title: 'Mes annonces', icon: 'list-outline', gradient: Gradients.primary, route: '/my-announcements' },
+    { id: '3', title: 'Rechercher', icon: 'search-outline', gradient: Gradients.cool, route: '/search' },
+    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
 ];
 
 const CATEGORIES = [

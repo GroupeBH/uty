@@ -6,15 +6,18 @@
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { Category } from '@/types/category';
+import { convertImagesToDataUrls } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Alert,
     Animated,
     Image,
@@ -38,7 +41,15 @@ const BASE_STEPS = [
 
 export default function PublishScreen() {
     const router = useRouter();
+    const { requireAuth } = useAuth();
     const [createAnnouncement, { isLoading: isPublishing }] = useCreateAnnouncementMutation();
+
+    // Check authentication on mount
+    useEffect(() => {
+        if (!requireAuth('Vous devez être connecté pour publier une annonce')) {
+            return;
+        }
+    }, [requireAuth]);
 
     // État du flux
     const [currentStep, setCurrentStep] = useState(1);
@@ -57,6 +68,8 @@ export default function PublishScreen() {
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [images, setImages] = useState<string[]>([]);
+    const [isConvertingImages, setIsConvertingImages] = useState(false);
+    const formDataWithFilesRef = useRef<FormData>(new FormData());
     const [errors, setErrors] = useState<Record<string, string>>({});
 
     // Queries
@@ -175,8 +188,33 @@ export default function PublishScreen() {
         });
 
         if (!result.canceled && result.assets) {
-            const newImages = result.assets.map((asset) => asset.uri);
-            setImages((prev) => [...prev, ...newImages].slice(0, 10));
+            // Convertir immédiatement les images en base64
+            const imageUris = result.assets.map((asset) => asset.uri);
+            console.log('Converting', imageUris.length, 'selected images to base64...');
+            
+            setIsConvertingImages(true);
+            try {
+                const base64Images = await convertImagesToDataUrls(imageUris);
+                console.log('Images converted to base64 successfully');
+                
+                // Ajouter les images converties au state pour affichage
+                setImages((prev) => {
+                    const newImages = [...prev, ...base64Images].slice(0, 10);
+                    
+                    // Ajouter immédiatement chaque nouvelle image au FormData dans le champ 'files'
+                    base64Images.forEach((base64Image) => {
+                        formDataWithFilesRef.current.append('files', base64Image);
+                    });
+                    
+                    console.log('Added', base64Images.length, 'images to FormData files field');
+                    return newImages;
+                });
+            } catch (error) {
+                console.error('Error converting images to base64:', error);
+                Alert.alert('Erreur', 'Impossible de convertir les images');
+            } finally {
+                setIsConvertingImages(false);
+            }
         }
     };
 
@@ -191,13 +229,50 @@ export default function PublishScreen() {
             quality: 0.8,
         });
 
+        console.log('result of takePhoto', result);
+
         if (!result.canceled && result.assets && result.assets.length > 0) {
-            setImages((prev) => [...prev, result.assets[0].uri].slice(0, 10));
+            // Convertir immédiatement l'image capturée en base64
+            const imageUri = result.assets[0].uri;
+            console.log('Converting captured photo to base64...');
+            
+            setIsConvertingImages(true);
+            try {
+                const base64Images = await convertImagesToDataUrls([imageUri]);
+                console.log('Captured photo converted to base64 successfully');
+                
+                // Ajouter l'image convertie au state pour affichage
+                setImages((prev) => {
+                    const newImages = [...prev, base64Images[0]].slice(0, 10);
+                    
+                    // Ajouter immédiatement l'image au FormData dans le champ 'files'
+                    formDataWithFilesRef.current.append('files', base64Images[0]);
+                    
+                    console.log('Added captured photo to FormData files field');
+                    return newImages;
+                });
+            } catch (error) {
+                console.error('Error converting photo to base64:', error);
+                Alert.alert('Erreur', 'Impossible de convertir la photo');
+            } finally {
+                setIsConvertingImages(false);
+            }
         }
     };
 
     const removeImage = (index: number) => {
-        setImages((prev) => prev.filter((_, i) => i !== index));
+        setImages((prev) => {
+            const newImages = prev.filter((_, i) => i !== index);
+            
+            // Reconstruire le FormData avec les images restantes
+            formDataWithFilesRef.current = new FormData();
+            newImages.forEach((base64Image) => {
+                formDataWithFilesRef.current.append('files', base64Image);
+            });
+            
+            console.log('Removed image at index', index, '. Remaining images in FormData:', newImages.length);
+            return newImages;
+        });
     };
 
     // Validation
@@ -286,33 +361,44 @@ export default function PublishScreen() {
     const handleSubmit = async () => {
         if (!validateStep(currentStep)) return;
 
-        const formDataToSend = new FormData();
-
-        formDataToSend.append('name', formData.name);
-        if (formData.description) formDataToSend.append('description', formData.description);
-        if (formData.price) formDataToSend.append('price', parseFloat(formData.price).toString());
-        if (formData.quantity) formDataToSend.append('quantity', parseInt(formData.quantity).toString());
-        if (selectedLeafCategory) formDataToSend.append('category', selectedLeafCategory._id);
-
-        if (Object.keys(dynamicAttributes).length > 0) {
-            formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
-        }
-
-        for (let i = 0; i < images.length; i++) {
-            const uri = images[i];
-            const filename = uri.split('/').pop() || `image_${i}.jpg`;
-            const match = /\.(\w+)$/.exec(filename);
-            const type = match ? `image/${match[1]}` : 'image/jpeg';
-
-            formDataToSend.append('files', {
-                uri,
-                name: filename,
-                type,
-            } as any);
+        if (!selectedLeafCategory) {
+            Alert.alert('Erreur', 'Veuillez sélectionner une catégorie');
+            return;
         }
 
         try {
-            await createAnnouncement(formDataToSend).unwrap();
+            // Le FormData contient déjà les images dans 'files' (ajoutées lors de la sélection)
+            console.log('Preparing FormData with', images.length, 'base64 images already in files field...');
+            
+            // Utiliser le FormData ref qui contient déjà les images
+            const formDataToSend = formDataWithFilesRef.current;
+            
+            // Ajouter les champs de base au FormData existant
+            formDataToSend.append('name', formData.name);
+            if (formData.description) {
+                formDataToSend.append('description', formData.description);
+            }
+            if (formData.price) {
+                formDataToSend.append('price', formData.price);
+            }
+            if (formData.quantity) {
+                formDataToSend.append('quantity', formData.quantity);
+            }
+            formDataToSend.append('category', selectedLeafCategory._id);
+            
+            // Ajouter les attributs dynamiques si présents
+            if (Object.keys(dynamicAttributes).length > 0) {
+                formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
+            }
+
+            console.log('Sending FormData with', images.length, 'base64 images in files field');
+            console.log('FormData contains:', {
+                name: formData.name,
+                category: selectedLeafCategory._id,
+                imagesCount: images.length,
+            });
+            
+            await createAnnouncement(formDataToSend as any).unwrap();
             Alert.alert(
                 '🎉 Succès',
                 'Votre annonce a été publiée avec succès!',
@@ -323,6 +409,8 @@ export default function PublishScreen() {
             Alert.alert('❌ Erreur', error?.data?.message || 'Échec de la publication de l\'annonce');
         }
     };
+
+    console.log('announcementData', formData);
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -631,12 +719,24 @@ export default function PublishScreen() {
                                     </View>
                                 ))}
 
+                                {/* Loader pendant la conversion */}
+                                {isConvertingImages && (
+                                    <View style={styles.imageLoadingItem}>
+                                        <ActivityIndicator size="large" color={Colors.primary} />
+                                        <Text style={styles.loadingText}>Conversion...</Text>
+                                    </View>
+                                )}
+
                                 {/* Boutons d'ajout */}
                                 {images.length < 10 && (
                                     <>
-                                        <TouchableOpacity style={styles.addImageButton} onPress={pickImages}>
+                                        <TouchableOpacity 
+                                            style={styles.addImageButton} 
+                                            onPress={pickImages}
+                                            disabled={isConvertingImages}
+                                        >
                                             <LinearGradient
-                                                colors={Gradients.cool}
+                                                colors={isConvertingImages ? [Colors.gray300, Colors.gray400] : Gradients.cool}
                                                 style={styles.addImageGradient}
                                             >
                                                 <Ionicons name="images" size={32} color={Colors.white} />
@@ -644,9 +744,13 @@ export default function PublishScreen() {
                                             </LinearGradient>
                                         </TouchableOpacity>
 
-                                        <TouchableOpacity style={styles.addImageButton} onPress={takePhoto}>
+                                        <TouchableOpacity 
+                                            style={styles.addImageButton} 
+                                            onPress={takePhoto}
+                                            disabled={isConvertingImages}
+                                        >
                                             <LinearGradient
-                                                colors={Gradients.warm}
+                                                colors={isConvertingImages ? [Colors.gray300, Colors.gray400] : Gradients.warm}
                                                 style={styles.addImageGradient}
                                             >
                                                 <Ionicons name="camera" size={32} color={Colors.white} />
@@ -1030,6 +1134,17 @@ const styles = StyleSheet.create({
     imagePreview: {
         width: '100%',
         height: '100%',
+    },
+    imageLoadingItem: {
+        width: '31%',
+        aspectRatio: 1,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray100,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: Colors.primary,
+        borderStyle: 'dashed',
     },
     removeImageButton: {
         position: 'absolute',

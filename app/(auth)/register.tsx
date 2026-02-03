@@ -1,13 +1,6 @@
-/**
- * Écran d'inscription
- */
-
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
-import { useAuth } from '@/hooks/useAuth';
-import { UserRole } from '@/types';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
@@ -17,254 +10,117 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRequestOtpMutation } from '@/store/api/authApi';
 
 export default function RegisterScreen() {
     const router = useRouter();
-    const { register, isRegistering } = useAuth();
-
-    const [firstName, setFirstName] = useState('');
-    const [lastName, setLastName] = useState('');
     const [phone, setPhone] = useState('');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
-    const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.CLIENT);
-    const [errors, setErrors] = useState<Record<string, string>>({});
+    const [requestOtp, { isLoading }] = useRequestOtpMutation();
 
-    const validate = () => {
-        const newErrors: Record<string, string> = {};
-
-        if (!firstName.trim()) {
-            newErrors.firstName = 'Le prénom est requis';
-        }
-
-        if (!lastName.trim()) {
-            newErrors.lastName = 'Le nom est requis';
-        }
-
+    const handleContinue = async () => {
         if (!phone.trim()) {
-            newErrors.phone = 'Le numéro de téléphone est requis';
-        } else if (phone.length < 10) {
-            newErrors.phone = 'Numéro de téléphone invalide';
+            Alert.alert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+            return;
         }
-
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-            newErrors.email = 'Email invalide';
-        }
-
-        if (!password.trim()) {
-            newErrors.password = 'Le mot de passe est requis';
-        } else if (password.length < 6) {
-            newErrors.password = 'Le mot de passe doit contenir au moins 6 caractères';
-        }
-
-        if (password !== confirmPassword) {
-            newErrors.confirmPassword = 'Les mots de passe ne correspondent pas';
-        }
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
-
-    const handleRegister = async () => {
-        if (!validate()) return;
 
         try {
-            const result = await register({
-                firstName,
-                lastName,
-                phone,
-                email: email || undefined,
-                password,
-                role: selectedRole,
-            });
-
-            // Redirection selon le rôle
-            if (result.user.role === 'client') {
-                router.replace('/(client)');
-            } else if (result.user.role === 'seller') {
-                router.replace('/(seller)');
-            } else if (result.user.role === 'driver') {
-                router.replace('/(driver)');
-            }
+            const response = await requestOtp({ phone }).unwrap();
+            Alert.alert('Succès', response.message || 'Code OTP envoyé !', [
+                {
+                    text: 'OK',
+                    onPress: () => {
+                        router.push({
+                            pathname: '/(auth)/otp',
+                            params: { phone, mode: 'register' },
+                        });
+                    },
+                },
+            ]);
         } catch (error: any) {
-            Alert.alert(
-                'Erreur d\'inscription',
-                error?.data?.message || 'Une erreur est survenue lors de l\'inscription'
-            );
+            console.error('OTP request error:', error);
+            Alert.alert('Erreur', error?.data?.message || 'Erreur lors de l\'envoi du code OTP');
         }
     };
 
-    const roles = [
-        { value: UserRole.CLIENT, label: 'Client', icon: 'person' },
-        { value: UserRole.SELLER, label: 'Vendeur', icon: 'storefront' },
-        { value: UserRole.DRIVER, label: 'Livreur', icon: 'car' },
-    ];
-
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardView}
+                style={styles.container}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
                 >
                     {/* Header */}
                     <View style={styles.header}>
-                        <TouchableOpacity
-                            onPress={() => router.back()}
-                            style={styles.backButton}
-                        >
-                            <Ionicons name="arrow-back" size={24} color={Colors.primary} />
+                        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                            <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
                         </TouchableOpacity>
+                    </View>
+
+                    {/* Illustration */}
+                    <View style={styles.illustrationContainer}>
+                        <LinearGradient colors={Gradients.cool} style={styles.iconCircle}>
+                            <Ionicons name="person-add-outline" size={64} color={Colors.white} />
+                        </LinearGradient>
+                    </View>
+
+                    {/* Title */}
+                    <View style={styles.titleContainer}>
                         <Text style={styles.title}>Créer un compte</Text>
-                        <Text style={styles.subtitle}>Rejoignez-nous dès maintenant</Text>
+                        <Text style={styles.subtitle}>
+                            Entrez votre numéro de téléphone pour commencer
+                        </Text>
                     </View>
 
-                    {/* Sélection du rôle */}
-                    <View style={styles.roleSection}>
-                        <Text style={styles.sectionTitle}>Je suis un :</Text>
-                        <View style={styles.roleButtons}>
-                            {roles.map((role) => (
-                                <TouchableOpacity
-                                    key={role.value}
-                                    style={[
-                                        styles.roleButton,
-                                        selectedRole === role.value && styles.roleButtonActive,
-                                    ]}
-                                    onPress={() => setSelectedRole(role.value)}
-                                >
-                                    <Ionicons
-                                        name={role.icon as any}
-                                        size={24}
-                                        color={selectedRole === role.value ? Colors.accent : Colors.gray400}
-                                    />
-                                    <Text
-                                        style={[
-                                            styles.roleButtonText,
-                                            selectedRole === role.value && styles.roleButtonTextActive,
-                                        ]}
-                                    >
-                                        {role.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-
-                    {/* Formulaire */}
+                    {/* Form */}
                     <View style={styles.form}>
-                        <View style={styles.row}>
-                            <View style={styles.halfInput}>
-                                <Input
-                                    label="Prénom"
-                                    icon="person"
-                                    placeholder="Votre prénom"
-                                    value={firstName}
-                                    onChangeText={(text) => {
-                                        setFirstName(text);
-                                        setErrors({ ...errors, firstName: undefined });
-                                    }}
-                                    error={errors.firstName}
-                                    required
-                                />
-                            </View>
-                            <View style={styles.halfInput}>
-                                <Input
-                                    label="Nom"
-                                    icon="person"
-                                    placeholder="Votre nom"
-                                    value={lastName}
-                                    onChangeText={(text) => {
-                                        setLastName(text);
-                                        setErrors({ ...errors, lastName: undefined });
-                                    }}
-                                    error={errors.lastName}
-                                    required
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Numéro de téléphone</Text>
+                            <View style={styles.inputContainer}>
+                                <Ionicons name="call-outline" size={20} color={Colors.gray400} />
+                                <TextInput
+                                    style={styles.input}
+                                    value={phone}
+                                    onChangeText={setPhone}
+                                    placeholder="Ex: 0812345678"
+                                    placeholderTextColor={Colors.gray400}
+                                    keyboardType="phone-pad"
+                                    autoCapitalize="none"
                                 />
                             </View>
                         </View>
 
-                        <Input
-                            label="Numéro de téléphone"
-                            type="phone"
-                            icon="call"
-                            placeholder="Ex: 0612345678"
-                            value={phone}
-                            onChangeText={(text) => {
-                                setPhone(text);
-                                setErrors({ ...errors, phone: undefined });
-                            }}
-                            error={errors.phone}
-                            required
-                        />
+                        <TouchableOpacity
+                            style={[styles.continueButton, isLoading && styles.disabledButton]}
+                            onPress={handleContinue}
+                            disabled={isLoading}
+                        >
+                            <LinearGradient colors={Gradients.cool} style={styles.continueGradient}>
+                                {isLoading ? (
+                                    <Text style={styles.continueButtonText}>Envoi...</Text>
+                                ) : (
+                                    <>
+                                        <Text style={styles.continueButtonText}>Recevoir le code</Text>
+                                        <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+                                    </>
+                                )}
+                            </LinearGradient>
+                        </TouchableOpacity>
 
-                        <Input
-                            label="Email (optionnel)"
-                            type="email"
-                            icon="mail"
-                            placeholder="votre@email.com"
-                            value={email}
-                            onChangeText={(text) => {
-                                setEmail(text);
-                                setErrors({ ...errors, email: undefined });
-                            }}
-                            error={errors.email}
-                        />
-
-                        <Input
-                            label="Mot de passe"
-                            type="password"
-                            icon="lock-closed"
-                            placeholder="Minimum 6 caractères"
-                            value={password}
-                            onChangeText={(text) => {
-                                setPassword(text);
-                                setErrors({ ...errors, password: undefined });
-                            }}
-                            error={errors.password}
-                            required
-                        />
-
-                        <Input
-                            label="Confirmer le mot de passe"
-                            type="password"
-                            icon="lock-closed"
-                            placeholder="Retapez votre mot de passe"
-                            value={confirmPassword}
-                            onChangeText={(text) => {
-                                setConfirmPassword(text);
-                                setErrors({ ...errors, confirmPassword: undefined });
-                            }}
-                            error={errors.confirmPassword}
-                            required
-                        />
-
-                        <Button
-                            title="S'inscrire"
-                            variant="primary"
-                            size="lg"
-                            fullWidth
-                            loading={isRegistering}
-                            onPress={handleRegister}
-                        />
-                    </View>
-
-                    {/* Footer */}
-                    <View style={styles.footer}>
-                        <Text style={styles.footerText}>Déjà un compte ?</Text>
-                        <Button
-                            title="Se connecter"
-                            variant="outline"
-                            size="md"
-                            onPress={() => router.back()}
-                        />
+                        {/* Info Box */}
+                        <View style={styles.infoBox}>
+                            <Ionicons name="information-circle-outline" size={20} color={Colors.accent} />
+                            <Text style={styles.infoText}>
+                                Un code de vérification sera envoyé à ce numéro
+                            </Text>
+                        </View>
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -275,84 +131,110 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background,
-    },
-    keyboardView: {
-        flex: 1,
+        backgroundColor: Colors.white,
     },
     scrollContent: {
         flexGrow: 1,
-        padding: Spacing.xxl,
+        paddingHorizontal: Spacing.xl,
     },
     header: {
-        marginBottom: Spacing.xxl,
+        paddingVertical: Spacing.md,
     },
     backButton: {
-        marginBottom: Spacing.md,
+        width: 40,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    illustrationContainer: {
+        alignItems: 'center',
+        marginVertical: Spacing.xxxl,
+    },
+    iconCircle: {
+        width: 140,
+        height: 140,
+        borderRadius: 70,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.lg,
+    },
+    titleContainer: {
+        marginBottom: Spacing.xxxl,
     },
     title: {
-        fontSize: Typography.fontSize.huge,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
-        marginBottom: Spacing.xs,
+        fontSize: Typography.fontSize.xxxl,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        marginBottom: Spacing.sm,
     },
     subtitle: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.base,
         color: Colors.textSecondary,
+        lineHeight: 24,
     },
-    roleSection: {
-        marginBottom: Spacing.xxl,
+    form: {
+        gap: Spacing.lg,
     },
-    sectionTitle: {
+    inputGroup: {
+        gap: Spacing.sm,
+    },
+    label: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.md,
     },
-    roleButtons: {
+    inputContainer: {
         flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.lg,
         gap: Spacing.md,
+        borderWidth: 2,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
     },
-    roleButton: {
+    input: {
         flex: 1,
+        height: 50,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    continueButton: {
+        marginTop: Spacing.lg,
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+        ...Shadows.md,
+    },
+    continueGradient: {
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: Spacing.lg,
-        borderRadius: BorderRadius.md,
-        borderWidth: 2,
-        borderColor: Colors.border,
-        backgroundColor: Colors.white,
+        gap: Spacing.sm,
     },
-    roleButtonActive: {
-        borderColor: Colors.accent,
-        backgroundColor: Colors.accent + '10',
-    },
-    roleButtonText: {
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.medium,
-        color: Colors.textSecondary,
-        marginTop: Spacing.xs,
-    },
-    roleButtonTextActive: {
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    form: {
-        marginBottom: Spacing.xxl,
-    },
-    row: {
-        flexDirection: 'row',
-        gap: Spacing.md,
-    },
-    halfInput: {
-        flex: 1,
-    },
-    footer: {
-        alignItems: 'center',
-        gap: Spacing.md,
-    },
-    footerText: {
+    continueButtonText: {
         fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
+    disabledButton: {
+        opacity: 0.5,
+    },
+    infoBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        padding: Spacing.md,
+        backgroundColor: Colors.accent + '10',
+        borderRadius: BorderRadius.md,
+        borderLeftWidth: 3,
+        borderLeftColor: Colors.accent,
+    },
+    infoText: {
+        flex: 1,
+        fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
     },
 });

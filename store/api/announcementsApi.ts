@@ -1,6 +1,26 @@
 import { Announcement } from '@/types/announcement';
 import { baseApi } from './baseApi';
 
+export interface CreateAnnouncementDto {
+    name: string;
+    description?: string;
+    price?: number;
+    quantity?: number;
+    category: string;
+    attributes?: Record<string, any>;
+}
+
+export interface UpdateAnnouncementDto {
+    name?: string;
+    description?: string;
+    price?: number;
+    quantity?: number;
+    attributes?: Record<string, any>;
+    existingImages?: string[];
+    imagesToDelete?: string[];
+    newImages?: string[]; // Base64 images
+}
+
 export const announcementsApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
         getAnnouncements: builder.query<Announcement[], void>({
@@ -12,18 +32,14 @@ export const announcementsApi = baseApi.injectEndpoints({
             providesTags: (result, error, id) => [{ type: 'Announcement', id }],
         }),
         createAnnouncement: builder.mutation<Announcement, FormData>({
-            query: (formData) => ({
+            query: (data) => ({
                 url: '/announcements',
                 method: 'POST',
-                body: formData,
-                headers: {
-                    // Important: Let browser set boundary for FormData
-                    // 'Content-Type': undefined, // handled by prepareHeaders logic update
-                },
+                body: data,
             }),
             invalidatesTags: ['Announcement'],
         }),
-        updateAnnouncement: builder.mutation<Announcement, { id: string; data: FormData }>({
+        updateAnnouncement: builder.mutation<Announcement, { id: string; data: FormData | UpdateAnnouncementDto }>({
             query: ({ id, data }) => ({
                 url: `/announcements/${id}`,
                 method: 'PATCH',

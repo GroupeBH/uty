@@ -11,6 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
+import { useAuth } from '@/hooks/useAuth';
 import { 
     Alert, 
     Animated, 
@@ -31,6 +32,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ProductDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
+    const { requireAuth } = useAuth();
     const { data: product, isLoading } = useGetAnnouncementByIdQuery(id!);
     const [addToCart] = useAddToCartMutation();
     
@@ -51,6 +53,10 @@ export default function ProductDetailScreen() {
     const scrollY = useRef(new Animated.Value(0)).current;
 
     const handleAddToCart = async () => {
+        if (!requireAuth('Vous devez être connecté pour ajouter au panier')) {
+            return;
+        }
+
         if (product) {
             try {
                 await addToCart({ productId: product._id, quantity }).unwrap();
@@ -62,6 +68,10 @@ export default function ProductDetailScreen() {
     };
 
     const handleContactSeller = () => {
+        if (!requireAuth('Vous devez être connecté pour contacter le vendeur')) {
+            return;
+        }
+
         if (!message.trim()) {
             Alert.alert('Erreur', 'Veuillez entrer un message');
             return;
@@ -73,6 +83,11 @@ export default function ProductDetailScreen() {
     };
 
     const handleSubmitReview = () => {
+        if (!requireAuth('Vous devez être connecté pour laisser un avis')) {
+            setShowReviewModal(false);
+            return;
+        }
+
         if (!reviewText.trim()) {
             Alert.alert('Erreur', 'Veuillez entrer un commentaire');
             return;
@@ -273,7 +288,11 @@ export default function ProductDetailScreen() {
                             </View>
                             <TouchableOpacity 
                                 style={styles.contactSellerButton}
-                                onPress={() => setShowContactModal(true)}
+                                onPress={() => {
+                                    if (requireAuth('Vous devez être connecté pour contacter le vendeur')) {
+                                        setShowContactModal(true);
+                                    }
+                                }}
                             >
                                 <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
                             </TouchableOpacity>
@@ -284,7 +303,13 @@ export default function ProductDetailScreen() {
                     <View style={styles.section}>
                         <View style={styles.reviewsHeader}>
                             <Text style={styles.sectionTitle}>⭐ Avis clients</Text>
-                            <TouchableOpacity onPress={() => setShowReviewModal(true)}>
+                            <TouchableOpacity 
+                                onPress={() => {
+                                    if (requireAuth('Vous devez être connecté pour laisser un avis')) {
+                                        setShowReviewModal(true);
+                                    }
+                                }}
+                            >
                                 <Text style={styles.addReviewLink}>Donner un avis</Text>
                             </TouchableOpacity>
                         </View>
