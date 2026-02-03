@@ -10,7 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { Category } from '@/types/category';
-import { convertImagesToDataUrls } from '@/utils/imageUtils';
+import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -67,9 +67,8 @@ export default function PublishScreen() {
         quantity: '1',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
-    const [images, setImages] = useState<string[]>([]);
+    const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
-    const formDataWithFilesRef = useRef<FormData>(new FormData());
     const [errors, setErrors] = useState<Record<string, string>>({});
 
     // Queries
@@ -173,10 +172,17 @@ export default function PublishScreen() {
     };
 
     // Gestion des images
+    const buildImageFile = (uri: string, name?: string) => {
+        const mimeType = getImageMimeType(uri);
+        const extension = mimeType.split('/')[1] || 'jpg';
+        const safeName = name || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+        return { uri, name: safeName, type: mimeType };
+    };
+
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour accéder à vos photos.');
+            Alert.alert('Permission refus??e', 'Nous avons besoin de la permission pour acc??der ?? vos photos.');
             return;
         }
 
@@ -188,30 +194,15 @@ export default function PublishScreen() {
         });
 
         if (!result.canceled && result.assets) {
-            // Convertir immédiatement les images en base64
-            const imageUris = result.assets.map((asset) => asset.uri);
-            console.log('Converting', imageUris.length, 'selected images to base64...');
-            
             setIsConvertingImages(true);
             try {
-                const base64Images = await convertImagesToDataUrls(imageUris);
-                console.log('Images converted to base64 successfully');
-                
-                // Ajouter les images converties au state pour affichage
-                setImages((prev) => {
-                    const newImages = [...prev, ...base64Images].slice(0, 10);
-                    
-                    // Ajouter immédiatement chaque nouvelle image au FormData dans le champ 'files'
-                    base64Images.forEach((base64Image) => {
-                        formDataWithFilesRef.current.append('files', base64Image);
-                    });
-                    
-                    console.log('Added', base64Images.length, 'images to FormData files field');
-                    return newImages;
-                });
+                const newImages = result.assets.map((asset) =>
+                    buildImageFile(asset.uri, asset.fileName)
+                );
+                setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
-                console.error('Error converting images to base64:', error);
-                Alert.alert('Erreur', 'Impossible de convertir les images');
+                console.error('Error preparing selected images:', error);
+                Alert.alert('Erreur', 'Impossible de pr??parer les images');
             } finally {
                 setIsConvertingImages(false);
             }
@@ -221,7 +212,7 @@ export default function PublishScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour utiliser la caméra.');
+            Alert.alert('Permission refus??e', 'Nous avons besoin de la permission pour utiliser la cam??ra.');
             return;
         }
 
@@ -232,28 +223,14 @@ export default function PublishScreen() {
         console.log('result of takePhoto', result);
 
         if (!result.canceled && result.assets && result.assets.length > 0) {
-            // Convertir immédiatement l'image capturée en base64
-            const imageUri = result.assets[0].uri;
-            console.log('Converting captured photo to base64...');
-            
+            const asset = result.assets[0];
             setIsConvertingImages(true);
             try {
-                const base64Images = await convertImagesToDataUrls([imageUri]);
-                console.log('Captured photo converted to base64 successfully');
-                
-                // Ajouter l'image convertie au state pour affichage
-                setImages((prev) => {
-                    const newImages = [...prev, base64Images[0]].slice(0, 10);
-                    
-                    // Ajouter immédiatement l'image au FormData dans le champ 'files'
-                    formDataWithFilesRef.current.append('files', base64Images[0]);
-                    
-                    console.log('Added captured photo to FormData files field');
-                    return newImages;
-                });
+                const newImage = buildImageFile(asset.uri, asset.fileName);
+                setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
-                console.error('Error converting photo to base64:', error);
-                Alert.alert('Erreur', 'Impossible de convertir la photo');
+                console.error('Error preparing captured photo:', error);
+                Alert.alert('Erreur', 'Impossible de pr??parer la photo');
             } finally {
                 setIsConvertingImages(false);
             }
@@ -263,14 +240,7 @@ export default function PublishScreen() {
     const removeImage = (index: number) => {
         setImages((prev) => {
             const newImages = prev.filter((_, i) => i !== index);
-            
-            // Reconstruire le FormData avec les images restantes
-            formDataWithFilesRef.current = new FormData();
-            newImages.forEach((base64Image) => {
-                formDataWithFilesRef.current.append('files', base64Image);
-            });
-            
-            console.log('Removed image at index', index, '. Remaining images in FormData:', newImages.length);
+            console.log('Removed image at index', index, '. Remaining images:', newImages.length);
             return newImages;
         });
     };
@@ -367,13 +337,19 @@ export default function PublishScreen() {
         }
 
         try {
-            // Le FormData contient déjà les images dans 'files' (ajoutées lors de la sélection)
-            console.log('Preparing FormData with', images.length, 'base64 images already in files field...');
-            
-            // Utiliser le FormData ref qui contient déjà les images
-            const formDataToSend = formDataWithFilesRef.current;
-            
-            // Ajouter les champs de base au FormData existant
+            console.log('Preparing FormData with', images.length, 'images...');
+
+            const formDataToSend = new FormData();
+
+            images.forEach((image) => {
+                formDataToSend.append('files', {
+                    uri: image.uri,
+                    name: image.name,
+                    type: image.type,
+                } as any);
+            });
+
+            // Ajouter les champs de base au FormData
             formDataToSend.append('name', formData.name);
             if (formData.description) {
                 formDataToSend.append('description', formData.description);
@@ -391,7 +367,7 @@ export default function PublishScreen() {
                 formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
             }
 
-            console.log('Sending FormData with', images.length, 'base64 images in files field');
+            console.log('Sending FormData with', images.length, 'images in files field');
             console.log('FormData contains:', {
                 name: formData.name,
                 category: selectedLeafCategory._id,
@@ -702,9 +678,9 @@ export default function PublishScreen() {
 
                             {/* Grid des images */}
                             <View style={styles.imagesGrid}>
-                                {images.map((uri, index) => (
+                                {images.map((image, index) => (
                                     <View key={index} style={styles.imageItem}>
-                                        <Image source={{ uri }} style={styles.imagePreview} />
+                                        <Image source={{ uri: image.uri }} style={styles.imagePreview} />
                                         <TouchableOpacity
                                             style={styles.removeImageButton}
                                             onPress={() => removeImage(index)}
