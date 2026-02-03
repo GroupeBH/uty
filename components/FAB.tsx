@@ -53,7 +53,7 @@ export const FAB: React.FC<FABProps> = ({ onPress }) => {
         if (onPress) {
             onPress();
         } else {
-            router.push('/(tabs)/publish');
+            router.push('/publish');
         }
     };
 

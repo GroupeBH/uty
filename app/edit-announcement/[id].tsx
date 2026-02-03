@@ -41,6 +41,14 @@ export default function EditAnnouncementScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
     const { requireAuth } = useAuth();
+    const safeBack = () => {
+        if (router.canGoBack()) {
+            safeBack();
+        } else {
+            router.replace('/(tabs)');
+        }
+    };
+
 
     // Fetch announcement data
     const { data: announcement, isLoading: isLoadingAnnouncement } = useGetAnnouncementByIdQuery(id!);
@@ -137,7 +145,7 @@ export default function EditAnnouncementScreen() {
     // Check authentication
     useEffect(() => {
         if (!requireAuth('Vous devez être connecté pour modifier une annonce')) {
-            router.back();
+            safeBack();
         }
     }, [requireAuth]);
 
@@ -357,7 +365,7 @@ export default function EditAnnouncementScreen() {
                 message: 'Annonce mise a jour avec succes',
                 variant: 'success',
                 confirmText: 'OK',
-                onConfirm: () => router.back(),
+                onConfirm: () => safeBack(),
             });
         } catch (error: any) {
             console.error('Error updating announcement:', error);
@@ -394,7 +402,7 @@ export default function EditAnnouncementScreen() {
             <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={64} color={Colors.error} />
                 <Text style={styles.errorText}>Annonce introuvable</Text>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                <TouchableOpacity style={styles.backButton} onPress={safeBack}>
                     <Text style={styles.backButtonText}>Retour</Text>
                 </TouchableOpacity>
             </View>
@@ -409,7 +417,7 @@ export default function EditAnnouncementScreen() {
             <LinearGradient colors={Gradients.cool} style={styles.backgroundGradient} />
             {/* Header */}
             <LinearGradient colors={Gradients.primary} style={styles.headerGradient}>
-                <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+                <TouchableOpacity style={styles.headerButton} onPress={safeBack}>
                     <Ionicons name="close" size={24} color={Colors.white} />
                 </TouchableOpacity>
                 <View style={styles.headerTitleWrap}>

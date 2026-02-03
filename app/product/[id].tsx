@@ -5,25 +5,25 @@
 
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
-import { useAddToCartMutation } from '@/store/api/cartApi';
+import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation } from '@/store/api/cartApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
-import { useAuth } from '@/hooks/useAuth';
-import { 
-    Alert, 
-    Animated, 
-    Dimensions, 
-    Image, 
-    Modal, 
-    ScrollView, 
-    StyleSheet, 
-    Text, 
+import {
+    Alert,
+    Animated,
+    Dimensions,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
     TextInput,
-    TouchableOpacity, 
-    View 
+    TouchableOpacity,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -32,9 +32,19 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 export default function ProductDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const router = useRouter();
-    const { requireAuth } = useAuth();
+    const { requireAuth, isAuthenticated } = useAuth();
+    const safeBack = () => {
+        if (router.canGoBack()) {
+            router.back();
+        } else {
+            router.replace('/(tabs)');
+        }
+    };
+
     const { data: product, isLoading } = useGetAnnouncementByIdQuery(id!);
     const [addToCart] = useAddToCartMutation();
+    const [removeFromCart] = useRemoveFromCartMutation();
+    const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
     const [showImageModal, setShowImageModal] = useState(false);
@@ -51,6 +61,72 @@ export default function ProductDetailScreen() {
     const [message, setMessage] = useState('');
     
     const scrollY = useRef(new Animated.Value(0)).current;
+    const cartItem = cart?.products?.find((item) => {
+        const productId =
+            typeof item.productId === 'string' ? item.productId : item.productId?._id;
+        return productId === product?._id;
+    });
+    const inCartQuantity = cartItem?.quantity || 0;
+    const infoChips = [
+        product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
+        product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
+        product?.quantity ? { icon: 'layers-outline', label: `${product.quantity} en stock` } : null,
+    ].filter(Boolean) as Array<{ icon: string; label: string }>;
+    const normalizeObject = (value: any): Record<string, any> => {
+        if (!value) return {};
+        if (value instanceof Map) {
+            const result: Record<string, any> = {};
+            value.forEach((val, key) => {
+                result[key as string] = val;
+            });
+            return result;
+        }
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                return typeof parsed === 'object' && parsed ? parsed : {};
+            } catch {
+                return {};
+            }
+        }
+        if (typeof value === 'object') return value;
+        return {};
+    };
+    const formatAttributeValue = (value: any): string => {
+        if (value === null || value === undefined) return '';
+        if (Array.isArray(value)) return value.join(', ');
+        if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
+        if (typeof value === 'number') return value.toString();
+        if (typeof value === 'string') return value;
+        if (typeof value === 'object') {
+            if (value.minimum !== undefined && value.maximum !== undefined) {
+                return `${value.minimum} - ${value.maximum}`;
+            }
+            if (value.valueMin !== undefined && value.valueMax !== undefined) {
+                return `${value.valueMin} - ${value.valueMax}`;
+            }
+            if (value.name) return value.name;
+            try {
+                return JSON.stringify(value);
+            } catch {
+                return '';
+            }
+        }
+        return '';
+    };
+    const attributeEntries = React.useMemo(() => {
+        if (!product) return [];
+        const attributes = normalizeObject(product.attributes);
+        const specifications = normalizeObject(product.specifications);
+        const merged = { ...specifications, ...attributes };
+        return Object.entries(merged)
+            .map(([key, value]) => {
+                const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+                const display = formatAttributeValue(value);
+                return { key, label, value: display };
+            })
+            .filter((item) => item.value && item.value.toString().length > 0);
+    }, [product]);
 
     const handleAddToCart = async () => {
         if (!requireAuth('Vous devez être connecté pour ajouter au panier')) {
@@ -63,6 +139,21 @@ export default function ProductDetailScreen() {
                 Alert.alert('✅ Succès', `${quantity} article(s) ajouté(s) au panier`);
             } catch (error) {
                 Alert.alert('❌ Erreur', 'Échec de l\'ajout au panier');
+            }
+        }
+    };
+
+    const handleRemoveFromCart = async () => {
+        if (!requireAuth('Vous devez ??tre connect?? pour modifier le panier')) {
+            return;
+        }
+
+        if (product) {
+            try {
+                await removeFromCart(product._id).unwrap();
+                Alert.alert('Info', 'Article retire du panier');
+            } catch (error) {
+                Alert.alert('Erreur', 'Impossible de retirer l\'article');
             }
         }
     };
@@ -139,7 +230,7 @@ export default function ProductDetailScreen() {
                     style={styles.headerGradient}
                 >
                     <SafeAreaView edges={['top']} style={styles.headerContent}>
-                        <TouchableOpacity onPress={() => router.back()} style={styles.headerButton}>
+                        <TouchableOpacity onPress={() => safeBack()} style={styles.headerButton}>
                             <Ionicons name="arrow-back" size={24} color={Colors.white} />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle} numberOfLines={1}>{product.name}</Text>
@@ -156,7 +247,7 @@ export default function ProductDetailScreen() {
 
             {/* Boutons flottants */}
             <SafeAreaView edges={['top']} style={styles.topButtons}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.floatingButton}>
+                <TouchableOpacity onPress={() => safeBack()} style={styles.floatingButton}>
                     <Ionicons name="arrow-back" size={24} color={Colors.white} />
                 </TouchableOpacity>
                 <TouchableOpacity onPress={toggleFavorite} style={styles.floatingButton}>
@@ -242,9 +333,20 @@ export default function ProductDetailScreen() {
                         </View>
                     </View>
 
-                    {/* Quantité */}
+                    {infoChips.length > 0 && (
+                        <View style={styles.infoChips}>
+                            {infoChips.map((chip, index) => (
+                                <View key={`${chip.label}-${index}`} style={styles.infoChip}>
+                                    <Ionicons name={chip.icon as any} size={14} color={Colors.accent} />
+                                    <Text style={styles.infoChipText}>{chip.label}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+
+                    {/* Quantite */}
                     <View style={styles.quantitySection}>
-                        <Text style={styles.sectionLabel}>Quantité</Text>
+                        <Text style={styles.sectionLabel}>Quantite</Text>
                         <View style={styles.quantityControls}>
                             <TouchableOpacity 
                                 style={styles.quantityButton}
@@ -262,13 +364,58 @@ export default function ProductDetailScreen() {
                         </View>
                     </View>
 
+                    {/* Panier */}
+                    <View style={styles.cartStatusCard}>
+                        <View>
+                            <Text style={styles.sectionLabel}>Panier</Text>
+                            <Text style={styles.cartStatusText}>
+                                {inCartQuantity > 0
+                                    ? `Deja dans le panier: ${inCartQuantity}`
+                                    : 'Pas encore dans le panier'}
+                            </Text>
+                        </View>
+                        <View style={styles.cartActions}>
+                            {inCartQuantity > 0 && (
+                                <TouchableOpacity
+                                    style={styles.cartRemoveButton}
+                                    onPress={handleRemoveFromCart}
+                                >
+                                    <Ionicons name="trash-outline" size={16} color={Colors.error} />
+                                    <Text style={styles.cartRemoveText}>Retirer</Text>
+                                </TouchableOpacity>
+                            )}
+                            <TouchableOpacity
+                                style={styles.cartViewButton}
+                                onPress={() => router.push('/(tabs)/cart')}
+                            >
+                                <Ionicons name="cart-outline" size={16} color={Colors.white} />
+                                <Text style={styles.cartViewText}>Voir panier</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+
                     {/* Description */}
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>📝 Description</Text>
                         <Text style={styles.description}>{product.description || 'Aucune description disponible'}</Text>
                     </View>
 
-                    {/* Informations vendeur */}
+                    
+                    {attributeEntries.length > 0 && (
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Caracteristiques</Text>
+                            <View style={styles.attributesGrid}>
+                                {attributeEntries.map((item) => (
+                                    <View key={item.key} style={styles.attributeCard}>
+                                        <Text style={styles.attributeLabel}>{item.label}</Text>
+                                        <Text style={styles.attributeValue}>{item.value}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
+{/* Informations vendeur */}
                     <View style={styles.sellerSection}>
                         <Text style={styles.sectionTitle}>👤 Vendeur</Text>
                         <View style={styles.sellerCard}>
@@ -277,8 +424,8 @@ export default function ProductDetailScreen() {
                             </View>
                             <View style={styles.sellerInfo}>
                                 <Text style={styles.sellerName}>
-                                    {typeof product.user === 'object' && product.user?.username 
-                                        ? product.user.username 
+                                    {typeof product.user === 'object' && product.user?.firstName 
+                                        ? product?.user?.firstName 
                                         : 'Anonyme'}
                                 </Text>
                                 <View style={styles.sellerRating}>
@@ -338,7 +485,9 @@ export default function ProductDetailScreen() {
                             style={styles.addToCartGradient}
                         >
                             <Ionicons name="cart" size={24} color={Colors.primary} />
-                            <Text style={styles.addToCartText}>Ajouter au panier</Text>
+                            <Text style={styles.addToCartText}>
+                                {inCartQuantity > 0 ? 'Ajouter +1' : 'Ajouter au panier'}
+                            </Text>
                         </LinearGradient>
                     </TouchableOpacity>
                     
@@ -642,6 +791,29 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
     },
+    infoChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+        marginBottom: Spacing.xl,
+    },
+    infoChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    infoChipText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textPrimary,
+    },
     quantitySection: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -651,6 +823,58 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         marginBottom: Spacing.xl,
         ...Shadows.sm,
+    },
+    cartStatusCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: Colors.white,
+        padding: Spacing.lg,
+        borderRadius: BorderRadius.xl,
+        marginBottom: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    cartStatusText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        marginTop: Spacing.xs / 2,
+    },
+    cartActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    cartRemoveButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.error + '10',
+        borderWidth: 1,
+        borderColor: Colors.error + '30',
+    },
+    cartRemoveText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.error,
+    },
+    cartViewButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary,
+    },
+    cartViewText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
     sectionLabel: {
         fontSize: Typography.fontSize.md,
@@ -687,6 +911,31 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
         marginBottom: Spacing.md,
+    },
+    attributesGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.md,
+    },
+    attributeCard: {
+        width: '48%',
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    attributeLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    attributeValue: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+        marginTop: Spacing.xs,
     },
     description: {
         fontSize: Typography.fontSize.base,

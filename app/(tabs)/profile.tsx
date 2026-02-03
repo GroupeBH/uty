@@ -14,6 +14,7 @@ import React from 'react';
 import {
     Alert,
     Image,
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -26,23 +27,16 @@ export default function ProfileScreen() {
     const router = useRouter();
     const { user, logout, isLoading, isLoggingOut } = useAuth();
     const { data: announcements } = useGetMyAnnouncementsQuery();
+    const [logoutVisible, setLogoutVisible] = React.useState(false);
 
     const handleLogout = () => {
-        Alert.alert(
-            'Déconnexion',
-            'Êtes-vous sûr de vouloir vous déconnecter ?',
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Déconnexion',
-                    style: 'destructive',
-                    onPress: async () => {
-                        await logout();
-                        router.replace('/(auth)/login');
-                    },
-                },
-            ]
-        );
+        setLogoutVisible(true);
+    };
+
+    const confirmLogout = async () => {
+        setLogoutVisible(false);
+        await logout();
+        router.replace('/(auth)/login');
     };
 
     if (isLoading) {
@@ -244,6 +238,44 @@ export default function ProfileScreen() {
                 {/* Version */}
                 <Text style={styles.version}>Version 1.0.0</Text>
             </ScrollView>
+
+            <Modal
+                visible={logoutVisible}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setLogoutVisible(false)}
+            >
+                <View style={styles.logoutOverlay}>
+                    <View style={styles.logoutCard}>
+                        <View style={styles.logoutIcon}>
+                            <Ionicons name="log-out-outline" size={22} color={Colors.white} />
+                        </View>
+                        <Text style={styles.logoutTitle}>Se deconnecter ?</Text>
+                        <Text style={styles.logoutMessage}>
+                            Vous devrez vous reconnecter pour acceder a vos annonces et commandes.
+                        </Text>
+                        <View style={styles.logoutActions}>
+                            <TouchableOpacity
+                                style={styles.logoutCancel}
+                                onPress={() => setLogoutVisible(false)}
+                            >
+                                <Text style={styles.logoutCancelText}>Annuler</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={styles.logoutConfirm}
+                                onPress={confirmLogout}
+                                disabled={isLoggingOut}
+                            >
+                                <LinearGradient colors={Gradients.warm} style={styles.logoutConfirmGradient}>
+                                    <Text style={styles.logoutConfirmText}>
+                                        {isLoggingOut ? 'Deconnexion...' : 'Deconnexion'}
+                                    </Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -424,6 +456,80 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.error,
+    },
+    logoutOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: Spacing.xl,
+    },
+    logoutCard: {
+        width: '100%',
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    logoutIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.error,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: Spacing.md,
+    },
+    logoutTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        textAlign: 'center',
+    },
+    logoutMessage: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        textAlign: 'center',
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.lg,
+        lineHeight: 22,
+    },
+    logoutActions: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        width: '100%',
+    },
+    logoutCancel: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+    },
+    logoutCancelText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textSecondary,
+    },
+    logoutConfirm: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    logoutConfirmGradient: {
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    logoutConfirmText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
     version: {
         fontSize: Typography.fontSize.xs,
