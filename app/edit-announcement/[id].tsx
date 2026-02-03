@@ -8,7 +8,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery, useUpdateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
-import { convertImagesToDataUrls } from '@/utils/imageUtils';
+import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,10 +16,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Animated,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -59,11 +59,55 @@ export default function EditAnnouncementScreen() {
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [existingImages, setExistingImages] = useState<string[]>([]);
-    const [images, setImages] = useState<string[]>([]);
+    const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
     const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
-    const formDataWithFilesRef = useRef<FormData>(new FormData());
     const [errors, setErrors] = useState<Record<string, string>>({});
+
+    type AlertVariant = 'success' | 'error' | 'info';
+    const [alertState, setAlertState] = useState<{
+        visible: boolean;
+        title: string;
+        message: string;
+        variant: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }>({
+        visible: false,
+        title: '',
+        message: '',
+        variant: 'info',
+    });
+
+    const showAlert = (options: {
+        title: string;
+        message: string;
+        variant?: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }) => {
+        setAlertState({
+            visible: true,
+            title: options.title,
+            message: options.message,
+            variant: options.variant || 'info',
+            confirmText: options.confirmText || 'OK',
+            onConfirm: options.onConfirm,
+        });
+    };
+
+    const closeAlert = () => {
+        const onConfirm = alertState.onConfirm;
+        setAlertState({
+            visible: false,
+            title: '',
+            message: '',
+            variant: 'info',
+            confirmText: 'OK',
+            onConfirm: undefined,
+        });
+        if (onConfirm) onConfirm();
+    };
 
     // Queries
     const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
@@ -139,41 +183,41 @@ export default function EditAnnouncementScreen() {
     }, [currentStep, updateProgress]);
 
     // Gestion des images
+    const buildImageFile = (uri: string, name?: string) => {
+        const mimeType = getImageMimeType(uri);
+        const extension = mimeType.split('/')[1] || 'jpg';
+        const safeName = name || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
+        return { uri, name: safeName, type: mimeType };
+    };
+
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour accéder à vos photos.');
+            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour acc??der ?? vos photos.', variant: 'error' });
             return;
         }
 
+        const selectionLimit = Math.max(0, 10 - (existingImages.length + images.length));
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsMultipleSelection: true,
             quality: 0.8,
-            selectionLimit: 10 - existingImages.length - images.length + imagesToDelete.length,
+            selectionLimit,
         });
 
         if (!result.canceled && result.assets) {
-            const imageUris = result.assets.map((asset) => asset.uri);
-            console.log('Converting', imageUris.length, 'selected images to base64...');
-            
             setIsConvertingImages(true);
             try {
-                const base64Images = await convertImagesToDataUrls(imageUris);
-                console.log('Images converted to base64 successfully');
-                
+                const newImages = result.assets.map((asset: any) =>
+                    buildImageFile(asset.uri, asset.fileName)
+                );
                 setImages((prev) => {
-                    const newImages = [...prev, ...base64Images].slice(0, 10 - existingImages.length + imagesToDelete.length);
-                    
-                    base64Images.forEach((base64Image) => {
-                        formDataWithFilesRef.current.append('files', base64Image);
-                    });
-                    
-                    return newImages;
+                    const remainingSlots = 10 - existingImages.length;
+                    return [...prev, ...newImages].slice(0, remainingSlots);
                 });
             } catch (error) {
-                console.error('Error converting images to base64:', error);
-                Alert.alert('Erreur', 'Impossible de convertir les images');
+                console.error('Error preparing selected images:', error);
+                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer les images', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -183,7 +227,7 @@ export default function EditAnnouncementScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour utiliser la caméra.');
+            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour utiliser la cam??ra.', variant: 'error' });
             return;
         }
 
@@ -192,24 +236,17 @@ export default function EditAnnouncementScreen() {
         });
 
         if (!result.canceled && result.assets && result.assets.length > 0) {
-            const imageUri = result.assets[0].uri;
-            console.log('Converting captured photo to base64...');
-            
+            const asset = result?.assets[0];
             setIsConvertingImages(true);
             try {
-                const base64Images = await convertImagesToDataUrls([imageUri]);
-                console.log('Captured photo converted to base64 successfully');
-                
+                const newImage = buildImageFile(asset.uri, asset?.fileName);
                 setImages((prev) => {
-                    const newImages = [...prev, base64Images[0]].slice(0, 10 - existingImages.length + imagesToDelete.length);
-                    
-                    formDataWithFilesRef.current.append('files', base64Images[0]);
-                    
-                    return newImages;
+                    const remainingSlots = 10 - existingImages.length;
+                    return [...prev, newImage].slice(0, remainingSlots);
                 });
             } catch (error) {
-                console.error('Error converting photo to base64:', error);
-                Alert.alert('Erreur', 'Impossible de convertir la photo');
+                console.error('Error preparing captured photo:', error);
+                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer la photo', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -217,17 +254,7 @@ export default function EditAnnouncementScreen() {
     };
 
     const removeNewImage = (index: number) => {
-        setImages((prev) => {
-            const newImages = prev.filter((_, i) => i !== index);
-            
-            // Reconstruire le FormData avec les images restantes
-            formDataWithFilesRef.current = new FormData();
-            newImages.forEach((base64Image) => {
-                formDataWithFilesRef.current.append('files', base64Image);
-            });
-            
-            return newImages;
-        });
+        setImages((prev) => prev.filter((_, i) => i !== index));
     };
 
     const removeExistingImage = (imageUrl: string) => {
@@ -256,7 +283,7 @@ export default function EditAnnouncementScreen() {
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
-                Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
                 return false;
             }
         }
@@ -293,8 +320,16 @@ export default function EditAnnouncementScreen() {
         if (!validateStep(currentStep)) return;
 
         try {
-            const formDataToSend = formDataWithFilesRef.current;
-            
+            const formDataToSend = new FormData();
+
+            images.forEach((image) => {
+                formDataToSend.append('files', {
+                    uri: image.uri,
+                    name: image.name,
+                    type: image.type,
+                } as any);
+            });
+
             formDataToSend.append('name', formData.name.trim());
             if (formData.description) {
                 formDataToSend.append('description', formData.description.trim());
@@ -317,20 +352,33 @@ export default function EditAnnouncementScreen() {
                 data: formDataToSend as any,
             }).unwrap();
 
-            Alert.alert('Succès', 'Annonce mise à jour avec succès', [
-                {
-                    text: 'OK',
-                    onPress: () => router.back(),
-                },
-            ]);
+            showAlert({
+                title: 'Succes',
+                message: 'Annonce mise a jour avec succes',
+                variant: 'success',
+                confirmText: 'OK',
+                onConfirm: () => router.back(),
+            });
         } catch (error: any) {
             console.error('Error updating announcement:', error);
-            Alert.alert(
-                'Erreur',
-                error?.data?.message || 'Impossible de mettre à jour l\'annonce'
-            );
+            showAlert({ title: 'Erreur', message: error?.data?.message || "Impossible de mettre a jour l'annonce", variant: 'error' });
         }
     };
+
+    const alertBadgeText =
+        alertState.variant === 'success'
+            ? 'Mission reussie'
+            : alertState.variant === 'error'
+              ? 'Petite correction'
+              : 'Petit conseil';
+    const alertPointsText =
+        alertState.variant === 'success' ? '+20 XP' : 'Astuce';
+    const alertProgress =
+        alertState.variant === 'success'
+            ? 0.82
+            : alertState.variant === 'error'
+              ? 0.35
+              : 0.55;
 
     if (isLoadingAnnouncement) {
         return (
@@ -358,14 +406,23 @@ export default function EditAnnouncementScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <LinearGradient colors={Gradients.cool} style={styles.backgroundGradient} />
             {/* Header */}
-            <View style={styles.header}>
+            <LinearGradient colors={Gradients.primary} style={styles.headerGradient}>
                 <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
-                    <Ionicons name="close" size={24} color={Colors.textPrimary} />
+                    <Ionicons name="close" size={24} color={Colors.white} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Modifier l'annonce</Text>
+                <View style={styles.headerTitleWrap}>
+                    <Text style={styles.headerTitle}>Modifier l'annonce</Text>
+                    <View style={styles.headerPill}>
+                        <Ionicons name="sparkles" size={14} color={Colors.white} />
+                        <Text style={styles.headerPillText}>
+                            Etape {currentStep}/{STEPS.length}
+                        </Text>
+                    </View>
+                </View>
                 <View style={{ width: 40 }} />
-            </View>
+            </LinearGradient>
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
@@ -381,6 +438,14 @@ export default function EditAnnouncementScreen() {
                             },
                         ]}
                     />
+                </View>
+                <View style={styles.progressMeta}>
+                    <View style={styles.progressPill}>
+                        <Ionicons name="checkmark-circle" size={14} color={Colors.accent} />
+                        <Text style={styles.progressPillText}>
+                            {currentStep === STEPS.length ? 'Derniere etape' : 'Avancement'}
+                        </Text>
+                    </View>
                 </View>
                 <View style={styles.stepsIndicator}>
                     {STEPS.map((step) => (
@@ -585,9 +650,9 @@ export default function EditAnnouncementScreen() {
                                     </View>
                                 ))}
 
-                                {images.map((uri, index) => (
+                                {images.map((image, index) => (
                                     <View key={`new-${index}`} style={styles.imageItem}>
-                                        <Image source={{ uri }} style={styles.imagePreview} />
+                                        <Image source={{ uri: image.uri }} style={styles.imagePreview} />
                                         <TouchableOpacity
                                             style={styles.removeImageButton}
                                             onPress={() => removeNewImage(index)}
@@ -646,6 +711,57 @@ export default function EditAnnouncementScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
+            <Modal
+                visible={alertState.visible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeAlert}
+            >
+                <View style={styles.alertOverlay}>
+                    <View style={styles.alertCard}>
+                        <View style={styles.alertTopRow}>
+                            <View style={[styles.alertIcon, styles[`alertIcon_${alertState.variant}`]]}>
+                                <Ionicons
+                                    name={
+                                        alertState.variant === 'success'
+                                            ? 'checkmark'
+                                            : alertState.variant === 'error'
+                                              ? 'close'
+                                              : 'information'
+                                    }
+                                    size={20}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.alertMeta}>
+                                <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
+                                    <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
+                                </View>
+                                <View style={styles.alertPoints}>
+                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
+                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
+                                </View>
+                            </View>
+                        </View>
+                        <Text style={styles.alertTitle}>{alertState.title}</Text>
+                        <Text style={styles.alertMessage}>{alertState.message}</Text>
+                        <View style={styles.alertProgressTrack}>
+                            <View
+                                style={[
+                                    styles.alertProgressFill,
+                                    { width: `${Math.round(alertProgress * 100)}%` },
+                                ]}
+                            />
+                        </View>
+                        <TouchableOpacity style={styles.alertButton} onPress={closeAlert}>
+                            <LinearGradient colors={Gradients.primary} style={styles.alertButtonGradient}>
+                                <Text style={styles.alertButtonText}>{alertState.confirmText || 'OK'}</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
             {/* Navigation Buttons */}
             <View style={styles.navigationContainer}>
                 {currentStep > 1 && (
@@ -688,6 +804,14 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: Colors.backgroundSecondary,
     },
+    backgroundGradient: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 260,
+        opacity: 0.12,
+    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -712,25 +836,46 @@ const styles = StyleSheet.create({
         marginTop: Spacing.lg,
         marginBottom: Spacing.xl,
     },
-    header: {
+    headerGradient: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.xl,
         paddingVertical: Spacing.lg,
-        backgroundColor: Colors.white,
-        ...Shadows.sm,
+        borderBottomLeftRadius: BorderRadius.xl,
+        borderBottomRightRadius: BorderRadius.xl,
+        ...Shadows.md,
     },
     headerButton: {
         width: 40,
         height: 40,
         alignItems: 'center',
         justifyContent: 'center',
+        borderRadius: BorderRadius.full,
+        backgroundColor: 'rgba(255,255,255,0.18)',
+    },
+    headerTitleWrap: {
+        alignItems: 'center',
+        gap: Spacing.xs,
     },
     headerTitle: {
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
+        color: Colors.white,
+    },
+    headerPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    headerPillText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
     progressContainer: {
         backgroundColor: Colors.white,
@@ -747,6 +892,26 @@ const styles = StyleSheet.create({
     progressFill: {
         height: '100%',
         backgroundColor: Colors.primary,
+    },
+    progressMeta: {
+        alignItems: 'center',
+        marginTop: Spacing.sm,
+    },
+    progressPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+    },
+    progressPillText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     stepsIndicator: {
         flexDirection: 'row',
@@ -768,7 +933,7 @@ const styles = StyleSheet.create({
         marginBottom: Spacing.xs,
     },
     stepIconActive: {
-        backgroundColor: Colors.primary,
+        backgroundColor: Colors.accent,
     },
     stepText: {
         fontSize: Typography.fontSize.xs,
@@ -792,6 +957,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
         padding: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
         ...Shadows.md,
     },
     stepTitle: {
@@ -861,7 +1028,8 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         borderWidth: 1,
-        borderColor: Colors.gray200,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
     },
     inputError: {
         borderColor: Colors.error,
@@ -900,6 +1068,9 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         overflow: 'hidden',
         position: 'relative',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
     },
     imagePreview: {
         width: '100%',
@@ -1024,6 +1195,126 @@ const styles = StyleSheet.create({
     submitText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
+    alertOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: Spacing.xl,
+    },
+    alertCard: {
+        width: '100%',
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    alertTopRow: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    alertIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertIcon_success: {
+        backgroundColor: Colors.success,
+    },
+    alertIcon_error: {
+        backgroundColor: Colors.error,
+    },
+    alertIcon_info: {
+        backgroundColor: Colors.accent,
+    },
+    alertMeta: {
+        alignItems: 'flex-end',
+        gap: Spacing.xs,
+    },
+    alertBadge: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray100,
+    },
+    alertBadge_success: {
+        backgroundColor: Colors.success + '20',
+    },
+    alertBadge_error: {
+        backgroundColor: Colors.error + '20',
+    },
+    alertBadge_info: {
+        backgroundColor: Colors.accent + '20',
+    },
+    alertBadgeText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    alertPoints: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+    },
+    alertPointsText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textSecondary,
+    },
+    alertTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        textAlign: 'center',
+    },
+    alertMessage: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        textAlign: 'center',
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.md,
+        lineHeight: 22,
+    },
+    alertProgressTrack: {
+        width: '100%',
+        height: 6,
+        backgroundColor: Colors.gray100,
+        borderRadius: BorderRadius.full,
+        overflow: 'hidden',
+        marginBottom: Spacing.lg,
+    },
+    alertProgressFill: {
+        height: '100%',
+        backgroundColor: Colors.accent,
+        borderRadius: BorderRadius.full,
+    },
+    alertButton: {
+        width: '100%',
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    alertButtonGradient: {
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertButtonText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
         color: Colors.white,
     },
     backButton: {

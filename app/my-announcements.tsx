@@ -11,16 +11,17 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
+    Animated,
     FlatList,
     Image,
+    Modal,
     RefreshControl,
+    ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
-    Modal,
-    Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
@@ -40,6 +41,32 @@ export default function MyAnnouncementsScreen() {
 
     const [refreshing, setRefreshing] = useState(false);
     const [actionMenu, setActionMenu] = useState<ActionMenuType>({
+        visible: false,
+        announcementId: null,
+        announcementName: '',
+    });
+    const [searchQuery, setSearchQuery] = useState('');
+    const [selectedCategoryId, setSelectedCategoryId] = useState('all');
+
+    type AlertVariant = 'success' | 'error' | 'info';
+    const [alertState, setAlertState] = useState<{
+        visible: boolean;
+        title: string;
+        message: string;
+        variant: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }>({
+        visible: false,
+        title: '',
+        message: '',
+        variant: 'info',
+    });
+    const [confirmState, setConfirmState] = useState<{
+        visible: boolean;
+        announcementId: string | null;
+        announcementName: string;
+    }>({
         visible: false,
         announcementId: null,
         announcementName: '',
@@ -97,6 +124,53 @@ export default function MyAnnouncementsScreen() {
         });
     };
 
+    const showAlert = (options: {
+        title: string;
+        message: string;
+        variant?: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }) => {
+        setAlertState({
+            visible: true,
+            title: options.title,
+            message: options.message,
+            variant: options.variant || 'info',
+            confirmText: options.confirmText || 'OK',
+            onConfirm: options.onConfirm,
+        });
+    };
+
+    const closeAlert = () => {
+        const onConfirm = alertState.onConfirm;
+        setAlertState({
+            visible: false,
+            title: '',
+            message: '',
+            variant: 'info',
+            confirmText: 'OK',
+            onConfirm: undefined,
+        });
+        if (onConfirm) onConfirm();
+    };
+
+    const openDeleteConfirm = (id: string, name: string) => {
+        closeActionMenu();
+        setConfirmState({
+            visible: true,
+            announcementId: id,
+            announcementName: name,
+        });
+    };
+
+    const closeDeleteConfirm = () => {
+        setConfirmState({
+            visible: false,
+            announcementId: null,
+            announcementName: '',
+        });
+    };
+
     const handleView = () => {
         if (actionMenu.announcementId) {
             closeActionMenu();
@@ -112,29 +186,80 @@ export default function MyAnnouncementsScreen() {
     };
 
     const handleDelete = () => {
-        Alert.alert(
-            'Supprimer l\'annonce',
-            `Êtes-vous sûr de vouloir supprimer "${actionMenu.announcementName}" ?`,
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Supprimer',
-                    style: 'destructive',
-                    onPress: async () => {
-                        if (actionMenu.announcementId) {
-                            try {
-                                await deleteAnnouncement(actionMenu.announcementId).unwrap();
-                                closeActionMenu();
-                                Alert.alert('Succès', 'Annonce supprimée avec succès');
-                            } catch (error) {
-                                Alert.alert('Erreur', 'Impossible de supprimer l\'annonce');
-                            }
-                        }
-                    },
-                },
-            ]
-        );
+        if (actionMenu.announcementId) {
+            openDeleteConfirm(actionMenu.announcementId, actionMenu.announcementName);
+        }
     };
+
+    const confirmDelete = async () => {
+        if (!confirmState.announcementId) return;
+        try {
+            await deleteAnnouncement(confirmState.announcementId).unwrap();
+            closeDeleteConfirm();
+            showAlert({
+                title: 'Succes',
+                message: 'Annonce supprimee avec succes',
+                variant: 'success',
+            });
+        } catch (error) {
+            closeDeleteConfirm();
+            showAlert({
+                title: 'Erreur',
+                message: "Impossible de supprimer l'annonce",
+                variant: 'error',
+            });
+        }
+    };
+
+    const categories = React.useMemo(() => {
+        if (!announcements) return [];
+        const map = new Map<string, string>();
+        announcements.forEach((item: any) => {
+            const categoryId =
+                typeof item.category === 'string' ? item.category : item.category?._id;
+            const categoryName =
+                typeof item.category === 'string' ? 'Categorie' : item.category?.name;
+            if (categoryId && categoryName && !map.has(categoryId)) {
+                map.set(categoryId, categoryName);
+            }
+        });
+        return Array.from(map, ([id, name]) => ({ id, name }));
+    }, [announcements]);
+
+    const filteredAnnouncements = React.useMemo(() => {
+        if (!announcements) return [];
+        const query = searchQuery.trim().toLowerCase();
+        return announcements.filter((item: any) => {
+            const name = (item.name || '').toLowerCase();
+            const categoryName = (item.category?.name || '').toLowerCase();
+            const categoryId =
+                typeof item.category === 'string' ? item.category : item.category?._id;
+            const matchesQuery =
+                query.length === 0 || name.includes(query) || categoryName.includes(query);
+            const matchesCategory =
+                selectedCategoryId === 'all' ||
+                (categoryId && categoryId === selectedCategoryId);
+            return matchesQuery && matchesCategory;
+        });
+    }, [announcements, searchQuery, selectedCategoryId]);
+
+    const hasFilters =
+        searchQuery.trim().length > 0 || selectedCategoryId !== 'all';
+
+    const alertBadgeText =
+        alertState.variant === 'success'
+            ? 'Bravo'
+            : alertState.variant === 'error'
+              ? 'Petit soucis'
+              : 'Petit conseil';
+    const alertPointsText =
+        alertState.variant === 'success' ? '+10 XP' : 'Astuce';
+    const alertProgress =
+        alertState.variant === 'success'
+            ? 0.8
+            : alertState.variant === 'error'
+              ? 0.35
+              : 0.55;
 
     const renderAnnouncementCard = ({ item }: any) => (
         <TouchableOpacity
@@ -198,19 +323,24 @@ export default function MyAnnouncementsScreen() {
     const renderEmpty = () => (
         <View style={styles.emptyContainer}>
             <LinearGradient colors={Gradients.cool} style={styles.emptyIcon}>
-                <Ionicons name="megaphone-outline" size={64} color={Colors.white} />
+                <Ionicons name={hasFilters ? 'search-outline' : 'megaphone-outline'} size={64} color={Colors.white} />
             </LinearGradient>
-            <Text style={styles.emptyTitle}>Aucune annonce</Text>
-            <Text style={styles.emptySubtitle}>
-                Vous n'avez pas encore publié d'annonce.{'\n'}
-                Commencez dès maintenant !
+            <Text style={styles.emptyTitle}>
+                {hasFilters ? 'Aucun resultat' : 'Aucune annonce'}
             </Text>
-            <TouchableOpacity style={styles.emptyButton} onPress={handleAddNew}>
-                <LinearGradient colors={Gradients.primary} style={styles.emptyButtonGradient}>
-                    <Ionicons name="add-circle-outline" size={24} color={Colors.white} />
-                    <Text style={styles.emptyButtonText}>Publier une annonce</Text>
-                </LinearGradient>
-            </TouchableOpacity>
+            <Text style={styles.emptySubtitle}>
+                {hasFilters
+                    ? 'Essayez un autre mot cle ou une autre categorie.'
+                    : "Vous n'avez pas encore publie d'annonce.\nCommencez des maintenant !"}
+            </Text>
+            {!hasFilters && (
+                <TouchableOpacity style={styles.emptyButton} onPress={handleAddNew}>
+                    <LinearGradient colors={Gradients.primary} style={styles.emptyButtonGradient}>
+                        <Ionicons name="add-circle-outline" size={24} color={Colors.white} />
+                        <Text style={styles.emptyButtonText}>Publier une annonce</Text>
+                    </LinearGradient>
+                </TouchableOpacity>
+            )}
         </View>
     );
 
@@ -257,9 +387,75 @@ export default function MyAnnouncementsScreen() {
                 </View>
             )}
 
+            {announcements && announcements.length > 0 && (
+                <View style={styles.filtersContainer}>
+                    <View style={styles.searchBox}>
+                        <Ionicons name="search" size={18} color={Colors.gray400} />
+                        <TextInput
+                            style={styles.searchInput}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            placeholder="Rechercher une annonce"
+                            placeholderTextColor={Colors.gray400}
+                        />
+                        {searchQuery.length > 0 && (
+                            <TouchableOpacity
+                                style={styles.searchClear}
+                                onPress={() => setSearchQuery('')}
+                            >
+                                <Ionicons name="close-circle" size={18} color={Colors.gray300} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                    {categories.length > 0 && (
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.filterRow}
+                        >
+                            <TouchableOpacity
+                                style={[
+                                    styles.filterChip,
+                                    selectedCategoryId === 'all' && styles.filterChipActive,
+                                ]}
+                                onPress={() => setSelectedCategoryId('all')}
+                            >
+                                <Text
+                                    style={[
+                                        styles.filterChipText,
+                                        selectedCategoryId === 'all' && styles.filterChipTextActive,
+                                    ]}
+                                >
+                                    Toutes
+                                </Text>
+                            </TouchableOpacity>
+                            {categories.map((category) => (
+                                <TouchableOpacity
+                                    key={category.id}
+                                    style={[
+                                        styles.filterChip,
+                                        selectedCategoryId === category.id && styles.filterChipActive,
+                                    ]}
+                                    onPress={() => setSelectedCategoryId(category.id)}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.filterChipText,
+                                            selectedCategoryId === category.id && styles.filterChipTextActive,
+                                        ]}
+                                    >
+                                        {category.name}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    )}
+                </View>
+            )}
+
             {/* List */}
             <FlatList
-                data={announcements}
+                data={filteredAnnouncements}
                 renderItem={renderAnnouncementCard}
                 keyExtractor={(item) => item._id}
                 contentContainerStyle={styles.listContent}
@@ -328,6 +524,86 @@ export default function MyAnnouncementsScreen() {
                         </TouchableOpacity>
                     </Animated.View>
                 </TouchableOpacity>
+            </Modal>
+
+            <Modal
+                visible={confirmState.visible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeDeleteConfirm}
+            >
+                <View style={styles.confirmOverlay}>
+                    <View style={styles.confirmCard}>
+                        <View style={styles.confirmIcon}>
+                            <Ionicons name="trash-outline" size={22} color={Colors.white} />
+                        </View>
+                        <Text style={styles.confirmTitle}>Supprimer l'annonce ?</Text>
+                        <Text style={styles.confirmMessage}>
+                            Cette action est definitive. "{confirmState.announcementName}"
+                        </Text>
+                        <View style={styles.confirmButtons}>
+                            <TouchableOpacity style={styles.confirmCancel} onPress={closeDeleteConfirm}>
+                                <Text style={styles.confirmCancelText}>Annuler</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.confirmDelete} onPress={confirmDelete}>
+                                <LinearGradient colors={Gradients.warm} style={styles.confirmDeleteGradient}>
+                                    <Text style={styles.confirmDeleteText}>Supprimer</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={alertState.visible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeAlert}
+            >
+                <View style={styles.alertOverlay}>
+                    <View style={styles.alertCard}>
+                        <View style={styles.alertTopRow}>
+                            <View style={[styles.alertIcon, styles[`alertIcon_${alertState.variant}`]]}>
+                                <Ionicons
+                                    name={
+                                        alertState.variant === 'success'
+                                            ? 'checkmark'
+                                            : alertState.variant === 'error'
+                                              ? 'close'
+                                              : 'information'
+                                    }
+                                    size={20}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.alertMeta}>
+                                <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
+                                    <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
+                                </View>
+                                <View style={styles.alertPoints}>
+                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
+                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
+                                </View>
+                            </View>
+                        </View>
+                        <Text style={styles.alertTitle}>{alertState.title}</Text>
+                        <Text style={styles.alertMessage}>{alertState.message}</Text>
+                        <View style={styles.alertProgressTrack}>
+                            <View
+                                style={[
+                                    styles.alertProgressFill,
+                                    { width: `${Math.round(alertProgress * 100)}%` },
+                                ]}
+                            />
+                        </View>
+                        <TouchableOpacity style={styles.alertButton} onPress={closeAlert}>
+                            <LinearGradient colors={Gradients.primary} style={styles.alertButtonGradient}>
+                                <Text style={styles.alertButtonText}>{alertState.confirmText || 'OK'}</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
             </Modal>
         </SafeAreaView>
     );
@@ -593,6 +869,250 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textSecondary,
+    },
+    filtersContainer: {
+        paddingHorizontal: Spacing.lg,
+        paddingBottom: Spacing.md,
+        gap: Spacing.md,
+    },
+    searchBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        gap: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    searchInput: {
+        flex: 1,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        paddingVertical: 2,
+    },
+    searchClear: {
+        padding: Spacing.xs / 2,
+    },
+    filterRow: {
+        gap: Spacing.sm,
+        paddingRight: Spacing.lg,
+    },
+    filterChip: {
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+    },
+    filterChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    filterChipText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    filterChipTextActive: {
+        color: Colors.white,
+    },
+    confirmOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: Spacing.xl,
+    },
+    confirmCard: {
+        width: '100%',
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    confirmIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.error,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: Spacing.md,
+    },
+    confirmTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        textAlign: 'center',
+    },
+    confirmMessage: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        textAlign: 'center',
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.lg,
+        lineHeight: 22,
+    },
+    confirmButtons: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        width: '100%',
+    },
+    confirmCancel: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+    },
+    confirmCancelText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textSecondary,
+    },
+    confirmDelete: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    confirmDeleteGradient: {
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    confirmDeleteText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
+    },
+    alertOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: Spacing.xl,
+    },
+    alertCard: {
+        width: '100%',
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    alertTopRow: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    alertIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertIcon_success: {
+        backgroundColor: Colors.success,
+    },
+    alertIcon_error: {
+        backgroundColor: Colors.error,
+    },
+    alertIcon_info: {
+        backgroundColor: Colors.accent,
+    },
+    alertMeta: {
+        alignItems: 'flex-end',
+        gap: Spacing.xs,
+    },
+    alertBadge: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray100,
+    },
+    alertBadge_success: {
+        backgroundColor: Colors.success + '20',
+    },
+    alertBadge_error: {
+        backgroundColor: Colors.error + '20',
+    },
+    alertBadge_info: {
+        backgroundColor: Colors.accent + '20',
+    },
+    alertBadgeText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    alertPoints: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+    },
+    alertPointsText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textSecondary,
+    },
+    alertTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        textAlign: 'center',
+    },
+    alertMessage: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        textAlign: 'center',
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.md,
+        lineHeight: 22,
+    },
+    alertProgressTrack: {
+        width: '100%',
+        height: 6,
+        backgroundColor: Colors.gray100,
+        borderRadius: BorderRadius.full,
+        overflow: 'hidden',
+        marginBottom: Spacing.lg,
+    },
+    alertProgressFill: {
+        height: '100%',
+        backgroundColor: Colors.accent,
+        borderRadius: BorderRadius.full,
+    },
+    alertButton: {
+        width: '100%',
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    alertButtonGradient: {
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertButtonText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
 });
 

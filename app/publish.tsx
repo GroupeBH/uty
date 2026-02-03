@@ -18,17 +18,17 @@ import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Animated,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ScrollView,
     StyleSheet,
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -70,6 +70,51 @@ export default function PublishScreen() {
     const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+
+    type AlertVariant = 'success' | 'error' | 'info';
+    const [alertState, setAlertState] = useState<{
+        visible: boolean;
+        title: string;
+        message: string;
+        variant: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }>({
+        visible: false,
+        title: '',
+        message: '',
+        variant: 'info',
+    });
+
+    const showAlert = (options: {
+        title: string;
+        message: string;
+        variant?: AlertVariant;
+        confirmText?: string;
+        onConfirm?: () => void;
+    }) => {
+        setAlertState({
+            visible: true,
+            title: options.title,
+            message: options.message,
+            variant: options.variant || 'info',
+            confirmText: options.confirmText || 'OK',
+            onConfirm: options.onConfirm,
+        });
+    };
+
+    const closeAlert = () => {
+        const onConfirm = alertState.onConfirm;
+        setAlertState({
+            visible: false,
+            title: '',
+            message: '',
+            variant: 'info',
+            confirmText: 'OK',
+            onConfirm: undefined,
+        });
+        if (onConfirm) onConfirm();
+    };
 
     // Queries
     const currentParentId = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]._id : null;
@@ -182,7 +227,7 @@ export default function PublishScreen() {
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refus??e', 'Nous avons besoin de la permission pour acc??der ?? vos photos.');
+            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour acc??der ?? vos photos.', variant: 'error' });
             return;
         }
 
@@ -202,7 +247,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                Alert.alert('Erreur', 'Impossible de pr??parer les images');
+                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer les images', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -212,7 +257,7 @@ export default function PublishScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refus??e', 'Nous avons besoin de la permission pour utiliser la cam??ra.');
+            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour utiliser la cam??ra.', variant: 'error' });
             return;
         }
 
@@ -230,7 +275,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                Alert.alert('Erreur', 'Impossible de pr??parer la photo');
+                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer la photo', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -252,7 +297,7 @@ export default function PublishScreen() {
         // Étape 1: Catégorie
         if (step === 1) {
             if (!selectedLeafCategory) {
-                Alert.alert('Erreur', 'Veuillez sélectionner une catégorie');
+                showAlert({ title: 'Erreur', message: 'Veuillez s??lectionner une cat??gorie', variant: 'error' });
                 return false;
             }
         }
@@ -268,7 +313,7 @@ export default function PublishScreen() {
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
-                Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
                 return false;
             }
         }
@@ -283,7 +328,7 @@ export default function PublishScreen() {
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
-                Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
                 return false;
             }
         }
@@ -292,7 +337,7 @@ export default function PublishScreen() {
         const photosStep = filteredAttributes.length > 0 ? 4 : 3;
         if (step === photosStep) {
             if (images.length === 0) {
-                Alert.alert('Erreur', 'Veuillez ajouter au moins une photo');
+                showAlert({ title: 'Erreur', message: 'Veuillez ajouter au moins une photo', variant: 'error' });
                 return false;
             }
         }
@@ -332,7 +377,7 @@ export default function PublishScreen() {
         if (!validateStep(currentStep)) return;
 
         if (!selectedLeafCategory) {
-            Alert.alert('Erreur', 'Veuillez sélectionner une catégorie');
+            showAlert({ title: 'Erreur', message: 'Veuillez s??lectionner une cat??gorie', variant: 'error' });
             return;
         }
 
@@ -375,16 +420,33 @@ export default function PublishScreen() {
             });
             
             await createAnnouncement(formDataToSend as any).unwrap();
-            Alert.alert(
-                '🎉 Succès',
-                'Votre annonce a été publiée avec succès!',
-                [{ text: 'OK', onPress: () => router.push('/(tabs)') }]
-            );
+            showAlert({
+                title: 'Succ??s',
+                message: 'Votre annonce a ??t?? publi??e avec succ??s!',
+                variant: 'success',
+                confirmText: 'OK',
+                onConfirm: () => router.push('/(tabs)'),
+            });
         } catch (error: any) {
             console.error('Failed to create announcement:', error);
-            Alert.alert('❌ Erreur', error?.data?.message || 'Échec de la publication de l\'annonce');
+            showAlert({ title: 'Erreur', message: error?.data?.message || "Echec de la publication de l'annonce", variant: 'error' });
         }
     };
+
+    const alertBadgeText =
+        alertState.variant === 'success'
+            ? 'Mission reussie'
+            : alertState.variant === 'error'
+              ? 'Petite correction'
+              : 'Petit conseil';
+    const alertPointsText =
+        alertState.variant === 'success' ? '+20 XP' : 'Astuce';
+    const alertProgress =
+        alertState.variant === 'success'
+            ? 0.82
+            : alertState.variant === 'error'
+              ? 0.35
+              : 0.55;
 
     console.log('announcementData', formData);
 
@@ -550,10 +612,25 @@ export default function PublishScreen() {
                                         </TouchableOpacity>
                                     ))}
                                 </View>
+                            ) : selectedLeafCategory ? (
+                                <View style={styles.leafSelectedCard}>
+                                    <View style={styles.leafSelectedIcon}>
+                                        <Ionicons name="checkmark-circle" size={28} color={Colors.white} />
+                                    </View>
+                                    <View style={styles.leafSelectedContent}>
+                                        <Text style={styles.leafSelectedTitle}>Cat??gorie s??lectionn??e</Text>
+                                        <Text style={styles.leafSelectedSubtitle}>
+                                            {selectedLeafCategory.name}
+                                        </Text>
+                                        <Text style={styles.leafSelectedHint}>
+                                            Vous pouvez continuer vers l'??tape suivante.
+                                        </Text>
+                                    </View>
+                                </View>
                             ) : (
                                 <View style={styles.emptyContainer}>
                                     <Ionicons name="folder-open-outline" size={64} color={Colors.gray300} />
-                                    <Text style={styles.emptyText}>Aucune catégorie disponible</Text>
+                                    <Text style={styles.emptyText}>Aucune cat??gorie disponible</Text>
                                 </View>
                             )}
                         </View>
@@ -793,6 +870,57 @@ export default function PublishScreen() {
                     )}
                 </View>
             </KeyboardAvoidingView>
+
+            <Modal
+                visible={alertState.visible}
+                transparent
+                animationType="fade"
+                onRequestClose={closeAlert}
+            >
+                <View style={styles.alertOverlay}>
+                    <View style={styles.alertCard}>
+                        <View style={styles.alertTopRow}>
+                            <View style={[styles.alertIcon, styles[`alertIcon_${alertState.variant}`]]}>
+                                <Ionicons
+                                    name={
+                                        alertState.variant === 'success'
+                                            ? 'checkmark'
+                                            : alertState.variant === 'error'
+                                              ? 'close'
+                                              : 'information'
+                                    }
+                                    size={20}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.alertMeta}>
+                                <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
+                                    <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
+                                </View>
+                                <View style={styles.alertPoints}>
+                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
+                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
+                                </View>
+                            </View>
+                        </View>
+                        <Text style={styles.alertTitle}>{alertState.title}</Text>
+                        <Text style={styles.alertMessage}>{alertState.message}</Text>
+                        <View style={styles.alertProgressTrack}>
+                            <View
+                                style={[
+                                    styles.alertProgressFill,
+                                    { width: `${Math.round(alertProgress * 100)}%` },
+                                ]}
+                            />
+                        </View>
+                        <TouchableOpacity style={styles.alertButton} onPress={closeAlert}>
+                            <LinearGradient colors={Gradients.primary} style={styles.alertButtonGradient}>
+                                <Text style={styles.alertButtonText}>{alertState.confirmText || 'OK'}</Text>
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </SafeAreaView>
     );
 }
@@ -1155,6 +1283,165 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.xs,
+    },
+
+    leafSelectedCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    leafSelectedIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: Colors.success,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: Spacing.md,
+    },
+    leafSelectedContent: {
+        flex: 1,
+    },
+    leafSelectedTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    leafSelectedSubtitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.accent,
+        marginTop: Spacing.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    leafSelectedHint: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        marginTop: Spacing.xs,
+    },
+    alertOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: Spacing.xl,
+    },
+    alertCard: {
+        width: '100%',
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    alertTopRow: {
+        width: '100%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    alertIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertMeta: {
+        alignItems: 'flex-end',
+        gap: Spacing.xs,
+    },
+    alertBadge: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray100,
+    },
+    alertBadge_success: {
+        backgroundColor: Colors.success + '20',
+    },
+    alertBadge_error: {
+        backgroundColor: Colors.error + '20',
+    },
+    alertBadge_info: {
+        backgroundColor: Colors.accent + '20',
+    },
+    alertBadgeText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    alertPoints: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+    },
+    alertPointsText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textSecondary,
+    },
+    alertIcon_success: {
+        backgroundColor: Colors.success,
+    },
+    alertIcon_error: {
+        backgroundColor: Colors.error,
+    },
+    alertIcon_info: {
+        backgroundColor: Colors.accent,
+    },
+    alertTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        textAlign: 'center',
+    },
+    alertMessage: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        textAlign: 'center',
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.md,
+        lineHeight: 22,
+    },
+    alertProgressTrack: {
+        width: '100%',
+        height: 6,
+        backgroundColor: Colors.gray100,
+        borderRadius: BorderRadius.full,
+        overflow: 'hidden',
+        marginBottom: Spacing.lg,
+    },
+    alertProgressFill: {
+        height: '100%',
+        backgroundColor: Colors.accent,
+        borderRadius: BorderRadius.full,
+    },
+    alertButton: {
+        width: '100%',
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    alertButtonGradient: {
+        paddingVertical: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    alertButtonText: {
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
     addImageText: {
         fontSize: Typography.fontSize.xs,
