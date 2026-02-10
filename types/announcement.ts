@@ -10,6 +10,12 @@ export interface WeightRange {
     valueMax: number;
 }
 
+export interface GeoPoint {
+    type: string;
+    coordinates: number[];
+    address?: string;
+}
+
 export interface Announcement {
     _id: string;
     seller?: string;
@@ -29,6 +35,9 @@ export interface Announcement {
     images?: string[];
     location?: string[];
     address?: string[];
+    isDeliverable?: boolean;
+    pickupLocation?: GeoPoint;
+    weightClass?: string[];
     views: number;
     likes?: User[];
     weightRange?: WeightRange;
@@ -84,6 +93,9 @@ export interface CreateAnnouncementDto {
     images?: string[];
     location?: string[];
     address?: string[];
+    isDeliverable?: boolean;
+    pickupLocation?: GeoPoint;
+    weightClass?: string[];
     weightRange?: WeightRange;
     offer_type?: string;
     condition?: string;

@@ -12,6 +12,9 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     newArchEnabled: true,
     ios: {
         supportsTablet: true,
+        config: {
+            googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+        },
     },
     android: {
         adaptiveIcon: {
@@ -22,6 +25,11 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
         },
         edgeToEdgeEnabled: true,
         predictiveBackGestureEnabled: false,
+        config: {
+            googleMaps: {
+                apiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
+            },
+        },
     },
     web: {
         output: 'static',

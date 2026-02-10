@@ -6,6 +6,7 @@ import { ApiResponse, CreateOrderRequest, Order, OrderStatus, PaginatedResponse 
 import { baseApi } from './baseApi';
 
 export const ordersApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         /**
          * Liste des commandes de l'utilisateur

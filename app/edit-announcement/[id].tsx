@@ -4,7 +4,9 @@
  */
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
+import { MapPickerModal } from '@/components/MapPickerModal';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery, useUpdateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
@@ -22,6 +24,7 @@ import {
     Modal,
     Platform,
     ScrollView,
+    Switch,
     StyleSheet,
     Text,
     TextInput,
@@ -31,24 +34,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const BASE_STEPS = [
-    { id: 1, title: 'Catégorie', icon: 'grid-outline' as const },
-    { id: 2, title: 'Détails', icon: 'document-text-outline' as const },
-    { id: 3, title: 'Caractéristiques', icon: 'list-outline' as const },
-    { id: 4, title: 'Photos', icon: 'images-outline' as const },
+    { key: 'category', title: 'Catégorie', icon: 'grid-outline' as const },
+    { key: 'details', title: 'Détails', icon: 'document-text-outline' as const },
+    { key: 'delivery', title: 'Livraison', icon: 'location-outline' as const },
+    { key: 'attributes', title: 'Caractéristiques', icon: 'list-outline' as const },
+    { key: 'photos', title: 'Photos', icon: 'images-outline' as const },
 ];
 
 export default function EditAnnouncementScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
     const { requireAuth } = useAuth();
-    const safeBack = () => {
-        if (router.canGoBack()) {
-            safeBack();
-        } else {
-            router.replace('/(tabs)');
-        }
-    };
-
 
     // Fetch announcement data
     const { data: announcement, isLoading: isLoadingAnnouncement } = useGetAnnouncementByIdQuery(id!);
@@ -64,6 +60,11 @@ export default function EditAnnouncementScreen() {
         description: '',
         price: '',
         quantity: '1',
+        isDeliverable: false,
+        weightClass: [] as string[],
+        pickupAddress: '',
+        pickupLatitude: '',
+        pickupLongitude: '',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [existingImages, setExistingImages] = useState<string[]>([]);
@@ -71,6 +72,7 @@ export default function EditAnnouncementScreen() {
     const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [mapVisible, setMapVisible] = useState(false);
 
     type AlertVariant = 'success' | 'error' | 'info';
     const [alertState, setAlertState] = useState<{
@@ -124,7 +126,16 @@ export default function EditAnnouncementScreen() {
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
-    const baseFormFields = ['name', 'description', 'price', 'quantity', 'currency'];
+    const baseFormFields = [
+        'name',
+        'description',
+        'price',
+        'quantity',
+        'currency',
+        'isDeliverable',
+        'pickupLocation',
+        'weightClass',
+    ];
     const filteredAttributes = React.useMemo(() => {
         if (!categoryAttributes) return [];
         return categoryAttributes.filter(attr => !baseFormFields.includes(attr.name));
@@ -132,31 +143,57 @@ export default function EditAnnouncementScreen() {
 
     // Calculer les étapes dynamiquement
     const STEPS = React.useMemo(() => {
-        if (filteredAttributes.length > 0) {
-            return BASE_STEPS;
-        } else {
-            return BASE_STEPS.filter(step => step.id !== 3).map((step, index) => ({
-                ...step,
-                id: index + 1,
-            }));
-        }
+        const steps = filteredAttributes.length > 0
+            ? BASE_STEPS
+            : BASE_STEPS.filter(step => step.key !== 'attributes');
+
+        return steps.map((step, index) => ({
+            ...step,
+            id: index + 1,
+        }));
     }, [filteredAttributes.length]);
+
+    const getStepId = React.useCallback(
+        (key: string) => STEPS.find((step) => step.key === key)?.id ?? -1,
+        [STEPS]
+    );
 
     // Check authentication
     useEffect(() => {
         if (!requireAuth('Vous devez être connecté pour modifier une annonce')) {
-            safeBack();
+            router.back();
         }
     }, [requireAuth]);
 
     // Initialize form with announcement data
     useEffect(() => {
         if (announcement) {
+            const pickupLocation: any = announcement.pickupLocation;
+            const pickupCoords = Array.isArray(pickupLocation?.coordinates)
+                ? pickupLocation.coordinates
+                : null;
+            const pickupLatitude =
+                pickupCoords && pickupCoords.length === 2 ? String(pickupCoords[1]) : '';
+            const pickupLongitude =
+                pickupCoords && pickupCoords.length === 2 ? String(pickupCoords[0]) : '';
+            const pickupAddress =
+                pickupLocation?.address || announcement.address?.[0] || '';
+            const normalizedWeightClass = Array.isArray(announcement.weightClass)
+                ? announcement.weightClass
+                : announcement.weightClass
+                  ? [announcement.weightClass]
+                  : [];
+
             setFormData({
                 name: announcement.name || '',
                 description: announcement.description || '',
                 price: announcement.price?.toString() || '',
                 quantity: announcement.quantity?.toString() || '1',
+                isDeliverable: !!announcement.isDeliverable,
+                weightClass: normalizedWeightClass,
+                pickupAddress,
+                pickupLatitude,
+                pickupLongitude,
             });
             setExistingImages(announcement.images || []);
             
@@ -177,13 +214,19 @@ export default function EditAnnouncementScreen() {
 
     // Animation du progress
     const updateProgress = React.useCallback((step: number) => {
-        const progress = ((step - 1) / (STEPS.length - 1)) * 100;
+        const progress = STEPS.length <= 1 ? 100 : ((step - 1) / (STEPS.length - 1)) * 100;
         Animated.timing(progressAnim, {
             toValue: progress,
             duration: 300,
             useNativeDriver: false,
         }).start();
     }, [STEPS.length, progressAnim]);
+
+    React.useEffect(() => {
+        if (currentStep > STEPS.length) {
+            setCurrentStep(STEPS.length);
+        }
+    }, [currentStep, STEPS.length]);
 
     // Initialiser le progress
     useEffect(() => {
@@ -247,7 +290,7 @@ export default function EditAnnouncementScreen() {
             const asset = result?.assets[0];
             setIsConvertingImages(true);
             try {
-                const newImage = buildImageFile(asset.uri, asset?.fileName);
+                const newImage = buildImageFile(asset.uri, asset.fileName);
                 setImages((prev) => {
                     const remainingSlots = 10 - existingImages.length;
                     return [...prev, newImage].slice(0, remainingSlots);
@@ -277,11 +320,37 @@ export default function EditAnnouncementScreen() {
         }));
     };
 
+    const parseCoordinate = (value: string) => {
+        const normalized = (value || '').toString().replace(',', '.').trim();
+        const parsed = parseFloat(normalized);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    };
+
+    const handleMapConfirm = (location: { latitude: number; longitude: number; address?: string }) => {
+        setFormData((prev: any) => ({
+            ...prev,
+            pickupLatitude: String(location.latitude),
+            pickupLongitude: String(location.longitude),
+            pickupAddress: location.address || prev.pickupAddress,
+        }));
+        if (location.address && errors.pickupAddress) {
+            setErrors((prev) => ({ ...prev, pickupAddress: '' }));
+        }
+        if (errors.pickupLocation) {
+            setErrors((prev) => ({ ...prev, pickupLocation: '' }));
+        }
+    };
+
     // Validation
     const validateStep = (step: number): boolean => {
         const newErrors: Record<string, string> = {};
 
-        if (step === 2) {
+        const detailsStepId = getStepId('details');
+        const deliveryStepId = getStepId('delivery');
+        const attributesStepId = getStepId('attributes');
+        const photosStepId = getStepId('photos');
+
+        if (step === detailsStepId) {
             if (!formData.name?.trim()) {
                 newErrors.name = 'Le nom est obligatoire';
             }
@@ -296,30 +365,64 @@ export default function EditAnnouncementScreen() {
             }
         }
 
+        if (step === deliveryStepId) {
+            if (formData.isDeliverable && !formData.pickupAddress?.trim()) {
+                newErrors.pickupAddress = "L'adresse de récupération est obligatoire";
+            }
+            if (formData.isDeliverable && (!formData.weightClass || formData.weightClass.length === 0)) {
+                newErrors.weightClass = 'La classe de poids est obligatoire';
+            }
+            if (formData.isDeliverable) {
+                const latitude = parseCoordinate(formData.pickupLatitude);
+                const longitude = parseCoordinate(formData.pickupLongitude);
+                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+                    newErrors.pickupLocation = 'Veuillez sélectionner un point sur la carte';
+                }
+            }
+
+            if (Object.keys(newErrors).length > 0) {
+                setErrors(newErrors);
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
+                return false;
+            }
+        }
+
+        if (step === attributesStepId && filteredAttributes.length > 0) {
+            for (const attr of filteredAttributes) {
+                if (attr.required && !dynamicAttributes[attr.name]) {
+                    newErrors[attr.name] = `${attr.label || attr.name} est obligatoire`;
+                }
+            }
+
+            if (Object.keys(newErrors).length > 0) {
+                setErrors(newErrors);
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
+                return false;
+            }
+        }
+
+        if (step === photosStepId) {
+            const totalImages = existingImages.length + images.length;
+            if (totalImages === 0) {
+                showAlert({ title: 'Erreur', message: 'Veuillez ajouter au moins une photo', variant: 'error' });
+                return false;
+            }
+        }
+
         setErrors({});
         return true;
     };
 
     const handleNext = () => {
         if (validateStep(currentStep)) {
-            let nextStep = currentStep + 1;
-            
-            if (nextStep === 3 && filteredAttributes.length === 0) {
-                nextStep = 4;
-            }
-            
+            const nextStep = Math.min(currentStep + 1, STEPS.length);
             setCurrentStep(nextStep);
             updateProgress(nextStep);
         }
     };
 
     const handlePrevious = () => {
-        let prevStep = currentStep - 1;
-        
-        if (prevStep === 3 && filteredAttributes.length === 0) {
-            prevStep = 2;
-        }
-        
+        const prevStep = Math.max(currentStep - 1, 1);
         setCurrentStep(prevStep);
         updateProgress(prevStep);
     };
@@ -344,6 +447,31 @@ export default function EditAnnouncementScreen() {
             }
             formDataToSend.append('price', parseFloat(formData.price).toString());
             formDataToSend.append('quantity', (formData.quantity ? parseInt(formData.quantity) : 1).toString());
+
+            formDataToSend.append('isDeliverable', String(!!formData.isDeliverable));
+            if (formData.isDeliverable) {
+                if (Array.isArray(formData.weightClass) && formData.weightClass.length > 0) {
+                    formDataToSend.append('weightClass', JSON.stringify(formData.weightClass));
+                }
+                const latitude = parseCoordinate(formData.pickupLatitude);
+                const longitude = parseCoordinate(formData.pickupLongitude);
+                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+                    showAlert({
+                        title: 'Erreur',
+                        message: 'Veuillez sélectionner un point de récupération sur la carte',
+                        variant: 'error',
+                    });
+                    return;
+                }
+                const pickupLocation = {
+                    type: 'Point',
+                    coordinates: [longitude, latitude],
+                    address: formData.pickupAddress?.trim(),
+                };
+                formDataToSend.append('pickupLocation', JSON.stringify(pickupLocation));
+            } else {
+                formDataToSend.append('pickupLocation', 'null');
+            }
             
             if (Object.keys(dynamicAttributes).length > 0) {
                 formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
@@ -365,7 +493,7 @@ export default function EditAnnouncementScreen() {
                 message: 'Annonce mise a jour avec succes',
                 variant: 'success',
                 confirmText: 'OK',
-                onConfirm: () => safeBack(),
+                onConfirm: () => router.back(),
             });
         } catch (error: any) {
             console.error('Error updating announcement:', error);
@@ -380,13 +508,23 @@ export default function EditAnnouncementScreen() {
               ? 'Petite correction'
               : 'Petit conseil';
     const alertPointsText =
-        alertState.variant === 'success' ? '+20 XP' : 'Astuce';
+        alertState.variant === 'success' ? '+15 XP' : 'Astuce';
     const alertProgress =
         alertState.variant === 'success'
-            ? 0.82
+            ? 0.78
             : alertState.variant === 'error'
               ? 0.35
               : 0.55;
+    const initialLatitude = parseCoordinate(formData.pickupLatitude);
+    const initialLongitude = parseCoordinate(formData.pickupLongitude);
+    const initialMapLocation =
+        typeof initialLatitude === 'number' && typeof initialLongitude === 'number'
+            ? {
+                  latitude: initialLatitude,
+                  longitude: initialLongitude,
+                  address: formData.pickupAddress,
+              }
+            : undefined;
 
     if (isLoadingAnnouncement) {
         return (
@@ -402,7 +540,7 @@ export default function EditAnnouncementScreen() {
             <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={64} color={Colors.error} />
                 <Text style={styles.errorText}>Annonce introuvable</Text>
-                <TouchableOpacity style={styles.backButton} onPress={safeBack}>
+                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <Text style={styles.backButtonText}>Retour</Text>
                 </TouchableOpacity>
             </View>
@@ -414,23 +552,14 @@ export default function EditAnnouncementScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            <LinearGradient colors={Gradients.cool} style={styles.backgroundGradient} />
             {/* Header */}
-            <LinearGradient colors={Gradients.primary} style={styles.headerGradient}>
-                <TouchableOpacity style={styles.headerButton} onPress={safeBack}>
-                    <Ionicons name="close" size={24} color={Colors.white} />
+            <View style={styles.header}>
+                <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
+                    <Ionicons name="close" size={24} color={Colors.textPrimary} />
                 </TouchableOpacity>
-                <View style={styles.headerTitleWrap}>
-                    <Text style={styles.headerTitle}>Modifier l'annonce</Text>
-                    <View style={styles.headerPill}>
-                        <Ionicons name="sparkles" size={14} color={Colors.white} />
-                        <Text style={styles.headerPillText}>
-                            Etape {currentStep}/{STEPS.length}
-                        </Text>
-                    </View>
-                </View>
+                <Text style={styles.headerTitle}>Modifier l'annonce</Text>
                 <View style={{ width: 40 }} />
-            </LinearGradient>
+            </View>
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
@@ -446,14 +575,6 @@ export default function EditAnnouncementScreen() {
                             },
                         ]}
                     />
-                </View>
-                <View style={styles.progressMeta}>
-                    <View style={styles.progressPill}>
-                        <Ionicons name="checkmark-circle" size={14} color={Colors.accent} />
-                        <Text style={styles.progressPillText}>
-                            {currentStep === STEPS.length ? 'Derniere etape' : 'Avancement'}
-                        </Text>
-                    </View>
                 </View>
                 <View style={styles.stepsIndicator}>
                     {STEPS.map((step) => (
@@ -494,7 +615,7 @@ export default function EditAnnouncementScreen() {
                     showsVerticalScrollIndicator={false}
                 >
                     {/* Step 1: Catégorie */}
-                    {currentStep === 1 && (
+                    {currentStep === getStepId('category') && (
                         <View style={styles.stepContainer}>
                             <Text style={styles.stepTitle}>Catégorie</Text>
                             <Text style={styles.stepSubtitle}>
@@ -533,7 +654,7 @@ export default function EditAnnouncementScreen() {
                     )}
 
                     {/* Step 2: Détails */}
-                    {currentStep === 2 && (
+                    {currentStep === getStepId('details') && (
                         <View style={styles.stepContainer}>
                             <Text style={styles.stepTitle}>Détails de l'annonce</Text>
                             <Text style={styles.stepSubtitle}>
@@ -599,11 +720,163 @@ export default function EditAnnouncementScreen() {
                                     />
                                 </View>
                             </View>
+
                         </View>
                     )}
 
-                    {/* Step 3: Caractéristiques */}
-                    {currentStep === 3 && filteredAttributes.length > 0 && (
+                    {/* Step 3: Livraison */}
+                    {currentStep === getStepId('delivery') && (
+                        <View style={styles.stepContainer}>
+                            <Text style={styles.stepTitle}>Livraison</Text>
+                            <Text style={styles.stepSubtitle}>
+                                Précisez si l'annonce est livrable et le point de récupération
+                            </Text>
+
+                            <View style={styles.deliveryCard}>
+                                <View style={styles.deliveryHeader}>
+                                    <View style={styles.deliveryHeaderText}>
+                                        <Text style={styles.deliveryTitle}>Livraison</Text>
+                                        <Text style={styles.deliverySubtitle}>
+                                            Indiquez si cette annonce est livrable
+                                        </Text>
+                                    </View>
+                                    <Switch
+                                        value={!!formData.isDeliverable}
+                                        onValueChange={(value) => {
+                                            setFormData({ ...formData, isDeliverable: value });
+                                            if (!value && errors.pickupAddress) {
+                                                setErrors((prev) => ({ ...prev, pickupAddress: '' }));
+                                            }
+                                            if (!value && errors.weightClass) {
+                                                setErrors((prev) => ({ ...prev, weightClass: '' }));
+                                            }
+                                            if (!value && errors.pickupLocation) {
+                                                setErrors((prev) => ({ ...prev, pickupLocation: '' }));
+                                            }
+                                        }}
+                                        trackColor={{
+                                            false: Colors.gray300,
+                                            true: Colors.primary + '80',
+                                        }}
+                                        thumbColor={formData.isDeliverable ? Colors.primary : Colors.gray400}
+                                    />
+                                </View>
+
+                                {formData.isDeliverable && (
+                                    <>
+                                        <View style={styles.inputContainer}>
+                                            <Text style={styles.inputLabel}>
+                                                Classe de poids <Text style={styles.required}>*</Text>
+                                            </Text>
+                                            <View style={styles.weightChips}>
+                                                {WEIGHT_CLASS_OPTIONS.map((option) => {
+                                                    const selectedClasses = Array.isArray(formData.weightClass)
+                                                        ? formData.weightClass
+                                                        : [];
+                                                    const isActive = selectedClasses.includes(option.value);
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={option.value}
+                                                            style={[
+                                                                styles.weightChip,
+                                                                isActive && styles.weightChipActive,
+                                                            ]}
+                                                            onPress={() => {
+                                                                const next = isActive
+                                                                    ? selectedClasses.filter((value: string) => value !== option.value)
+                                                                    : [...selectedClasses, option.value];
+                                                                setFormData({ ...formData, weightClass: next });
+                                                            }}
+                                                            activeOpacity={0.8}
+                                                        >
+                                                            <Text
+                                                                style={[
+                                                                    styles.weightChipText,
+                                                                    isActive && styles.weightChipTextActive,
+                                                                ]}
+                                                            >
+                                                                {option.label}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                            {errors.weightClass && (
+                                                <Text style={styles.errorText}>{errors.weightClass}</Text>
+                                            )}
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.mapSelectButton}
+                                            onPress={() => setMapVisible(true)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <LinearGradient colors={Gradients.primary} style={styles.mapSelectGradient}>
+                                                <Ionicons name="map-outline" size={18} color={Colors.white} />
+                                                <Text style={styles.mapSelectText}>Choisir sur la carte</Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                        {errors.pickupLocation && (
+                                            <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                        )}
+
+                                        <View style={styles.inputContainer}>
+                                            <Text style={styles.inputLabel}>
+                                                Adresse de récupération <Text style={styles.required}>*</Text>
+                                            </Text>
+                                            <TextInput
+                                                style={[styles.input, errors.pickupAddress && styles.inputError]}
+                                                placeholder="Ex: 12 rue des Fleurs, Abidjan"
+                                                value={formData.pickupAddress}
+                                                onChangeText={(text) =>
+                                                    setFormData({ ...formData, pickupAddress: text })
+                                                }
+                                                placeholderTextColor={Colors.gray400}
+                                            />
+                                            {errors.pickupAddress && (
+                                                <Text style={styles.errorText}>{errors.pickupAddress}</Text>
+                                            )}
+                                        </View>
+
+                                        <View style={styles.row}>
+                                            <View style={[styles.inputContainer, { flex: 1 }]}>
+                                                <Text style={styles.inputLabel}>Latitude (optionnel)</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    placeholder="5.3166"
+                                                    value={formData.pickupLatitude}
+                                                    onChangeText={(text) =>
+                                                        setFormData({ ...formData, pickupLatitude: text })
+                                                    }
+                                                    keyboardType="decimal-pad"
+                                                    placeholderTextColor={Colors.gray400}
+                                                />
+                                            </View>
+                                            <View style={[styles.inputContainer, { flex: 1 }]}>
+                                                <Text style={styles.inputLabel}>Longitude (optionnel)</Text>
+                                                <TextInput
+                                                    style={styles.input}
+                                                    placeholder="-4.0333"
+                                                    value={formData.pickupLongitude}
+                                                    onChangeText={(text) =>
+                                                        setFormData({ ...formData, pickupLongitude: text })
+                                                    }
+                                                    keyboardType="decimal-pad"
+                                                    placeholderTextColor={Colors.gray400}
+                                                />
+                                            </View>
+                                        </View>
+
+                                        <Text style={styles.deliveryHint}>
+                                            Cette adresse servira de point de récupération pour le livreur.
+                                        </Text>
+                                    </>
+                                )}
+                            </View>
+                        </View>
+                    )}
+                    {/* Step 4: Caractéristiques */}
+                    {currentStep === getStepId('attributes') && filteredAttributes.length > 0 && (
                         <View style={styles.stepContainer}>
                             <Text style={styles.stepTitle}>Caractéristiques</Text>
                             <Text style={styles.stepSubtitle}>
@@ -621,7 +894,7 @@ export default function EditAnnouncementScreen() {
                                         attribute={attribute}
                                         value={dynamicAttributes[attribute.name]}
                                         onChange={(value) => handleDynamicAttributeChange(attribute.name, value)}
-                                        error={errors[attribute.name]}
+                                        // error={errors[attribute.name]}
                                     />
                                 ))
                             )}
@@ -637,8 +910,8 @@ export default function EditAnnouncementScreen() {
                         </View>
                     )}
 
-                    {/* Step 4: Photos */}
-                    {currentStep === 4 && (
+                    {/* Step 5: Photos */}
+                    {currentStep === getStepId('photos') && (
                         <View style={styles.stepContainer}>
                             <Text style={styles.stepTitle}>Photos</Text>
                             <Text style={styles.stepSubtitle}>
@@ -718,6 +991,13 @@ export default function EditAnnouncementScreen() {
                     )}
                 </ScrollView>
             </KeyboardAvoidingView>
+
+            <MapPickerModal
+                visible={mapVisible}
+                initialLocation={initialMapLocation}
+                onClose={() => setMapVisible(false)}
+                onConfirm={handleMapConfirm}
+            />
 
             <Modal
                 visible={alertState.visible}
@@ -812,14 +1092,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: Colors.backgroundSecondary,
     },
-    backgroundGradient: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 260,
-        opacity: 0.12,
-    },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
@@ -844,46 +1116,25 @@ const styles = StyleSheet.create({
         marginTop: Spacing.lg,
         marginBottom: Spacing.xl,
     },
-    headerGradient: {
+    header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.xl,
         paddingVertical: Spacing.lg,
-        borderBottomLeftRadius: BorderRadius.xl,
-        borderBottomRightRadius: BorderRadius.xl,
-        ...Shadows.md,
+        backgroundColor: Colors.white,
+        ...Shadows.sm,
     },
     headerButton: {
         width: 40,
         height: 40,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: BorderRadius.full,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-    },
-    headerTitleWrap: {
-        alignItems: 'center',
-        gap: Spacing.xs,
     },
     headerTitle: {
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.white,
-    },
-    headerPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-    },
-    headerPillText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
+        color: Colors.textPrimary,
     },
     progressContainer: {
         backgroundColor: Colors.white,
@@ -900,26 +1151,6 @@ const styles = StyleSheet.create({
     progressFill: {
         height: '100%',
         backgroundColor: Colors.primary,
-    },
-    progressMeta: {
-        alignItems: 'center',
-        marginTop: Spacing.sm,
-    },
-    progressPill: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-        borderWidth: 1,
-        borderColor: Colors.gray100,
-    },
-    progressPillText: {
-        fontSize: Typography.fontSize.xs,
-        color: Colors.textSecondary,
-        fontWeight: Typography.fontWeight.semibold,
     },
     stepsIndicator: {
         flexDirection: 'row',
@@ -941,7 +1172,7 @@ const styles = StyleSheet.create({
         marginBottom: Spacing.xs,
     },
     stepIconActive: {
-        backgroundColor: Colors.accent,
+        backgroundColor: Colors.primary,
     },
     stepText: {
         fontSize: Typography.fontSize.xs,
@@ -965,8 +1196,6 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
         padding: Spacing.xl,
-        borderWidth: 1,
-        borderColor: Colors.gray100,
         ...Shadows.md,
     },
     stepTitle: {
@@ -1036,8 +1265,7 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         borderWidth: 1,
-        borderColor: Colors.gray100,
-        ...Shadows.sm,
+        borderColor: Colors.gray200,
     },
     inputError: {
         borderColor: Colors.error,
@@ -1054,6 +1282,83 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
         gap: Spacing.md,
+    },
+    deliveryCard: {
+        marginTop: Spacing.lg,
+        padding: Spacing.lg,
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    deliveryHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    deliveryHeaderText: {
+        flex: 1,
+        marginRight: Spacing.md,
+    },
+    deliveryTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+    },
+    deliverySubtitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        marginTop: Spacing.xs,
+    },
+    deliveryHint: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray400,
+        marginTop: Spacing.xs,
+    },
+    mapSelectButton: {
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+        marginBottom: Spacing.md,
+        ...Shadows.sm,
+    },
+    mapSelectGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.sm,
+    },
+    mapSelectText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
+    },
+    weightChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    weightChip: {
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    weightChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    weightChipText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textPrimary,
+    },
+    weightChipTextActive: {
+        color: Colors.white,
     },
     noAttributesContainer: {
         alignItems: 'center',
@@ -1076,9 +1381,6 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         overflow: 'hidden',
         position: 'relative',
-        borderWidth: 1,
-        borderColor: Colors.gray100,
-        backgroundColor: Colors.white,
     },
     imagePreview: {
         width: '100%',

@@ -8,6 +8,9 @@ export interface CreateAnnouncementDto {
     quantity?: number;
     category: string;
     attributes?: Record<string, any>;
+    isDeliverable?: boolean;
+    pickupLocation?: any;
+    weightClass?: string[];
 }
 
 export interface UpdateAnnouncementDto {
@@ -19,9 +22,13 @@ export interface UpdateAnnouncementDto {
     existingImages?: string[];
     imagesToDelete?: string[];
     newImages?: string[]; // Base64 images
+    isDeliverable?: boolean;
+    pickupLocation?: any;
+    weightClass?: string[];
 }
 
 export const announcementsApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getAnnouncements: builder.query<Announcement[], void>({
             query: () => '/announcements',

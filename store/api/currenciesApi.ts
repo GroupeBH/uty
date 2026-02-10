@@ -2,6 +2,7 @@ import { Currency } from '@/types/currency';
 import { baseApi } from './baseApi';
 
 export const currenciesApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getCurrencies: builder.query<Currency[], void>({
             query: () => '/currencies',

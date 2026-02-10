@@ -4,8 +4,10 @@
  */
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
+import { MapPickerModal } from '@/components/MapPickerModal';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
@@ -24,6 +26,7 @@ import {
     Modal,
     Platform,
     ScrollView,
+    Switch,
     StyleSheet,
     Text,
     TextInput,
@@ -33,10 +36,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const BASE_STEPS = [
-    { id: 1, title: 'Catégorie', icon: 'grid-outline' as const },
-    { id: 2, title: 'Détails', icon: 'document-text-outline' as const },
-    { id: 3, title: 'Caractéristiques', icon: 'list-outline' as const },
-    { id: 4, title: 'Photos', icon: 'images-outline' as const },
+    { key: 'category', title: 'Catégorie', icon: 'grid-outline' as const },
+    { key: 'details', title: 'Détails', icon: 'document-text-outline' as const },
+    { key: 'delivery', title: 'Livraison', icon: 'location-outline' as const },
+    { key: 'attributes', title: 'Caractéristiques', icon: 'list-outline' as const },
+    { key: 'photos', title: 'Photos', icon: 'images-outline' as const },
 ];
 
 export default function PublishScreen() {
@@ -65,11 +69,17 @@ export default function PublishScreen() {
         description: '',
         price: '',
         quantity: '1',
+        isDeliverable: false,
+        weightClass: [] as string[],
+        pickupAddress: '',
+        pickupLatitude: '',
+        pickupLongitude: '',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [mapVisible, setMapVisible] = useState(false);
 
     type AlertVariant = 'success' | 'error' | 'info';
     const [alertState, setAlertState] = useState<{
@@ -125,7 +135,16 @@ export default function PublishScreen() {
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
-    const baseFormFields = ['name', 'description', 'price', 'quantity', 'currency'];
+    const baseFormFields = [
+        'name',
+        'description',
+        'price',
+        'quantity',
+        'currency',
+        'isDeliverable',
+        'pickupLocation',
+        'weightClass',
+    ];
     const filteredAttributes = React.useMemo(() => {
         if (!categoryAttributes) return [];
         return categoryAttributes.filter(attr => !baseFormFields.includes(attr.name));
@@ -133,16 +152,20 @@ export default function PublishScreen() {
 
     // Calculer les étapes dynamiquement en fonction des attributs
     const STEPS = React.useMemo(() => {
-        if (filteredAttributes.length > 0) {
-            return BASE_STEPS; // Toutes les étapes incluant Caractéristiques
-        } else {
-            // Skip l'étape Caractéristiques
-            return BASE_STEPS.filter(step => step.id !== 3).map((step, index) => ({
-                ...step,
-                id: index + 1, // Réindexer les étapes
-            }));
-        }
+        const steps = filteredAttributes.length > 0
+            ? BASE_STEPS
+            : BASE_STEPS.filter(step => step.key !== 'attributes');
+
+        return steps.map((step, index) => ({
+            ...step,
+            id: index + 1,
+        }));
     }, [filteredAttributes.length]);
+
+    const getStepId = React.useCallback(
+        (key: string) => STEPS.find((step) => step.key === key)?.id ?? -1,
+        [STEPS]
+    );
 
     // Debug: Log category attributes when they change
     React.useEffect(() => {
@@ -160,16 +183,16 @@ export default function PublishScreen() {
         }
     }, [categoryAttributes, filteredAttributes]);
 
-    // Ajuster currentStep si on est sur l'étape 3 mais qu'il n'y a plus d'attributs
+    // Ajuster currentStep si le nombre d'étapes change
     React.useEffect(() => {
-        if (currentStep === 3 && filteredAttributes.length === 0) {
-            setCurrentStep(2); // Retour à l'étape détails
+        if (currentStep > STEPS.length) {
+            setCurrentStep(STEPS.length);
         }
-    }, [currentStep, filteredAttributes.length]);
+    }, [currentStep, STEPS.length]);
 
     // Animation du progress
     const updateProgress = React.useCallback((step: number) => {
-        const progress = ((step - 1) / (STEPS.length - 1)) * 100;
+        const progress = STEPS.length <= 1 ? 100 : ((step - 1) / (STEPS.length - 1)) * 100;
         Animated.timing(progressAnim, {
             toValue: progress,
             duration: 300,
@@ -207,12 +230,38 @@ export default function PublishScreen() {
         if (errors[field]) {
             setErrors((prev) => ({ ...prev, [field]: '' }));
         }
+        if (field === 'isDeliverable' && !value && errors.pickupAddress) {
+            setErrors((prev) => ({ ...prev, pickupAddress: '' }));
+        }
+        if (field === 'isDeliverable' && !value && errors.weightClass) {
+            setErrors((prev) => ({ ...prev, weightClass: '' }));
+        }
+        if (field === 'isDeliverable' && !value && errors.pickupLocation) {
+            setErrors((prev) => ({ ...prev, pickupLocation: '' }));
+        }
     };
 
     const handleAttributeChange = (attributeName: string, value: any) => {
         setDynamicAttributes((prev) => ({ ...prev, [attributeName]: value }));
         if (errors[attributeName]) {
             setErrors((prev) => ({ ...prev, [attributeName]: '' }));
+        }
+    };
+
+    const parseCoordinate = (value: string) => {
+        const normalized = (value || '').toString().replace(',', '.').trim();
+        const parsed = parseFloat(normalized);
+        return Number.isFinite(parsed) ? parsed : undefined;
+    };
+
+    const handleMapConfirm = (location: { latitude: number; longitude: number; address?: string }) => {
+        handleInputChange('pickupLatitude', String(location.latitude));
+        handleInputChange('pickupLongitude', String(location.longitude));
+        if (location.address) {
+            handleInputChange('pickupAddress', location.address);
+        }
+        if (errors.pickupLocation) {
+            setErrors((prev) => ({ ...prev, pickupLocation: '' }));
         }
     };
 
@@ -294,8 +343,14 @@ export default function PublishScreen() {
     const validateStep = (step: number): boolean => {
         const newErrors: Record<string, string> = {};
 
+        const categoryStepId = getStepId('category');
+        const detailsStepId = getStepId('details');
+        const deliveryStepId = getStepId('delivery');
+        const attributesStepId = getStepId('attributes');
+        const photosStepId = getStepId('photos');
+
         // Étape 1: Catégorie
-        if (step === 1) {
+        if (step === categoryStepId) {
             if (!selectedLeafCategory) {
                 showAlert({ title: 'Erreur', message: 'Veuillez s??lectionner une cat??gorie', variant: 'error' });
                 return false;
@@ -303,7 +358,7 @@ export default function PublishScreen() {
         }
 
         // Étape 2: Détails de base
-        if (step === 2) {
+        if (step === detailsStepId) {
             if (!formData.name?.trim()) {
                 newErrors.name = 'Le nom est obligatoire';
             }
@@ -318,8 +373,31 @@ export default function PublishScreen() {
             }
         }
 
-        // Étape 3: Attributs dynamiques (seulement si présents)
-        if (step === 3 && filteredAttributes.length > 0) {
+        // Étape 3: Livraison
+        if (step === deliveryStepId) {
+            if (formData.isDeliverable && !formData.pickupAddress?.trim()) {
+                newErrors.pickupAddress = "L'adresse de récupération est obligatoire";
+            }
+            if (formData.isDeliverable && (!formData.weightClass || formData.weightClass.length === 0)) {
+                newErrors.weightClass = 'La classe de poids est obligatoire';
+            }
+            if (formData.isDeliverable) {
+                const latitude = parseCoordinate(formData.pickupLatitude);
+                const longitude = parseCoordinate(formData.pickupLongitude);
+                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+                    newErrors.pickupLocation = 'Veuillez sélectionner un point sur la carte';
+                }
+            }
+
+            if (Object.keys(newErrors).length > 0) {
+                setErrors(newErrors);
+                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
+                return false;
+            }
+        }
+
+        // Étape 4: Attributs dynamiques (seulement si présents)
+        if (step === attributesStepId && filteredAttributes.length > 0) {
             for (const attr of filteredAttributes) {
                 if (attr.required && !dynamicAttributes[attr.name]) {
                     newErrors[attr.name] = `${attr.label || attr.name} est obligatoire`;
@@ -333,9 +411,8 @@ export default function PublishScreen() {
             }
         }
 
-        // Étape Photos (3 ou 4 selon présence d'attributs)
-        const photosStep = filteredAttributes.length > 0 ? 4 : 3;
-        if (step === photosStep) {
+        // Étape Photos
+        if (step === photosStepId) {
             if (images.length === 0) {
                 showAlert({ title: 'Erreur', message: 'Veuillez ajouter au moins une photo', variant: 'error' });
                 return false;
@@ -348,26 +425,14 @@ export default function PublishScreen() {
     // Navigation entre étapes
     const handleNext = () => {
         if (validateStep(currentStep)) {
-            let nextStep = currentStep + 1;
-            
-            // Skip l'étape 3 (Caractéristiques) s'il n'y a pas d'attributs dynamiques
-            if (nextStep === 3 && filteredAttributes.length === 0) {
-                nextStep = 4;
-            }
-            
+            const nextStep = Math.min(currentStep + 1, STEPS.length);
             setCurrentStep(nextStep);
             updateProgress(nextStep);
         }
     };
 
     const handlePrevious = () => {
-        let prevStep = currentStep - 1;
-        
-        // Skip l'étape 3 (Caractéristiques) en arrière s'il n'y a pas d'attributs dynamiques
-        if (prevStep === 3 && filteredAttributes.length === 0) {
-            prevStep = 2;
-        }
-        
+        const prevStep = Math.max(currentStep - 1, 1);
         setCurrentStep(prevStep);
         updateProgress(prevStep);
     };
@@ -406,6 +471,29 @@ export default function PublishScreen() {
                 formDataToSend.append('quantity', formData.quantity);
             }
             formDataToSend.append('category', selectedLeafCategory._id);
+
+            formDataToSend.append('isDeliverable', String(!!formData.isDeliverable));
+            if (formData.isDeliverable) {
+                if (Array.isArray(formData.weightClass) && formData.weightClass.length > 0) {
+                    formDataToSend.append('weightClass', JSON.stringify(formData.weightClass));
+                }
+                const latitude = parseCoordinate(formData.pickupLatitude);
+                const longitude = parseCoordinate(formData.pickupLongitude);
+                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+                    showAlert({
+                        title: 'Erreur',
+                        message: 'Veuillez sélectionner un point de récupération sur la carte',
+                        variant: 'error',
+                    });
+                    return;
+                }
+                const pickupLocation = {
+                    type: 'Point',
+                    coordinates: [longitude, latitude],
+                    address: formData.pickupAddress?.trim(),
+                };
+                formDataToSend.append('pickupLocation', JSON.stringify(pickupLocation));
+            }
             
             // Ajouter les attributs dynamiques si présents
             if (Object.keys(dynamicAttributes).length > 0) {
@@ -447,6 +535,16 @@ export default function PublishScreen() {
             : alertState.variant === 'error'
               ? 0.35
               : 0.55;
+    const initialLatitude = parseCoordinate(formData.pickupLatitude);
+    const initialLongitude = parseCoordinate(formData.pickupLongitude);
+    const initialMapLocation =
+        typeof initialLatitude === 'number' && typeof initialLongitude === 'number'
+            ? {
+                  latitude: initialLatitude,
+                  longitude: initialLongitude,
+                  address: formData.pickupAddress,
+              }
+            : undefined;
 
     console.log('announcementData', formData);
 
@@ -516,7 +614,7 @@ export default function PublishScreen() {
                     showsVerticalScrollIndicator={false}
                 >
                     {/* Step 1: Sélection Catégorie */}
-                    {currentStep === 1 && (
+                    {currentStep === getStepId('category') && (
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>📂 Choisissez une catégorie</Text>
                             <Text style={styles.stepSubtitle}>
@@ -637,7 +735,7 @@ export default function PublishScreen() {
                     )}
 
                     {/* Step 2: Détails du Produit */}
-                    {currentStep === 2 && (
+                    {currentStep === getStepId('details') && (
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>📝 Détails de l'annonce</Text>
                             <Text style={styles.stepSubtitle}>
@@ -714,11 +812,153 @@ export default function PublishScreen() {
                                     </View>
                                 </View>
                             </View>
+
                         </View>
                     )}
 
-                    {/* Step 3: Caractéristiques spécifiques (seulement si présents) */}
-                    {currentStep === 3 && filteredAttributes.length > 0 && (
+                    {/* Step 3: Livraison */}
+                    {currentStep === getStepId('delivery') && (
+                        <View style={styles.stepContent}>
+                            <Text style={styles.stepTitle}>🚚 Livraison</Text>
+                            <Text style={styles.stepSubtitle}>
+                                Définissez si l'annonce est livrable et le point de récupération
+                            </Text>
+
+                            <View style={styles.deliveryCard}>
+                                <View style={styles.deliveryHeader}>
+                                    <View style={styles.deliveryHeaderText}>
+                                        <Text style={styles.deliveryTitle}>Livraison</Text>
+                                        <Text style={styles.deliverySubtitle}>
+                                            Indiquez si cette annonce est livrable
+                                        </Text>
+                                    </View>
+                                    <Switch
+                                        value={!!formData.isDeliverable}
+                                        onValueChange={(value) => handleInputChange('isDeliverable', value)}
+                                        trackColor={{
+                                            false: Colors.gray300,
+                                            true: Colors.primary + '80',
+                                        }}
+                                        thumbColor={formData.isDeliverable ? Colors.primary : Colors.gray400}
+                                    />
+                                </View>
+
+                                {formData.isDeliverable && (
+                                    <>
+                                        <View style={styles.inputGroup}>
+                                            <Text style={styles.inputLabel}>
+                                                Classe de poids <Text style={styles.required}>*</Text>
+                                            </Text>
+                                            <View style={styles.weightChips}>
+                                                {WEIGHT_CLASS_OPTIONS.map((option) => {
+                                                    const selectedClasses = Array.isArray(formData.weightClass)
+                                                        ? formData.weightClass
+                                                        : [];
+                                                    const isActive = selectedClasses.includes(option.value);
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={option.value}
+                                                            style={[
+                                                                styles.weightChip,
+                                                                isActive && styles.weightChipActive,
+                                                            ]}
+                                                            onPress={() => {
+                                                                const next = isActive
+                                                                    ? selectedClasses.filter((value: string) => value !== option.value)
+                                                                    : [...selectedClasses, option.value];
+                                                                handleInputChange('weightClass', next);
+                                                            }}
+                                                            activeOpacity={0.8}
+                                                        >
+                                                            <Text
+                                                                style={[
+                                                                    styles.weightChipText,
+                                                                    isActive && styles.weightChipTextActive,
+                                                                ]}
+                                                            >
+                                                                {option.label}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                            {errors.weightClass && <Text style={styles.errorText}>{errors.weightClass}</Text>}
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={styles.mapSelectButton}
+                                            onPress={() => setMapVisible(true)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <LinearGradient colors={Gradients.primary} style={styles.mapSelectGradient}>
+                                                <Ionicons name="map-outline" size={18} color={Colors.white} />
+                                                <Text style={styles.mapSelectText}>Choisir sur la carte</Text>
+                                            </LinearGradient>
+                                        </TouchableOpacity>
+                                        {errors.pickupLocation && (
+                                            <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                        )}
+
+                                        <View style={styles.inputGroup}>
+                                            <Text style={styles.inputLabel}>
+                                                Adresse de récupération <Text style={styles.required}>*</Text>
+                                            </Text>
+                                            <View style={[styles.inputContainer, errors.pickupAddress && styles.inputError]}>
+                                                <Ionicons name="location-outline" size={20} color={Colors.gray400} />
+                                                <TextInput
+                                                    style={styles.input}
+                                                    value={formData.pickupAddress}
+                                                    onChangeText={(value) => handleInputChange('pickupAddress', value)}
+                                                    placeholder="Ex: 12 rue des Fleurs, Abidjan"
+                                                    placeholderTextColor={Colors.gray400}
+                                                />
+                                            </View>
+                                            {errors.pickupAddress && <Text style={styles.errorText}>{errors.pickupAddress}</Text>}
+                                        </View>
+
+                                        <View style={styles.row}>
+                                            <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
+                                                <Text style={styles.inputLabel}>Latitude (optionnel)</Text>
+                                                <View style={styles.inputContainer}>
+                                                    <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
+                                                    <TextInput
+                                                        style={styles.input}
+                                                        value={formData.pickupLatitude}
+                                                        onChangeText={(value) => handleInputChange('pickupLatitude', value)}
+                                                        placeholder="5.3166"
+                                                        placeholderTextColor={Colors.gray400}
+                                                        keyboardType="decimal-pad"
+                                                    />
+                                                </View>
+                                            </View>
+
+                                            <View style={[styles.inputGroup, styles.flex1]}>
+                                                <Text style={styles.inputLabel}>Longitude (optionnel)</Text>
+                                                <View style={styles.inputContainer}>
+                                                    <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
+                                                    <TextInput
+                                                        style={styles.input}
+                                                        value={formData.pickupLongitude}
+                                                        onChangeText={(value) => handleInputChange('pickupLongitude', value)}
+                                                        placeholder="-4.0333"
+                                                        placeholderTextColor={Colors.gray400}
+                                                        keyboardType="decimal-pad"
+                                                    />
+                                                </View>
+                                            </View>
+                                        </View>
+
+                                        <Text style={styles.deliveryHint}>
+                                            Cette adresse servira de point de récupération pour le livreur.
+                                        </Text>
+                                    </>
+                                )}
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Step 4: Caractéristiques spécifiques (seulement si présents) */}
+                    {currentStep === getStepId('attributes') && filteredAttributes.length > 0 && (
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>🎯 Caractéristiques spécifiques</Text>
                             <Text style={styles.stepSubtitle}>
@@ -745,8 +985,8 @@ export default function PublishScreen() {
                         </View>
                     )}
 
-                    {/* Step 4 (ou 3): Photos */}
-                    {currentStep === (filteredAttributes.length > 0 ? 4 : 3) && (
+                    {/* Step 5: Photos */}
+                    {currentStep === getStepId('photos') && (
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>📸 Ajoutez des photos</Text>
                             <Text style={styles.stepSubtitle}>
@@ -838,12 +1078,19 @@ export default function PublishScreen() {
 
                     {currentStep < STEPS.length ? (
                         <TouchableOpacity
-                            style={[styles.nextButton, currentStep === 1 && !selectedLeafCategory && styles.disabledButton]}
+                            style={[
+                                styles.nextButton,
+                                currentStep === getStepId('category') && !selectedLeafCategory && styles.disabledButton,
+                            ]}
                             onPress={handleNext}
-                            disabled={currentStep === 1 && !selectedLeafCategory}
+                            disabled={currentStep === getStepId('category') && !selectedLeafCategory}
                         >
                             <LinearGradient
-                                colors={currentStep === 1 && !selectedLeafCategory ? [Colors.gray300, Colors.gray400] : Gradients.primary}
+                                colors={
+                                    currentStep === getStepId('category') && !selectedLeafCategory
+                                        ? [Colors.gray300, Colors.gray400]
+                                        : Gradients.primary
+                                }
                                 style={styles.nextButtonGradient}
                             >
                                 <Text style={styles.nextButtonText}>Suivant</Text>
@@ -870,6 +1117,13 @@ export default function PublishScreen() {
                     )}
                 </View>
             </KeyboardAvoidingView>
+
+            <MapPickerModal
+                visible={mapVisible}
+                initialLocation={initialMapLocation}
+                onClose={() => setMapVisible(false)}
+                onConfirm={handleMapConfirm}
+            />
 
             <Modal
                 visible={alertState.visible}
@@ -1178,6 +1432,83 @@ const styles = StyleSheet.create({
     },
     marginRight: {
         marginRight: 0,
+    },
+    deliveryCard: {
+        marginTop: Spacing.lg,
+        padding: Spacing.lg,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    deliveryHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    deliveryHeaderText: {
+        flex: 1,
+        marginRight: Spacing.md,
+    },
+    deliveryTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+    },
+    deliverySubtitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        marginTop: Spacing.xs,
+    },
+    deliveryHint: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray400,
+        marginTop: Spacing.xs,
+    },
+    mapSelectButton: {
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+        marginBottom: Spacing.md,
+        ...Shadows.sm,
+    },
+    mapSelectGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.sm,
+    },
+    mapSelectText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
+    },
+    weightChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    weightChip: {
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    weightChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    weightChipText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textPrimary,
+    },
+    weightChipTextActive: {
+        color: Colors.white,
     },
     dynamicAttributesSection: {
         marginTop: Spacing.lg,

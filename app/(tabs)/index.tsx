@@ -368,13 +368,21 @@ export default function HomeScreen() {
                         <Text style={styles.sectionTitle}>⚡ Actions rapides</Text>
                     </View>
                     {isLoading ? (
-                        <View style={styles.quickActionsContainer}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.quickActionsScroll}
+                        >
                             {[1, 2, 3, 4].map((i) => (
                                 <QuickActionSkeleton key={i} />
                             ))}
-                        </View>
+                        </ScrollView>
                     ) : (
-                        <View style={styles.quickActionsContainer}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.quickActionsScroll}
+                        >
                             {QUICK_ACTIONS.map((action) => (
                                 <TouchableOpacity
                                     key={action.id}
@@ -394,7 +402,7 @@ export default function HomeScreen() {
                                     <Text style={styles.actionTitle}>{action.title}</Text>
                                 </TouchableOpacity>
                             ))}
-                        </View>
+                        </ScrollView>
                     )}
                 </View>
 
@@ -414,12 +422,20 @@ export default function HomeScreen() {
                             contentContainerStyle={styles.horizontalScrollContainer}
                         >
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                         </ScrollView>
                     ) : error ? (
@@ -490,12 +506,20 @@ export default function HomeScreen() {
                     {isLoading ? (
                         <>
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                         </>
                     ) : error ? (
@@ -774,21 +798,20 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         color: Colors.accent,
     },
-    quickActionsContainer: {
+    quickActionsScroll: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
+        alignItems: 'center',
+        paddingVertical: Spacing.sm,
+        paddingRight: Spacing.xl,
         gap: Spacing.md,
     },
     actionCard: {
         alignItems: 'center',
-        flex: 1,
-        marginHorizontal: Spacing.xs / 2,
-        minWidth: 72,
+        width: 92,
     },
     actionGradient: {
-        width: 68,
-        height: 68,
+        width: 72,
+        height: 72,
         borderRadius: BorderRadius.xl,
         alignItems: 'center',
         justifyContent: 'center',

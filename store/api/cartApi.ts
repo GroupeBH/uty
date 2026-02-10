@@ -2,6 +2,7 @@ import { AddItemDto, Cart } from '@/types/cart';
 import { baseApi } from './baseApi';
 
 export const cartApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getCart: builder.query<Cart, void>({
             query: () => '/carts',

@@ -6,6 +6,7 @@ import { ApiResponse, Delivery, DeliveryStatus, Location, PaginatedResponse, Val
 import { baseApi } from './baseApi';
 
 export const deliveriesApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         /**
          * Liste des livraisons du livreur

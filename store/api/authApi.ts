@@ -43,6 +43,7 @@ export interface User {
 }
 
 export const authApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         requestOtp: builder.mutation<{ message: string; phone: string; status: string }, RequestOtpDto>({
             query: (dto) => ({

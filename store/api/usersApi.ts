@@ -2,6 +2,7 @@ import { User } from '@/types/user';
 import { baseApi } from './baseApi';
 
 export const usersApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getProfile: builder.query<User, void>({
             query: () => '/users/profile',
