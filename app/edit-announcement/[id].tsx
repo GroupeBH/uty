@@ -472,10 +472,7 @@ export default function EditAnnouncementScreen() {
             } else {
                 formDataToSend.append('pickupLocation', 'null');
             }
-            
-            if (Object.keys(dynamicAttributes).length > 0) {
-                formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
-            }
+            formDataToSend.append('attributes', JSON.stringify(dynamicAttributes || {}));
             
             if (imagesToDelete.length > 0) {
                 formDataToSend.append('imagesToDelete', JSON.stringify(imagesToDelete));

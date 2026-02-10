@@ -401,9 +401,9 @@ export default function ProductDetailScreen() {
                     </View>
 
                     
-                    {attributeEntries.length > 0 && (
-                        <View style={styles.section}>
-                            <Text style={styles.sectionTitle}>Caracteristiques</Text>
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Caract\u00e9ristiques</Text>
+                        {attributeEntries.length > 0 ? (
                             <View style={styles.attributesGrid}>
                                 {attributeEntries.map((item) => (
                                     <View key={item.key} style={styles.attributeCard}>
@@ -412,8 +412,19 @@ export default function ProductDetailScreen() {
                                     </View>
                                 ))}
                             </View>
-                        </View>
-                    )}
+                        ) : (
+                            <View style={styles.emptyAttributes}>
+                                <Ionicons
+                                    name="information-circle-outline"
+                                    size={20}
+                                    color={Colors.gray400}
+                                />
+                                <Text style={styles.emptyAttributesText}>
+                                    Aucune caract\u00e9ristique disponible
+                                </Text>
+                            </View>
+                        )}
+                    </View>
 
 {/* Informations vendeur */}
                     <View style={styles.sellerSection}>
@@ -936,6 +947,20 @@ const styles = StyleSheet.create({
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.bold,
         marginTop: Spacing.xs,
+    },
+    emptyAttributes: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+    },
+    emptyAttributesText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
     },
     description: {
         fontSize: Typography.fontSize.base,

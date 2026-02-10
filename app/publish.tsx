@@ -276,7 +276,7 @@ export default function PublishScreen() {
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour acc??der ?? vos photos.', variant: 'error' });
+            showAlert({ title: 'Permission refusée', message: 'Nous avons besoin de la permission pour accéder à vos photos.', variant: 'error' });
             return;
         }
 
@@ -296,7 +296,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer les images', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de préparer les images', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -306,7 +306,7 @@ export default function PublishScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour utiliser la cam??ra.', variant: 'error' });
+            showAlert({ title: 'Permission refusée', message: 'Nous avons besoin de la permission pour utiliser la caméra.', variant: 'error' });
             return;
         }
 
@@ -324,7 +324,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer la photo', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de préparer la photo', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -349,21 +349,21 @@ export default function PublishScreen() {
         const attributesStepId = getStepId('attributes');
         const photosStepId = getStepId('photos');
 
-        // Ã‰tape 1: CatÃ©gorie
+        // Étape 1: Catégorie
         if (step === categoryStepId) {
             if (!selectedLeafCategory) {
-                showAlert({ title: 'Erreur', message: 'Veuillez s??lectionner une cat??gorie', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Veuillez sélectionner une catégorie', variant: 'error' });
                 return false;
             }
         }
 
-        // Ã‰tape 2: DÃ©tails de base
+        // Étape 2: Détails de base
         if (step === detailsStepId) {
             if (!formData.name?.trim()) {
                 newErrors.name = 'Le nom est obligatoire';
             }
             if (!formData.price || parseFloat(formData.price) <= 0) {
-                newErrors.price = 'Le prix doit Ãªtre supÃ©rieur Ã  0';
+                newErrors.price = 'Le prix doit être supérieur à 0';
             }
 
             if (Object.keys(newErrors).length > 0) {
@@ -373,10 +373,10 @@ export default function PublishScreen() {
             }
         }
 
-        // Ã‰tape 3: Livraison
+        // Étape 3: Livraison
         if (step === deliveryStepId) {
             if (formData.isDeliverable && !formData.pickupAddress?.trim()) {
-                newErrors.pickupAddress = "L'adresse de rÃ©cupÃ©ration est obligatoire";
+                newErrors.pickupAddress = "L'adresse de récupération est obligatoire";
             }
             if (formData.isDeliverable && (!formData.weightClass || formData.weightClass.length === 0)) {
                 newErrors.weightClass = 'La classe de poids est obligatoire';
@@ -385,7 +385,7 @@ export default function PublishScreen() {
                 const latitude = parseCoordinate(formData.pickupLatitude);
                 const longitude = parseCoordinate(formData.pickupLongitude);
                 if (typeof latitude !== 'number' || typeof longitude !== 'number') {
-                    newErrors.pickupLocation = 'Veuillez sÃ©lectionner un point sur la carte';
+                    newErrors.pickupLocation = 'Veuillez sélectionner un point sur la carte';
                 }
             }
 
@@ -396,7 +396,7 @@ export default function PublishScreen() {
             }
         }
 
-        // Ã‰tape 4: Attributs dynamiques (seulement si prÃ©sents)
+        // Étape 4: Attributs dynamiques (seulement si présents)
         if (step === attributesStepId && filteredAttributes.length > 0) {
             for (const attr of filteredAttributes) {
                 if (attr.required && !dynamicAttributes[attr.name]) {
@@ -411,7 +411,7 @@ export default function PublishScreen() {
             }
         }
 
-        // Ã‰tape Photos
+        // Étape Photos
         if (step === photosStepId) {
             if (images.length === 0) {
                 showAlert({ title: 'Erreur', message: 'Veuillez ajouter au moins une photo', variant: 'error' });
@@ -442,7 +442,7 @@ export default function PublishScreen() {
         if (!validateStep(currentStep)) return;
 
         if (!selectedLeafCategory) {
-            showAlert({ title: 'Erreur', message: 'Veuillez s??lectionner une cat??gorie', variant: 'error' });
+            showAlert({ title: 'Erreur', message: 'Veuillez sélectionner une catégorie', variant: 'error' });
             return;
         }
 
@@ -482,7 +482,7 @@ export default function PublishScreen() {
                 if (typeof latitude !== 'number' || typeof longitude !== 'number') {
                     showAlert({
                         title: 'Erreur',
-                        message: 'Veuillez sÃ©lectionner un point de rÃ©cupÃ©ration sur la carte',
+                        message: 'Veuillez sélectionner un point de récupération sur la carte',
                         variant: 'error',
                     });
                     return;
@@ -492,13 +492,12 @@ export default function PublishScreen() {
                     coordinates: [longitude, latitude],
                     address: formData.pickupAddress?.trim(),
                 };
+
                 formDataToSend.append('pickupLocation', JSON.stringify(pickupLocation));
             }
-            
-            // Ajouter les attributs dynamiques si prÃ©sents
-            if (Object.keys(dynamicAttributes).length > 0) {
-                formDataToSend.append('attributes', JSON.stringify(dynamicAttributes));
-            }
+
+            // Toujours envoyer les attributs (m?me vides)
+            formDataToSend.append('attributes', JSON.stringify(dynamicAttributes || {}));
 
             console.log('Sending FormData with', images.length, 'images in files field');
             console.log('FormData contains:', {
@@ -509,8 +508,8 @@ export default function PublishScreen() {
             
             await createAnnouncement(formDataToSend as any).unwrap();
             showAlert({
-                title: 'Succ??s',
-                message: 'Votre annonce a ??t?? publi??e avec succ??s!',
+                title: 'Succ?s',
+                message: 'Votre annonce a ?t? publi?e avec succ?s!',
                 variant: 'success',
                 confirmText: 'OK',
                 onConfirm: () => router.push('/(tabs)'),
