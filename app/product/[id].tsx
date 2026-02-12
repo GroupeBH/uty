@@ -7,7 +7,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
-import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation } from '@/store/api/cartApi';
+import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -44,6 +44,7 @@ export default function ProductDetailScreen() {
     const { data: product, isLoading } = useGetAnnouncementByIdQuery(id!);
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
+    const [updateCartItem] = useUpdateCartItemMutation();
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -67,11 +68,14 @@ export default function ProductDetailScreen() {
         return productId === product?._id;
     });
     const inCartQuantity = cartItem?.quantity || 0;
+    const stock = typeof product?.quantity === 'number' ? product.quantity : undefined;
+    const remainingStock = stock === undefined ? undefined : Math.max(stock - inCartQuantity, 0);
+    const hasStockLeft = remainingStock === undefined ? true : remainingStock > 0;
     const infoChips = [
         product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
         product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
         product?.quantity ? { icon: 'layers-outline', label: `${product.quantity} en stock` } : null,
-    ].filter(Boolean) as Array<{ icon: string; label: string }>;
+    ].filter(Boolean) as { icon: string; label: string }[];
     const normalizeObject = (value: any): Record<string, any> => {
         if (!value) return {};
         if (value instanceof Map) {
@@ -128,18 +132,54 @@ export default function ProductDetailScreen() {
             .filter((item) => item.value && item.value.toString().length > 0);
     }, [product]);
 
+    React.useEffect(() => {
+        if (remainingStock === undefined) return;
+
+        setQuantity((prev) => {
+            if (remainingStock <= 0) return 1;
+            return Math.min(Math.max(prev, 1), remainingStock);
+        });
+    }, [remainingStock]);
+
     const handleAddToCart = async () => {
-        if (!requireAuth('Vous devez être connecté pour ajouter au panier')) {
+        if (!requireAuth('Vous devez etre connecte pour ajouter au panier')) {
             return;
         }
 
-        if (product) {
-            try {
-                await addToCart({ productId: product._id, quantity }).unwrap();
-                Alert.alert('✅ Succès', `${quantity} article(s) ajouté(s) au panier`);
-            } catch (error) {
-                Alert.alert('❌ Erreur', 'Échec de l\'ajout au panier');
+        if (!product) {
+            return;
+        }
+
+        if (!hasStockLeft) {
+            Alert.alert('Stock', 'Ce produit est deja au maximum dans votre panier.');
+            return;
+        }
+
+        const quantityToAdd = Math.max(1, quantity);
+        const mergedQuantity = inCartQuantity + quantityToAdd;
+        const nextQuantity = stock === undefined ? mergedQuantity : Math.min(mergedQuantity, stock);
+
+        try {
+            if (inCartQuantity > 0) {
+                try {
+                    await updateCartItem({ itemId: product._id, quantity: nextQuantity }).unwrap();
+                } catch {
+                    // Fallback for backends without PATCH /carts/items/:id
+                    await removeFromCart(product._id).unwrap();
+                    await addToCart({ productId: product._id, quantity: nextQuantity }).unwrap();
+                }
+            } else {
+                await addToCart({ productId: product._id, quantity: nextQuantity }).unwrap();
             }
+
+            const added = nextQuantity - inCartQuantity;
+            if (added <= 0) {
+                Alert.alert('Stock', 'Quantite maximale deja atteinte pour ce produit.');
+            } else {
+                Alert.alert('Succes', `${added} article(s) ajoute(s). Total dans le panier: ${nextQuantity}.`);
+            }
+        } catch {
+            Alert.alert('Erreur', "Echec de l'ajout au panier");
         }
     };
 
@@ -152,7 +192,7 @@ export default function ProductDetailScreen() {
             try {
                 await removeFromCart(product._id).unwrap();
                 Alert.alert('Info', 'Article retire du panier');
-            } catch (error) {
+            } catch {
                 Alert.alert('Erreur', 'Impossible de retirer l\'article');
             }
         }
@@ -207,7 +247,7 @@ export default function ProductDetailScreen() {
                     style={styles.backToHomeButton}
                     onPress={() => router.push('/')}
                 >
-                    <Text style={styles.backToHomeText}>Retour à l'accueil</Text>
+                    <Text style={styles.backToHomeText}>Retour à l&apos;accueil</Text>
                 </TouchableOpacity>
             </View>
         );
@@ -345,52 +385,96 @@ export default function ProductDetailScreen() {
                     )}
 
                     {/* Quantite */}
-                    <View style={styles.quantitySection}>
-                        <Text style={styles.sectionLabel}>Quantite</Text>
-                        <View style={styles.quantityControls}>
-                            <TouchableOpacity 
-                                style={styles.quantityButton}
-                                onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                            >
-                                <Ionicons name="remove" size={20} color={Colors.primary} />
-                            </TouchableOpacity>
-                            <Text style={styles.quantityText}>{quantity}</Text>
-                            <TouchableOpacity 
-                                style={styles.quantityButton}
-                                onPress={() => setQuantity(quantity + 1)}
-                            >
-                                <Ionicons name="add" size={20} color={Colors.primary} />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    {/* Panier */}
-                    <View style={styles.cartStatusCard}>
-                        <View>
-                            <Text style={styles.sectionLabel}>Panier</Text>
-                            <Text style={styles.cartStatusText}>
-                                {inCartQuantity > 0
-                                    ? `Deja dans le panier: ${inCartQuantity}`
-                                    : 'Pas encore dans le panier'}
-                            </Text>
-                        </View>
-                        <View style={styles.cartActions}>
-                            {inCartQuantity > 0 && (
+                    <View style={styles.purchasePanel}>
+                        <View style={styles.quantitySection}>
+                            <View>
+                                <Text style={styles.sectionLabel}>Quantite a ajouter</Text>
+                                <Text style={styles.quantityHint}>
+                                    {remainingStock === undefined
+                                        ? 'Stock non precise par le vendeur.'
+                                        : remainingStock > 0
+                                            ? `${remainingStock} article(s) encore disponible(s)`
+                                            : 'Stock maximal deja dans le panier'}
+                                </Text>
+                            </View>
+                            <View style={styles.quantityControls}>
                                 <TouchableOpacity
-                                    style={styles.cartRemoveButton}
-                                    onPress={handleRemoveFromCart}
+                                    style={[
+                                        styles.quantityButton,
+                                        quantity <= 1 && styles.quantityButtonDisabled,
+                                    ]}
+                                    onPress={() => setQuantity(Math.max(1, quantity - 1))}
+                                    disabled={quantity <= 1}
                                 >
-                                    <Ionicons name="trash-outline" size={16} color={Colors.error} />
-                                    <Text style={styles.cartRemoveText}>Retirer</Text>
+                                    <Ionicons
+                                        name="remove"
+                                        size={20}
+                                        color={quantity <= 1 ? Colors.gray300 : Colors.primary}
+                                    />
                                 </TouchableOpacity>
-                            )}
-                            <TouchableOpacity
-                                style={styles.cartViewButton}
-                                onPress={() => router.push('/(tabs)/cart')}
-                            >
-                                <Ionicons name="cart-outline" size={16} color={Colors.white} />
-                                <Text style={styles.cartViewText}>Voir panier</Text>
-                            </TouchableOpacity>
+                                <Text style={styles.quantityText}>{quantity}</Text>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.quantityButton,
+                                        (!hasStockLeft ||
+                                            (remainingStock !== undefined && quantity >= remainingStock)) &&
+                                            styles.quantityButtonDisabled,
+                                    ]}
+                                    onPress={() =>
+                                        setQuantity((prev) => {
+                                            const next = prev + 1;
+                                            if (remainingStock === undefined) return next;
+                                            return Math.min(next, Math.max(remainingStock, 1));
+                                        })
+                                    }
+                                    disabled={!hasStockLeft || (remainingStock !== undefined && quantity >= remainingStock)}
+                                >
+                                    <Ionicons
+                                        name="add"
+                                        size={20}
+                                        color={
+                                            !hasStockLeft || (remainingStock !== undefined && quantity >= remainingStock)
+                                                ? Colors.gray300
+                                                : Colors.primary
+                                        }
+                                    />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+
+                        {/* Panier */}
+                        <View style={styles.cartStatusCard}>
+                            <View style={styles.cartStatusCopy}>
+                                <Text style={styles.sectionLabel}>Panier</Text>
+                                <Text style={styles.cartStatusText}>
+                                    {inCartQuantity > 0
+                                        ? `Deja dans le panier: ${inCartQuantity}`
+                                        : 'Pas encore dans le panier'}
+                                </Text>
+                                <Text style={styles.cartStatusHint}>
+                                    {hasStockLeft
+                                        ? 'Ajoute en un clic, la quantite se cumule automatiquement.'
+                                        : 'Aucun ajout possible tant qu il n y a pas de stock.'}
+                                </Text>
+                            </View>
+                            <View style={styles.cartActions}>
+                                {inCartQuantity > 0 && (
+                                    <TouchableOpacity
+                                        style={styles.cartRemoveButton}
+                                        onPress={handleRemoveFromCart}
+                                    >
+                                        <Ionicons name="trash-outline" size={16} color={Colors.error} />
+                                        <Text style={styles.cartRemoveText}>Retirer</Text>
+                                    </TouchableOpacity>
+                                )}
+                                <TouchableOpacity
+                                    style={styles.cartViewButton}
+                                    onPress={() => router.push('/(tabs)/cart')}
+                                >
+                                    <Ionicons name="cart-outline" size={16} color={Colors.white} />
+                                    <Text style={styles.cartViewText}>Voir panier</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     </View>
 
@@ -484,30 +568,48 @@ export default function ProductDetailScreen() {
             {/* Bottom Action Bar */}
             <View style={styles.bottomBar}>
                 <SafeAreaView edges={['bottom']} style={styles.bottomBarContent}>
-                    <TouchableOpacity 
-                        style={styles.addToCartButton}
-                        onPress={handleAddToCart}
-                        activeOpacity={0.8}
-                    >
-                        <LinearGradient
-                            colors={Gradients.accent}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 1 }}
-                            style={styles.addToCartGradient}
+                    <View style={styles.bottomBarInfoRow}>
+                        <Text style={styles.bottomBarLabel}>Dans le panier</Text>
+                        <Text style={styles.bottomBarValue}>{inCartQuantity} article(s)</Text>
+                        <Text style={styles.bottomBarState}>
+                            {hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
+                        </Text>
+                    </View>
+
+                    <View style={styles.bottomBarButtons}>
+                        <TouchableOpacity
+                            style={[styles.addToCartButton, !hasStockLeft && styles.addToCartButtonDisabled]}
+                            onPress={handleAddToCart}
+                            activeOpacity={0.8}
+                            disabled={!hasStockLeft}
                         >
-                            <Ionicons name="cart" size={24} color={Colors.primary} />
-                            <Text style={styles.addToCartText}>
-                                {inCartQuantity > 0 ? 'Ajouter +1' : 'Ajouter au panier'}
-                            </Text>
-                        </LinearGradient>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                        style={styles.buyNowButton}
-                        onPress={() => Alert.alert('Acheter', 'Fonctionnalité à venir')}
-                    >
-                        <Text style={styles.buyNowText}>Acheter maintenant</Text>
-                    </TouchableOpacity>
+                            {hasStockLeft ? (
+                                <LinearGradient
+                                    colors={Gradients.accent}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.addToCartGradient}
+                                >
+                                    <Ionicons name="cart" size={20} color={Colors.primary} />
+                                    <Text style={styles.addToCartText}>Ajouter {quantity}</Text>
+                                </LinearGradient>
+                            ) : (
+                                <View style={[styles.addToCartGradient, styles.addToCartGradientDisabled]}>
+                                    <Ionicons name="alert-circle-outline" size={20} color={Colors.gray500} />
+                                    <Text style={[styles.addToCartText, styles.addToCartTextDisabled]}>
+                                        Stock atteint
+                                    </Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={styles.buyNowButton}
+                            onPress={() => Alert.alert('Acheter', 'Fonctionnalite a venir')}
+                        >
+                            <Text style={styles.buyNowText} numberOfLines={2}>Acheter maintenant</Text>
+                        </TouchableOpacity>
+                    </View>
                 </SafeAreaView>
             </View>
 
@@ -650,7 +752,7 @@ export default function ProductDetailScreen() {
                                 style={styles.submitReviewGradient}
                             >
                                 <Ionicons name="checkmark" size={20} color={Colors.primary} />
-                                <Text style={styles.submitReviewText}>Publier l'avis</Text>
+                                <Text style={styles.submitReviewText}>Publier l&apos;avis</Text>
                             </LinearGradient>
                         </TouchableOpacity>
                     </View>
@@ -825,32 +927,47 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
     },
+    purchasePanel: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+        padding: Spacing.lg,
+        marginBottom: Spacing.xl,
+        gap: Spacing.md,
+        ...Shadows.md,
+    },
     quantitySection: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        backgroundColor: Colors.white,
-        padding: Spacing.lg,
-        borderRadius: BorderRadius.xl,
-        marginBottom: Spacing.xl,
-        ...Shadows.sm,
+        gap: Spacing.md,
     },
-    cartStatusCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        backgroundColor: Colors.white,
-        padding: Spacing.lg,
-        borderRadius: BorderRadius.xl,
-        marginBottom: Spacing.xl,
-        borderWidth: 1,
-        borderColor: Colors.gray100,
-        ...Shadows.sm,
-    },
-    cartStatusText: {
+    quantityHint: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
         marginTop: Spacing.xs / 2,
+    },
+    cartStatusCard: {
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+    },
+    cartStatusCopy: {
+        marginBottom: Spacing.md,
+    },
+    cartStatusText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.semibold,
+        marginTop: Spacing.xs / 2,
+    },
+    cartStatusHint: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        marginTop: Spacing.xs,
     },
     cartActions: {
         flexDirection: 'row',
@@ -907,6 +1024,10 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: Colors.gray200,
     },
+    quantityButtonDisabled: {
+        backgroundColor: Colors.gray100,
+        borderColor: Colors.gray200,
+    },
     quantityText: {
         fontSize: Typography.fontSize.xl,
         fontWeight: Typography.fontWeight.bold,
@@ -916,6 +1037,12 @@ const styles = StyleSheet.create({
     },
     section: {
         marginBottom: Spacing.xl,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+        padding: Spacing.lg,
+        ...Shadows.sm,
     },
     sectionTitle: {
         fontSize: Typography.fontSize.xl,
@@ -966,9 +1093,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.base,
         color: Colors.textSecondary,
         lineHeight: 24,
-        backgroundColor: Colors.white,
-        padding: Spacing.lg,
-        borderRadius: BorderRadius.xl,
     },
     sellerSection: {
         marginBottom: Spacing.xl,
@@ -1038,40 +1162,81 @@ const styles = StyleSheet.create({
         fontStyle: 'italic',
     },
     bottomSpacer: {
-        height: 120,
+        height: 148,
     },
     bottomBar: {
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.white + 'F5',
         borderTopWidth: 1,
         borderTopColor: Colors.gray100,
         ...Shadows.xl,
     },
     bottomBarContent: {
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        gap: Spacing.sm,
+    },
+    bottomBarInfoRow: {
         flexDirection: 'row',
-        padding: Spacing.lg,
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.xs,
+    },
+    bottomBarLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+    },
+    bottomBarValue: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    bottomBarState: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
+        backgroundColor: Colors.primary + '12',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 2,
+    },
+    bottomBarButtons: {
+        flexDirection: 'row',
+        alignItems: 'center',
         gap: Spacing.md,
+        paddingBottom: Spacing.xs,
     },
     addToCartButton: {
-        flex: 2,
+        flex: 1,
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
+    },
+    addToCartButtonDisabled: {
+        opacity: 1,
     },
     addToCartGradient: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
         gap: Spacing.sm,
+    },
+    addToCartGradientDisabled: {
+        backgroundColor: Colors.gray100,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     addToCartText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
+    },
+    addToCartTextDisabled: {
+        color: Colors.gray500,
     },
     buyNowButton: {
         flex: 1,
@@ -1079,12 +1244,13 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
     },
     buyNowText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.white,
+        textAlign: 'center',
     },
     errorContainer: {
         flex: 1,

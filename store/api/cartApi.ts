@@ -23,6 +23,22 @@ export const cartApi = baseApi.injectEndpoints({
             }),
             invalidatesTags: ['Cart'],
         }),
+        updateCartItem: builder.mutation<Cart, { itemId: string; quantity: number }>({
+            query: ({ itemId, quantity }) => ({
+                url: `/carts/items/${itemId}`,
+                method: 'PATCH',
+                body: { quantity },
+            }),
+            invalidatesTags: ['Cart'],
+        }),
+        setDeliveryLocation: builder.mutation<Cart, { coordinates: number[] }>({
+            query: (body) => ({
+                url: '/carts/delivery-location',
+                method: 'PATCH',
+                body,
+            }),
+            invalidatesTags: ['Cart'],
+        }),
         clearCart: builder.mutation<Cart, void>({
             query: () => ({
                 url: '/carts',
@@ -37,5 +53,7 @@ export const {
     useGetCartQuery,
     useAddToCartMutation,
     useRemoveFromCartMutation,
+    useUpdateCartItemMutation,
+    useSetDeliveryLocationMutation,
     useClearCartMutation,
 } = cartApi;

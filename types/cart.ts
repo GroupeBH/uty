@@ -12,6 +12,9 @@ export interface Cart {
     userId: string;
     status: 'in progress' | 'ordered';
     products: CartProduct[];
+    deliveryLocation?: { type: string; coordinates: number[] };
+    deliveryCost?: number;
+    deliveryMode?: 'pending' | 'none' | 'walking' | 'vehicle';
     createdAt: string;
     updatedAt: string;
 }
