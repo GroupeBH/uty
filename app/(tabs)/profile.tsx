@@ -88,6 +88,13 @@ export default function ProfileScreen() {
                     onPress: () => router.push('/edit-profile'),
                 },
                 {
+                    icon: 'storefront-outline',
+                    label: 'Ma boutique',
+                    subtitle: 'Gerer boutique et KYC',
+                    gradient: Gradients.accent,
+                    onPress: () => router.push('/my-shop'),
+                },
+                {
                     icon: 'location-outline',
                     label: 'Adresses',
                     subtitle: 'Gérer mes adresses',

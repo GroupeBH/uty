@@ -1,4 +1,4 @@
-import { AddItemDto, Cart } from '@/types/cart';
+import { AddItemDto, Cart, CheckoutCartDto } from '@/types/cart';
 import { baseApi } from './baseApi';
 
 export const cartApi = baseApi.injectEndpoints({
@@ -25,11 +25,19 @@ export const cartApi = baseApi.injectEndpoints({
         }),
         updateCartItem: builder.mutation<Cart, { itemId: string; quantity: number }>({
             query: ({ itemId, quantity }) => ({
-                url: `/carts/items/${itemId}`,
+                url: `/carts/items/${itemId}/quantity`,
                 method: 'PATCH',
                 body: { quantity },
             }),
             invalidatesTags: ['Cart'],
+        }),
+        checkoutCart: builder.mutation<any[], CheckoutCartDto | void>({
+            query: (body) => ({
+                url: '/carts/checkout',
+                method: 'POST',
+                body: body || {},
+            }),
+            invalidatesTags: ['Cart', 'Order'],
         }),
         setDeliveryLocation: builder.mutation<Cart, { coordinates: number[] }>({
             query: (body) => ({
@@ -54,6 +62,7 @@ export const {
     useAddToCartMutation,
     useRemoveFromCartMutation,
     useUpdateCartItemMutation,
+    useCheckoutCartMutation,
     useSetDeliveryLocationMutation,
     useClearCartMutation,
 } = cartApi;

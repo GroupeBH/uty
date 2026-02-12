@@ -4,6 +4,7 @@
  */
 
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
@@ -13,11 +14,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
-    Alert,
     Animated,
     Dimensions,
     Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -60,6 +62,17 @@ export default function ProductDetailScreen() {
     
     // Contact form states
     const [message, setMessage] = useState('');
+    const [alertState, setAlertState] = useState<{
+        visible: boolean;
+        title: string;
+        message: string;
+        type: 'success' | 'error' | 'info' | 'warning';
+    }>({
+        visible: false,
+        title: '',
+        message: '',
+        type: 'info',
+    });
     
     const scrollY = useRef(new Animated.Value(0)).current;
     const cartItem = cart?.products?.find((item) => {
@@ -71,6 +84,18 @@ export default function ProductDetailScreen() {
     const stock = typeof product?.quantity === 'number' ? product.quantity : undefined;
     const remainingStock = stock === undefined ? undefined : Math.max(stock - inCartQuantity, 0);
     const hasStockLeft = remainingStock === undefined ? true : remainingStock > 0;
+    const showAlert = (
+        title: string,
+        message: string,
+        type: 'success' | 'error' | 'info' | 'warning' = 'info',
+    ) => {
+        setAlertState({
+            visible: true,
+            title,
+            message,
+            type,
+        });
+    };
     const infoChips = [
         product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
         product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
@@ -151,7 +176,7 @@ export default function ProductDetailScreen() {
         }
 
         if (!hasStockLeft) {
-            Alert.alert('Stock', 'Ce produit est deja au maximum dans votre panier.');
+            showAlert('Stock', 'Ce produit est deja au maximum dans votre panier.', 'warning');
             return;
         }
 
@@ -174,12 +199,12 @@ export default function ProductDetailScreen() {
 
             const added = nextQuantity - inCartQuantity;
             if (added <= 0) {
-                Alert.alert('Stock', 'Quantite maximale deja atteinte pour ce produit.');
+                showAlert('Stock', 'Quantite maximale deja atteinte pour ce produit.', 'warning');
             } else {
-                Alert.alert('Succes', `${added} article(s) ajoute(s). Total dans le panier: ${nextQuantity}.`);
+                showAlert('Succes', `${added} article(s) ajoute(s). Total dans le panier: ${nextQuantity}.`, 'success');
             }
         } catch {
-            Alert.alert('Erreur', "Echec de l'ajout au panier");
+            showAlert('Erreur', "Echec de l'ajout au panier", 'error');
         }
     };
 
@@ -191,9 +216,9 @@ export default function ProductDetailScreen() {
         if (product) {
             try {
                 await removeFromCart(product._id).unwrap();
-                Alert.alert('Info', 'Article retire du panier');
+                showAlert('Info', 'Article retire du panier', 'info');
             } catch {
-                Alert.alert('Erreur', 'Impossible de retirer l\'article');
+                showAlert('Erreur', 'Impossible de retirer l\'article', 'error');
             }
         }
     };
@@ -204,11 +229,11 @@ export default function ProductDetailScreen() {
         }
 
         if (!message.trim()) {
-            Alert.alert('Erreur', 'Veuillez entrer un message');
+            showAlert('Erreur', 'Veuillez entrer un message', 'warning');
             return;
         }
         // TODO: Implémenter l'envoi du message
-        Alert.alert('Message envoyé', 'Le vendeur a reçu votre message');
+        showAlert('Message envoye', 'Le vendeur a recu votre message', 'success');
         setShowContactModal(false);
         setMessage('');
     };
@@ -220,11 +245,11 @@ export default function ProductDetailScreen() {
         }
 
         if (!reviewText.trim()) {
-            Alert.alert('Erreur', 'Veuillez entrer un commentaire');
+            showAlert('Erreur', 'Veuillez entrer un commentaire', 'warning');
             return;
         }
         // TODO: Implémenter l'envoi de l'avis
-        Alert.alert('Avis envoyé', 'Merci pour votre avis !');
+        showAlert('Avis envoye', 'Merci pour votre avis !', 'success');
         setShowReviewModal(false);
         setReviewText('');
         setRating(5);
@@ -605,7 +630,7 @@ export default function ProductDetailScreen() {
 
                         <TouchableOpacity
                             style={styles.buyNowButton}
-                            onPress={() => Alert.alert('Acheter', 'Fonctionnalite a venir')}
+                            onPress={() => showAlert('Acheter', 'Fonctionnalite a venir', 'info')}
                         >
                             <Text style={styles.buyNowText} numberOfLines={2}>Acheter maintenant</Text>
                         </TouchableOpacity>
@@ -619,6 +644,7 @@ export default function ProductDetailScreen() {
                 transparent={false}
                 visible={showImageModal}
                 onRequestClose={() => setShowImageModal(false)}
+                statusBarTranslucent
             >
                 <View style={styles.modalContainer}>
                     <SafeAreaView style={styles.modalContent}>
@@ -661,40 +687,49 @@ export default function ProductDetailScreen() {
                 transparent={true}
                 visible={showContactModal}
                 onRequestClose={() => setShowContactModal(false)}
+                statusBarTranslucent
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.contactModal}>
-                        <View style={styles.contactModalHeader}>
-                            <Text style={styles.contactModalTitle}>Contacter le vendeur</Text>
-                            <TouchableOpacity onPress={() => setShowContactModal(false)}>
-                                <Ionicons name="close" size={24} color={Colors.textPrimary} />
+                    <KeyboardAvoidingView
+                        style={styles.sheetKeyboardWrap}
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    >
+                        <View style={styles.contactModal}>
+                            <View style={styles.contactModalHeader}>
+                                <Text style={styles.contactModalTitle}>Contacter le vendeur</Text>
+                                <TouchableOpacity
+                                    style={styles.sheetCloseButton}
+                                    onPress={() => setShowContactModal(false)}
+                                >
+                                    <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                                </TouchableOpacity>
+                            </View>
+                            
+                            <TextInput
+                                style={styles.messageInput}
+                                placeholder="Votre message..."
+                                placeholderTextColor={Colors.gray400}
+                                multiline
+                                numberOfLines={6}
+                                value={message}
+                                onChangeText={setMessage}
+                                textAlignVertical="top"
+                            />
+                            
+                            <TouchableOpacity 
+                                style={styles.sendMessageButton}
+                                onPress={handleContactSeller}
+                            >
+                                <LinearGradient
+                                    colors={Gradients.primary}
+                                    style={styles.sendMessageGradient}
+                                >
+                                    <Ionicons name="send" size={20} color={Colors.white} />
+                                    <Text style={styles.sendMessageText}>Envoyer le message</Text>
+                                </LinearGradient>
                             </TouchableOpacity>
                         </View>
-                        
-                        <TextInput
-                            style={styles.messageInput}
-                            placeholder="Votre message..."
-                            placeholderTextColor={Colors.gray400}
-                            multiline
-                            numberOfLines={6}
-                            value={message}
-                            onChangeText={setMessage}
-                            textAlignVertical="top"
-                        />
-                        
-                        <TouchableOpacity 
-                            style={styles.sendMessageButton}
-                            onPress={handleContactSeller}
-                        >
-                            <LinearGradient
-                                colors={Gradients.primary}
-                                style={styles.sendMessageGradient}
-                            >
-                                <Ionicons name="send" size={20} color={Colors.white} />
-                                <Text style={styles.sendMessageText}>Envoyer le message</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
 
@@ -704,60 +739,84 @@ export default function ProductDetailScreen() {
                 transparent={true}
                 visible={showReviewModal}
                 onRequestClose={() => setShowReviewModal(false)}
+                statusBarTranslucent
             >
                 <View style={styles.modalOverlay}>
-                    <View style={styles.reviewModal}>
-                        <View style={styles.reviewModalHeader}>
-                            <Text style={styles.reviewModalTitle}>Donner votre avis</Text>
-                            <TouchableOpacity onPress={() => setShowReviewModal(false)}>
-                                <Ionicons name="close" size={24} color={Colors.textPrimary} />
-                            </TouchableOpacity>
-                        </View>
-                        
-                        <Text style={styles.ratingLabel}>Note</Text>
-                        <View style={styles.starsContainer}>
-                            {[1, 2, 3, 4, 5].map((star) => (
-                                <TouchableOpacity
-                                    key={star}
-                                    onPress={() => setRating(star)}
-                                >
-                                    <Ionicons
-                                        name={star <= rating ? "star" : "star-outline"}
-                                        size={40}
-                                        color={star <= rating ? Colors.accent : Colors.gray300}
-                                        style={styles.starIcon}
-                                    />
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                        
-                        <Text style={styles.reviewLabel}>Votre commentaire</Text>
-                        <TextInput
-                            style={styles.reviewInput}
-                            placeholder="Partagez votre expérience..."
-                            placeholderTextColor={Colors.gray400}
-                            multiline
-                            numberOfLines={6}
-                            value={reviewText}
-                            onChangeText={setReviewText}
-                            textAlignVertical="top"
-                        />
-                        
-                        <TouchableOpacity 
-                            style={styles.submitReviewButton}
-                            onPress={handleSubmitReview}
+                    <KeyboardAvoidingView
+                        style={styles.sheetKeyboardWrap}
+                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                    >
+                        <ScrollView
+                            style={styles.sheetScroll}
+                            contentContainerStyle={styles.sheetScrollContent}
+                            keyboardShouldPersistTaps="handled"
+                            showsVerticalScrollIndicator={false}
                         >
-                            <LinearGradient
-                                colors={Gradients.accent}
-                                style={styles.submitReviewGradient}
-                            >
-                                <Ionicons name="checkmark" size={20} color={Colors.primary} />
-                                <Text style={styles.submitReviewText}>Publier l&apos;avis</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
+                            <View style={styles.reviewModal}>
+                                <View style={styles.reviewModalHeader}>
+                                    <Text style={styles.reviewModalTitle}>Donner votre avis</Text>
+                                    <TouchableOpacity
+                                        style={styles.sheetCloseButton}
+                                        onPress={() => setShowReviewModal(false)}
+                                    >
+                                        <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                                    </TouchableOpacity>
+                                </View>
+                                
+                                <Text style={styles.ratingLabel}>Note</Text>
+                                <View style={styles.starsContainer}>
+                                    {[1, 2, 3, 4, 5].map((star) => (
+                                        <TouchableOpacity
+                                            key={star}
+                                            onPress={() => setRating(star)}
+                                        >
+                                            <Ionicons
+                                                name={star <= rating ? "star" : "star-outline"}
+                                                size={40}
+                                                color={star <= rating ? Colors.accent : Colors.gray300}
+                                                style={styles.starIcon}
+                                            />
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                                
+                                <Text style={styles.reviewLabel}>Votre commentaire</Text>
+                                <TextInput
+                                    style={styles.reviewInput}
+                                    placeholder="Partagez votre experience..."
+                                    placeholderTextColor={Colors.gray400}
+                                    multiline
+                                    numberOfLines={6}
+                                    value={reviewText}
+                                    onChangeText={setReviewText}
+                                    textAlignVertical="top"
+                                />
+                                
+                                <TouchableOpacity 
+                                    style={styles.submitReviewButton}
+                                    onPress={handleSubmitReview}
+                                >
+                                    <LinearGradient
+                                        colors={Gradients.accent}
+                                        style={styles.submitReviewGradient}
+                                    >
+                                        <Ionicons name="checkmark" size={20} color={Colors.primary} />
+                                        <Text style={styles.submitReviewText}>Publier l&apos;avis</Text>
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
+                    </KeyboardAvoidingView>
                 </View>
             </Modal>
+            <CustomAlert
+                visible={alertState.visible}
+                title={alertState.title}
+                message={alertState.message}
+                type={alertState.type}
+                onConfirm={() => setAlertState((prev) => ({ ...prev, visible: false }))}
+                confirmText="OK"
+            />
         </View>
     );
 }
@@ -1162,7 +1221,7 @@ const styles = StyleSheet.create({
         fontStyle: 'italic',
     },
     bottomSpacer: {
-        height: 148,
+        height: 164,
     },
     bottomBar: {
         position: 'absolute',
@@ -1177,6 +1236,7 @@ const styles = StyleSheet.create({
     bottomBarContent: {
         paddingHorizontal: Spacing.lg,
         paddingTop: Spacing.sm,
+        paddingBottom: Spacing.sm,
         gap: Spacing.sm,
     },
     bottomBarInfoRow: {
@@ -1184,6 +1244,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.xs,
+        gap: Spacing.xs,
     },
     bottomBarLabel: {
         fontSize: Typography.fontSize.xs,
@@ -1206,11 +1267,12 @@ const styles = StyleSheet.create({
     bottomBarButtons: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.md,
+        gap: Spacing.sm,
         paddingBottom: Spacing.xs,
     },
     addToCartButton: {
-        flex: 1,
+        flex: 1.15,
+        minWidth: 180,
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
@@ -1240,6 +1302,7 @@ const styles = StyleSheet.create({
     },
     buyNowButton: {
         flex: 1,
+        minWidth: 148,
         backgroundColor: Colors.primary,
         borderRadius: BorderRadius.xl,
         alignItems: 'center',
@@ -1251,6 +1314,8 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         color: Colors.white,
         textAlign: 'center',
+        lineHeight: 20,
+        includeFontPadding: false,
     },
     errorContainer: {
         flex: 1,
@@ -1310,12 +1375,34 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0, 0, 0, 0.5)',
         justifyContent: 'flex-end',
+        paddingHorizontal: Spacing.sm,
+        paddingBottom: Spacing.sm,
+    },
+    sheetKeyboardWrap: {
+        width: '100%',
+    },
+    sheetScroll: {
+        width: '100%',
+        maxHeight: '88%',
+    },
+    sheetScrollContent: {
+        flexGrow: 1,
+        justifyContent: 'flex-end',
+    },
+    sheetCloseButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: Colors.gray100,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     contactModal: {
         backgroundColor: Colors.white,
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
         padding: Spacing.xl,
+        maxHeight: '88%',
     },
     contactModalHeader: {
         flexDirection: 'row',
@@ -1361,6 +1448,7 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
         padding: Spacing.xl,
+        maxHeight: '88%',
     },
     reviewModalHeader: {
         flexDirection: 'row',
@@ -1423,3 +1511,4 @@ const styles = StyleSheet.create({
         color: Colors.primary,
     },
 });
+

@@ -27,3 +27,7 @@ export interface AddItemDto {
 export interface UpdateCartItemDto {
     quantity: number;
 }
+
+export interface CheckoutCartDto {
+    deliveryAddress?: string;
+}
