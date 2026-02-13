@@ -1,8 +1,9 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetOrderQuery, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
+import { useGetOrderQuery, useRequestDeliveryMutation, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
 import {
     OrderStatusValue,
     getNextSellerStatuses,
@@ -16,21 +17,22 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Alert,
     Image,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
+    TextInput,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { deliveryStorage } from '@/utils/deliveryStorage';
 
 const STATUS_ACTION_LABELS: Record<OrderStatusValue, string> = {
     pending: 'Mettre en attente',
     confirmed: 'Confirmer',
-    shipped: 'Marquer expediee',
-    delivered: 'Marquer livree',
+    shipped: 'Expedier',
+    delivered: 'Livrer',
     cancelled: 'Annuler la commande',
 };
 
@@ -55,7 +57,31 @@ export default function OrderDetailScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const [updateOrderStatus, { isLoading: isUpdatingStatus }] = useUpdateOrderStatusMutation();
+    const [requestDelivery, { isLoading: isRequestingDelivery }] = useRequestDeliveryMutation();
     const { data: order, isLoading, refetch } = useGetOrderQuery(id || '', { skip: !id });
+    const [deliveryId, setDeliveryId] = React.useState<string | null>(null);
+    const [deliveryIdInput, setDeliveryIdInput] = React.useState('');
+    const [pickupLocationInput, setPickupLocationInput] = React.useState('');
+    const [deliveryLocationInput, setDeliveryLocationInput] = React.useState('');
+    const [alertState, setAlertState] = React.useState<{
+        visible: boolean;
+        title: string;
+        message: string;
+        type: 'success' | 'error' | 'info' | 'warning';
+        confirmText?: string;
+        cancelText?: string;
+        showCancel?: boolean;
+        onConfirm?: () => void;
+        onCancel?: () => void;
+    }>({
+        visible: false,
+        title: '',
+        message: '',
+        type: 'info',
+        confirmText: 'OK',
+        cancelText: 'Annuler',
+        showCancel: false,
+    });
 
     const currentUserId = user?._id || '';
     const buyerId = getOrderPartyId(order?.userId);
@@ -68,33 +94,161 @@ export default function OrderDetailScreen() {
         [isSeller, order],
     );
 
+    React.useEffect(() => {
+        const orderId = order?._id;
+        if (!orderId) return;
+
+        let cancelled = false;
+
+        (async () => {
+            const savedDeliveryId = await deliveryStorage.getDeliveryIdForOrder(orderId);
+            if (!cancelled && savedDeliveryId) {
+                setDeliveryId(savedDeliveryId);
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [order?._id]);
+
+    React.useEffect(() => {
+        if (!order) return;
+        if (!deliveryLocationInput.trim() && order.deliveryAddress?.trim()) {
+            setDeliveryLocationInput(order.deliveryAddress.trim());
+        }
+    }, [deliveryLocationInput, order]);
+
+    const closeAlert = React.useCallback(() => {
+        setAlertState((prev) => ({
+            ...prev,
+            visible: false,
+            onConfirm: undefined,
+            onCancel: undefined,
+        }));
+    }, []);
+
+    const showAlert = React.useCallback(
+        (payload: {
+            title: string;
+            message: string;
+            type?: 'success' | 'error' | 'info' | 'warning';
+            confirmText?: string;
+            cancelText?: string;
+            showCancel?: boolean;
+            onConfirm?: () => void;
+            onCancel?: () => void;
+        }) => {
+            setAlertState({
+                visible: true,
+                title: payload.title,
+                message: payload.message,
+                type: payload.type || 'info',
+                confirmText: payload.confirmText || 'OK',
+                cancelText: payload.cancelText || 'Annuler',
+                showCancel: payload.showCancel || false,
+                onConfirm: payload.onConfirm,
+                onCancel: payload.onCancel,
+            });
+        },
+        [],
+    );
+
     const changeStatus = async (nextStatus: OrderStatusValue) => {
         if (!order?._id) return;
 
-        Alert.alert(
-            'Confirmer le changement',
-            `Voulez-vous passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`,
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Confirmer',
-                    onPress: async () => {
-                        try {
-                            await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
-                            await refetch();
-                        } catch (error: any) {
-                            const apiMessage =
-                                (Array.isArray(error?.data?.message) && error.data.message[0]) ||
-                                error?.data?.message ||
-                                error?.data?.error ||
-                                error?.message ||
-                                'Impossible de mettre a jour le statut.';
-                            Alert.alert('Erreur', String(apiMessage));
-                        }
-                    },
+        showAlert({
+            title: 'Confirmer le changement',
+            message: `Passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`,
+            type: 'warning',
+            showCancel: true,
+            confirmText: 'Confirmer',
+            cancelText: 'Annuler',
+            onConfirm: () => {
+                void (async () => {
+                    try {
+                        await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
+                        await refetch();
+                        showAlert({
+                            title: 'Statut mis a jour',
+                            message: 'Le statut de la commande a ete modifie avec succes.',
+                            type: 'success',
+                        });
+                    } catch (error: any) {
+                        const apiMessage =
+                            (Array.isArray(error?.data?.message) && error.data.message[0]) ||
+                            error?.data?.message ||
+                            error?.data?.error ||
+                            error?.message ||
+                            'Impossible de mettre a jour le statut.';
+                        showAlert({
+                            title: 'Erreur',
+                            message: String(apiMessage),
+                            type: 'error',
+                        });
+                    }
+                })();
+            },
+        });
+    };
+
+    const onRequestDelivery = async () => {
+        if (!order?._id) return;
+
+        try {
+            const payload = {
+                pickupLocation: pickupLocationInput.trim() || undefined,
+                deliveryLocation: deliveryLocationInput.trim() || undefined,
+            };
+            const createdDelivery = await requestDelivery({ id: order._id, data: payload }).unwrap();
+            const createdDeliveryId = (createdDelivery as any)?._id?.toString?.() || (createdDelivery as any)?._id;
+
+            if (createdDeliveryId) {
+                setDeliveryId(String(createdDeliveryId));
+                await deliveryStorage.setDeliveryIdForOrder(order._id, String(createdDeliveryId));
+            }
+
+            showAlert({
+                title: 'Livraison demandee',
+                message: 'La demande est envoyee aux livreurs disponibles.',
+                type: 'success',
+                showCancel: Boolean(createdDeliveryId),
+                confirmText: createdDeliveryId ? 'Suivre' : 'OK',
+                cancelText: 'Fermer',
+                onConfirm: () => {
+                    if (createdDeliveryId) {
+                        router.push(`/delivery/${createdDeliveryId}` as any);
+                    }
                 },
-            ],
-        );
+            });
+        } catch (error: any) {
+            const apiMessage =
+                (Array.isArray(error?.data?.message) && error.data.message[0]) ||
+                error?.data?.message ||
+                error?.data?.error ||
+                error?.message ||
+                'Impossible de demander la livraison.';
+            showAlert({
+                title: 'Erreur',
+                message: String(apiMessage),
+                type: 'error',
+            });
+        }
+    };
+
+    const onOpenDeliveryById = async () => {
+        const candidate = deliveryIdInput.trim();
+        if (!candidate || !order?._id) {
+            showAlert({
+                title: 'ID requis',
+                message: 'Veuillez renseigner un ID de livraison valide.',
+                type: 'warning',
+            });
+            return;
+        }
+        setDeliveryId(candidate);
+        await deliveryStorage.setDeliveryIdForOrder(order._id, candidate);
+        router.push(`/delivery/${candidate}` as any);
     };
 
     if (isLoading) {
@@ -206,6 +360,83 @@ export default function OrderDetailScreen() {
                     })}
                 </View>
 
+                <View style={styles.card}>
+                    <Text style={styles.cardTitle}>Livraison</Text>
+                    {deliveryId ? (
+                        <>
+                            <Text style={styles.mutedText}>
+                                Livraison liee a cette commande: #{deliveryId.slice(-8).toUpperCase()}
+                            </Text>
+                            <TouchableOpacity
+                                style={styles.deliveryTrackButton}
+                                onPress={() => router.push(`/delivery/${deliveryId}` as any)}
+                            >
+                                <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                                <Text style={styles.deliveryTrackButtonText}>Suivre la livraison</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        <>
+                            {isSeller ? (
+                                order.status === 'confirmed' ? (
+                                    <>
+                                        <Text style={styles.mutedText}>
+                                            Cette commande est confirmee. Vous pouvez maintenant demander un livreur.
+                                        </Text>
+                                        <Text style={styles.fieldLabel}>Lieu de recuperation (optionnel)</Text>
+                                        <TextInput
+                                            value={pickupLocationInput}
+                                            onChangeText={setPickupLocationInput}
+                                            placeholder="Adresse ou point de pickup"
+                                            style={styles.fieldInput}
+                                        />
+                                        <Text style={styles.fieldLabel}>Lieu de livraison (optionnel)</Text>
+                                        <TextInput
+                                            value={deliveryLocationInput}
+                                            onChangeText={setDeliveryLocationInput}
+                                            placeholder="Adresse de livraison"
+                                            style={styles.fieldInput}
+                                        />
+                                        <TouchableOpacity
+                                            style={[styles.deliveryRequestButton, isRequestingDelivery && styles.disabledButton]}
+                                            onPress={onRequestDelivery}
+                                            disabled={isRequestingDelivery}
+                                        >
+                                            <Text style={styles.deliveryRequestButtonText}>
+                                                {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </>
+                                ) : (
+                                    <Text style={styles.mutedText}>
+                                        Le vendeur peut demander la livraison uniquement apres confirmation de la commande.
+                                    </Text>
+                                )
+                            ) : (
+                                <Text style={styles.mutedText}>
+                                    Le suivi de livraison apparaitra ici une fois la demande lancee par le vendeur.
+                                </Text>
+                            )}
+                            <Text style={styles.fieldLabel}>ID de livraison (si recu par notification)</Text>
+                            <TextInput
+                                value={deliveryIdInput}
+                                onChangeText={setDeliveryIdInput}
+                                placeholder="Collez l ID de livraison"
+                                style={styles.fieldInput}
+                                autoCapitalize="none"
+                            />
+                            <TouchableOpacity
+                                style={[styles.deliveryTrackButton, !deliveryIdInput.trim() && styles.disabledButton]}
+                                onPress={onOpenDeliveryById}
+                                disabled={!deliveryIdInput.trim()}
+                            >
+                                <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                                <Text style={styles.deliveryTrackButtonText}>Ouvrir le suivi</Text>
+                            </TouchableOpacity>
+                        </>
+                    )}
+                </View>
+
                 {isSeller ? (
                     <View style={styles.card}>
                         <Text style={styles.cardTitle}>Actions vendeur</Text>
@@ -252,6 +483,26 @@ export default function OrderDetailScreen() {
                     </View>
                 ) : null}
             </ScrollView>
+
+            <CustomAlert
+                visible={alertState.visible}
+                title={alertState.title}
+                message={alertState.message}
+                type={alertState.type}
+                confirmText={alertState.confirmText}
+                cancelText={alertState.cancelText}
+                showCancel={alertState.showCancel}
+                onCancel={() => {
+                    const callback = alertState.onCancel;
+                    closeAlert();
+                    callback?.();
+                }}
+                onConfirm={() => {
+                    const callback = alertState.onConfirm;
+                    closeAlert();
+                    callback?.();
+                }}
+            />
         </SafeAreaView>
     );
 }
@@ -324,6 +575,23 @@ const styles = StyleSheet.create({
     mutedText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray600,
+    },
+    fieldLabel: {
+        marginTop: Spacing.sm,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    fieldInput: {
+        marginTop: Spacing.xs,
+        borderWidth: 1,
+        borderColor: Colors.border,
+        borderRadius: BorderRadius.md,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.sm,
+        backgroundColor: Colors.gray50,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
     },
     valueText: {
         fontSize: Typography.fontSize.base,
@@ -415,6 +683,38 @@ const styles = StyleSheet.create({
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.bold,
     },
+    deliveryRequestButton: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.full,
+        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+        flexDirection: 'row',
+        gap: Spacing.xs,
+    },
+    deliveryRequestButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    deliveryTrackButton: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.full,
+        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+        flexDirection: 'row',
+        gap: Spacing.xs,
+    },
+    deliveryTrackButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
     actionsRow: {
         flexDirection: 'row',
         flexWrap: 'wrap',
@@ -474,4 +774,3 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
     },
 });
-

@@ -28,19 +28,35 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
     showCancel = false,
 }) => {
     const scaleAnim = React.useRef(new Animated.Value(0)).current;
+    const opacityAnim = React.useRef(new Animated.Value(0)).current;
+    const translateYAnim = React.useRef(new Animated.Value(24)).current;
 
     React.useEffect(() => {
         if (visible) {
-            Animated.spring(scaleAnim, {
-                toValue: 1,
-                friction: 6,
-                tension: 40,
-                useNativeDriver: true,
-            }).start();
+            Animated.parallel([
+                Animated.spring(scaleAnim, {
+                    toValue: 1,
+                    friction: 7,
+                    tension: 60,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(opacityAnim, {
+                    toValue: 1,
+                    duration: 220,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(translateYAnim, {
+                    toValue: 0,
+                    duration: 220,
+                    useNativeDriver: true,
+                }),
+            ]).start();
         } else {
             scaleAnim.setValue(0);
+            opacityAnim.setValue(0);
+            translateYAnim.setValue(24);
         }
-    }, [visible, scaleAnim]);
+    }, [opacityAnim, scaleAnim, translateYAnim, visible]);
 
     const getIconConfig = () => {
         switch (type) {
@@ -72,6 +88,14 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
     };
 
     const iconConfig = getIconConfig();
+    const typeLabel =
+        type === 'success'
+            ? 'Succes'
+            : type === 'error'
+            ? 'Erreur'
+            : type === 'warning'
+            ? 'Attention'
+            : 'Information';
 
     return (
         <Modal transparent visible={visible} animationType="fade" statusBarTranslucent>
@@ -80,24 +104,27 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
                     style={[
                         styles.alertContainer,
                         {
-                            transform: [{ scale: scaleAnim }],
+                            opacity: opacityAnim,
+                            transform: [{ scale: scaleAnim }, { translateY: translateYAnim }],
                         },
                     ]}
                 >
-                    {/* Icon */}
+                    <LinearGradient colors={iconConfig.gradient} style={styles.topStripe} />
+
                     <View style={styles.iconContainer}>
                         <LinearGradient colors={iconConfig.gradient} style={styles.iconCircle}>
-                            <Ionicons name={iconConfig.name} size={48} color={Colors.white} />
+                            <Ionicons name={iconConfig.name} size={38} color={Colors.white} />
                         </LinearGradient>
                     </View>
 
-                    {/* Content */}
                     <View style={styles.content}>
+                        <View style={styles.typeChip}>
+                            <Text style={styles.typeChipText}>{typeLabel}</Text>
+                        </View>
                         <Text style={styles.title}>{title}</Text>
                         <Text style={styles.message}>{message}</Text>
                     </View>
 
-                    {/* Buttons */}
                     <View style={styles.buttons}>
                         {showCancel && (
                             <TouchableOpacity style={styles.cancelButton} onPress={onCancel}>
@@ -127,67 +154,94 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backgroundColor: 'rgba(1, 9, 23, 0.58)',
+        paddingHorizontal: Spacing.lg,
     },
     alertContainer: {
-        width: '85%',
-        maxWidth: 400,
+        width: '100%',
+        maxWidth: 420,
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xxl,
-        padding: Spacing.xxl,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+        paddingHorizontal: Spacing.xl,
+        paddingTop: Spacing.lg,
+        paddingBottom: Spacing.xl,
         alignItems: 'center',
         ...Shadows.xl,
     },
+    topStripe: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 6,
+    },
     iconContainer: {
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.md,
     },
     iconCircle: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 72,
+        height: 72,
+        borderRadius: 36,
         alignItems: 'center',
         justifyContent: 'center',
         ...Shadows.lg,
     },
     content: {
         alignItems: 'center',
-        marginBottom: Spacing.xl,
+        marginBottom: Spacing.lg,
+    },
+    typeChip: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray100,
+        marginBottom: Spacing.sm,
+    },
+    typeChipText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
     },
     title: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
+        marginBottom: Spacing.xs,
         textAlign: 'center',
     },
     message: {
-        fontSize: Typography.fontSize.base,
+        fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
         textAlign: 'center',
-        lineHeight: 22,
+        lineHeight: 20,
     },
     buttons: {
         flexDirection: 'row',
-        gap: Spacing.md,
+        gap: Spacing.sm,
         width: '100%',
     },
     cancelButton: {
         flex: 1,
-        paddingVertical: Spacing.md,
-        borderRadius: BorderRadius.xl,
-        borderWidth: 2,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
         borderColor: Colors.gray200,
         alignItems: 'center',
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray50,
     },
     cancelButtonText: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.bold,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
         color: Colors.textSecondary,
     },
     confirmButton: {
         flex: 1,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.lg,
         overflow: 'hidden',
         ...Shadows.md,
     },
@@ -195,11 +249,11 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     confirmButtonGradient: {
-        paddingVertical: Spacing.md,
+        paddingVertical: Spacing.sm,
         alignItems: 'center',
     },
     confirmButtonText: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },

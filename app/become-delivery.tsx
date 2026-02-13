@@ -43,6 +43,7 @@ export default function BecomeDeliveryScreen() {
     const [licensePlate, setLicensePlate] = React.useState('');
     const [vehicleType, setVehicleType] = React.useState<VehicleType>('motorcycle');
     const [isAvailable, setIsAvailable] = React.useState(true);
+    const [deliveryLookupId, setDeliveryLookupId] = React.useState('');
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
         title: string;
@@ -183,12 +184,28 @@ export default function BecomeDeliveryScreen() {
                             <Text style={styles.alreadyText}>
                                 Votre compte est deja configure comme livreur.
                             </Text>
+                            <Text style={styles.label}>ID livraison (notification)</Text>
+                            <TextInput
+                                value={deliveryLookupId}
+                                onChangeText={setDeliveryLookupId}
+                                style={styles.input}
+                                placeholder="Collez l ID de livraison"
+                                placeholderTextColor={Colors.gray400}
+                                autoCapitalize="none"
+                            />
                             <View style={styles.alreadyButtonsRow}>
                                 <TouchableOpacity
                                     style={styles.secondaryButton}
                                     onPress={() => router.push('/orders')}
                                 >
                                     <Text style={styles.secondaryButtonText}>Voir les commandes</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.secondaryButton, !deliveryLookupId.trim() && { opacity: 0.6 }]}
+                                    onPress={() => router.push(`/delivery/${deliveryLookupId.trim()}` as any)}
+                                    disabled={!deliveryLookupId.trim()}
+                                >
+                                    <Text style={styles.secondaryButtonText}>Ouvrir livraison</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
                                     style={styles.primaryButton}

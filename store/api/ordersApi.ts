@@ -2,6 +2,7 @@
  * API des commandes
  */
 
+import { Delivery, RateOrderDto, RequestDeliveryDto } from '@/types/delivery';
 import { CreateOrderRequest, Order, OrderStatusValue } from '@/types/order';
 import { baseApi } from './baseApi';
 
@@ -54,6 +55,26 @@ export const ordersApi = baseApi.injectEndpoints({
             }),
             invalidatesTags: (result, error, { id }) => [{ type: 'Order', id }, { type: 'Order', id: 'LIST' }],
         }),
+        requestDelivery: builder.mutation<Delivery, { id: string; data?: RequestDeliveryDto }>({
+            query: ({ id, data }) => ({
+                url: `/orders/${id}/request-delivery`,
+                method: 'POST',
+                body: data || {},
+            }),
+            invalidatesTags: (result, error, { id }) => [
+                { type: 'Order', id },
+                { type: 'Order', id: 'LIST' },
+                { type: 'Delivery', id: result?._id || 'LIST' },
+            ],
+        }),
+        rateOrderParticipants: builder.mutation<Order, { id: string; data: RateOrderDto }>({
+            query: ({ id, data }) => ({
+                url: `/orders/${id}/rate`,
+                method: 'POST',
+                body: data,
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Order', id }, { type: 'Order', id: 'LIST' }],
+        }),
     }),
 });
 
@@ -62,5 +83,6 @@ export const {
     useGetOrderQuery,
     useCreateOrderMutation,
     useUpdateOrderStatusMutation,
+    useRequestDeliveryMutation,
+    useRateOrderParticipantsMutation,
 } = ordersApi;
-

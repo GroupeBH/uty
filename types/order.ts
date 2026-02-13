@@ -123,7 +123,5 @@ export const getOrderItemImage = (item: OrderItem): string | undefined => {
 
 export const getNextSellerStatuses = (status: OrderStatusValue): OrderStatusValue[] => {
     if (status === 'pending') return ['confirmed', 'cancelled'];
-    if (status === 'confirmed') return ['shipped', 'cancelled'];
-    if (status === 'shipped') return ['delivered'];
     return [];
 };

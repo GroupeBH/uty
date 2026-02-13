@@ -34,6 +34,26 @@ type PlacesSearchParams = {
     language?: string;
 };
 
+type DirectionsWaypoint = {
+    address?: string;
+    lat?: number;
+    lng?: number;
+    placeId?: string;
+};
+
+type DirectionsRequest = {
+    origin: DirectionsWaypoint;
+    destination: DirectionsWaypoint;
+    waypoints?: DirectionsWaypoint[];
+    optimizeWaypoints?: boolean;
+    avoid?: string[];
+    alternatives?: boolean;
+    language?: string;
+    region?: string;
+    departureTime?: number;
+    arrivalTime?: number;
+};
+
 export const googleMapsApi = baseApi.injectEndpoints({
     overrideExisting: true,
     endpoints: (builder) => ({
@@ -67,6 +87,13 @@ export const googleMapsApi = baseApi.injectEndpoints({
                 params,
             }),
         }),
+        getDirections: builder.mutation<any, DirectionsRequest>({
+            query: (body) => ({
+                url: '/google-maps/directions',
+                method: 'POST',
+                body,
+            }),
+        }),
     }),
 });
 
@@ -76,4 +103,5 @@ export const {
     useLazyReverseGeocodeQuery,
     useLazyPlacesDetailsQuery,
     useLazyPlacesSearchQuery,
+    useGetDirectionsMutation,
 } = googleMapsApi;
