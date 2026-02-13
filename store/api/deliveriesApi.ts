@@ -1,4 +1,4 @@
-import { Delivery, DeliveryMessage, DeliveryTracking } from '@/types/delivery';
+import { Delivery, DeliveryMessage, DeliveryQrPayload, DeliveryTracking } from '@/types/delivery';
 import { baseApi } from './baseApi';
 
 export const deliveriesApi = baseApi.injectEndpoints({
@@ -31,6 +31,21 @@ export const deliveriesApi = baseApi.injectEndpoints({
             }),
             invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
         }),
+        generatePickupQr: builder.mutation<DeliveryQrPayload, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/pickup-qr`,
+                method: 'POST',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }],
+        }),
+        scanPickupQr: builder.mutation<Delivery, { id: string; qrData: string }>({
+            query: ({ id, qrData }) => ({
+                url: `/deliveries/${id}/scan-pickup-qr`,
+                method: 'POST',
+                body: { qrData },
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
         driverArrivePickup: builder.mutation<Delivery, string>({
             query: (id) => ({
                 url: `/deliveries/${id}/arrive-pickup`,
@@ -58,6 +73,21 @@ export const deliveriesApi = baseApi.injectEndpoints({
                 method: 'PATCH',
             }),
             invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        generateDropoffQr: builder.mutation<DeliveryQrPayload, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/dropoff-qr`,
+                method: 'POST',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }],
+        }),
+        scanDropoffQr: builder.mutation<Delivery, { id: string; qrData: string }>({
+            query: ({ id, qrData }) => ({
+                url: `/deliveries/${id}/scan-dropoff-qr`,
+                method: 'POST',
+                body: { qrData },
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
         }),
         buyerConfirmDropoff: builder.mutation<Delivery, string>({
             query: (id) => ({
@@ -93,12 +123,15 @@ export const {
     useGetDeliveryMessagesQuery,
     useSendDeliveryMessageMutation,
     useAcceptDeliveryMutation,
+    useGeneratePickupQrMutation,
+    useScanPickupQrMutation,
     useDriverArrivePickupMutation,
     useSellerConfirmPickupMutation,
     useDriverConfirmPickupMutation,
     useDriverArriveDropoffMutation,
+    useGenerateDropoffQrMutation,
+    useScanDropoffQrMutation,
     useBuyerConfirmDropoffMutation,
     useDriverConfirmDropoffMutation,
     useUpdateDeliveryLocationMutation,
 } = deliveriesApi;
-

@@ -25,19 +25,27 @@ export interface DeliveryMessage {
 
 export interface Delivery {
     _id: string;
-    orderId: string;
+    orderId: string | { _id?: string };
     buyerId: string | OrderParty;
     sellerId: string | OrderParty;
     deliveryPersonId?: string | { _id?: string; userId?: string | OrderParty } | null;
     status: DeliveryStatusValue;
     pickupLocation: string;
     deliveryLocation: string;
+    pickupCoordinates?: DeliveryGeoPoint | null;
+    deliveryCoordinates?: DeliveryGeoPoint | null;
     currentLocation?: DeliveryGeoPoint;
     trackingActive: boolean;
     sellerPickupConfirmed: boolean;
     driverPickupConfirmed: boolean;
     buyerDropoffConfirmed: boolean;
     driverDropoffConfirmed: boolean;
+    pickupQrGeneratedAt?: string | null;
+    pickupQrExpiresAt?: string | null;
+    pickupQrUsedAt?: string | null;
+    dropoffQrGeneratedAt?: string | null;
+    dropoffQrExpiresAt?: string | null;
+    dropoffQrUsedAt?: string | null;
     requestedAt?: string;
     acceptedAt?: string | null;
     startedAt?: string | null;
@@ -56,10 +64,18 @@ export interface DeliveryTracking {
     currentLocation: DeliveryGeoPoint | null;
     pickupLocation: string;
     deliveryLocation: string;
+    pickupCoordinates?: DeliveryGeoPoint | null;
+    deliveryCoordinates?: DeliveryGeoPoint | null;
     sellerPickupConfirmed: boolean;
     driverPickupConfirmed: boolean;
     buyerDropoffConfirmed: boolean;
     driverDropoffConfirmed: boolean;
+    pickupQrGeneratedAt?: string | null;
+    pickupQrExpiresAt?: string | null;
+    pickupQrUsedAt?: string | null;
+    dropoffQrGeneratedAt?: string | null;
+    dropoffQrExpiresAt?: string | null;
+    dropoffQrUsedAt?: string | null;
     acceptedAt: string | null;
     startedAt: string | null;
     arrivedAtPickupAt: string | null;
@@ -70,6 +86,14 @@ export interface DeliveryTracking {
 export interface RequestDeliveryDto {
     pickupLocation?: string;
     deliveryLocation?: string;
+}
+
+export interface DeliveryQrPayload {
+    deliveryId: string;
+    stage: 'pickup' | 'dropoff';
+    status: DeliveryStatusValue;
+    expiresAt: string;
+    qrPayload: string;
 }
 
 export interface RateOrderDto {
@@ -117,4 +141,3 @@ export const getDeliveryPersonUserId = (
 
 export const getDeliveryActorId = (value: string | OrderParty | null | undefined): string | null =>
     toIdString((value as any)?._id ?? value);
-

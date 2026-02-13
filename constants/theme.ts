@@ -7,12 +7,12 @@ import { Platform } from 'react-native';
 
 const Palette = {
   // Couleurs principales
-  primary: '#003366',      // Bleu Foncé - Headers, navigation, typographie
+  primary: '#1F4F8C',      // Bleu adouci - Headers, navigation, typographie
   accent: '#FFD700',       // Jaune Vif - CTA, statuts, éléments interactifs
 
   // Variations de la couleur primaire
-  primaryLight: '#004080',
-  primaryDark: '#002244',
+  primaryLight: '#3D73BD',
+  primaryDark: '#173A68',
 
   // Variations de la couleur accent
   accentLight: '#FFE44D',
@@ -22,7 +22,7 @@ const Palette = {
   success: '#10B981',
   warning: '#F59E0B',
   error: '#EF4444',
-  info: '#3B82F6',
+  info: '#4E85DC',
 
   // Couleurs neutres
   white: '#FFFFFF',
@@ -44,7 +44,7 @@ const Palette = {
   backgroundDark: '#111827',
 
   // Couleurs de texte
-  textPrimary: '#003366',
+  textPrimary: '#1F4F8C',
   textSecondary: '#6B7280',
   textLight: '#9CA3AF',
   textWhite: '#FFFFFF',
@@ -77,15 +77,15 @@ export const Colors = {
 
 // Gradients pour un design moderne et dynamique
 export const Gradients = {
-  primary: ['#004080', '#003366'] as const,           // Bleu dégradé
-  primaryVertical: ['#003366', '#002244'] as const,   // Bleu vertical
+  primary: ['#5B8ED6', '#2E62AA'] as const,           // Bleu adouci dégradé
+  primaryVertical: ['#3D73BD', '#1F4F8C'] as const,   // Bleu vertical adouci
   accent: ['#FFD700', '#FFA500'] as const,            // Jaune vers Orange
   accentReverse: ['#FFA500', '#FFD700'] as const,     // Orange vers Jaune
   success: ['#10B981', '#059669'] as const,           // Vert
   warm: ['#FF6B6B', '#FF8E53'] as const,              // Rouge-Orange chaud
   cool: ['#4FC3F7', '#29B6F6'] as const,              // Bleu ciel
   sunset: ['#FF6B6B', '#FFD93D', '#6BCB77'] as const, // Sunset multi
-  ocean: ['#003366', '#0066CC', '#4FC3F7'] as const,  // Océan
+  ocean: ['#1F4F8C', '#4C81CA', '#8AB0E8'] as const,  // Océan adouci
 };
 
 export const Spacing = {

@@ -22,6 +22,11 @@ export interface OrderItem {
     price: number;
 }
 
+export interface OrderGeoPoint {
+    type: string;
+    coordinates: number[];
+}
+
 export interface Order {
     _id: string;
     userId: string | OrderParty;
@@ -29,6 +34,7 @@ export interface Order {
     items: OrderItem[];
     totalAmount: number;
     deliveryAddress: string;
+    deliveryLocation?: OrderGeoPoint | null;
     status: OrderStatusValue;
     deliveryPersonId?: string | Record<string, any> | null;
     createdAt: string;
