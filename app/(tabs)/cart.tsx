@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useAddToCartMutation, useCheckoutCartMutation, useClearCartMutation, useGetCartQuery, useRemoveFromCartMutation, useSetDeliveryLocationMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
+import { useAddToCartMutation, useCheckoutCartMutation, useClearCartMutation, useGetCartQuery, useSetDeliveryLocationMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Announcement } from '@/types/announcement';
@@ -82,7 +82,6 @@ export default function CartScreen() {
     const router = useRouter();
     const { data: cart, isLoading, isFetching, refetch } = useGetCartQuery();
     const { data: currencies = [] } = useGetCurrenciesQuery();
-    const [removeFromCart] = useRemoveFromCartMutation();
     const [addToCart] = useAddToCartMutation();
     const [clearCart] = useClearCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
@@ -222,25 +221,48 @@ export default function CartScreen() {
     const cartItems = cartNormalization.mergedItems;
     const rawDuplicateCountByProductId = cartNormalization.rawDuplicateCountByProductId;
 
-    const rebuildCartFromSanitizedLines = React.useCallback(async () => {
-        const linesToKeep = cartNormalization.rebuildableItems;
+    const rebuildCartFromSanitizedLines = React.useCallback(
+        async (options?: { quantityOverrides?: Record<string, number>; removeProductIds?: string[] }) => {
+            const quantityOverrides = options?.quantityOverrides || {};
+            const removeSet = new Set(options?.removeProductIds || []);
 
-        await clearCart().unwrap();
+            const linesToKeep = cartNormalization.rebuildableItems
+                .map((item) => {
+                    const productId = resolveCartProductId(item);
+                    if (!productId || removeSet.has(productId)) {
+                        return null;
+                    }
 
-        for (const item of linesToKeep) {
-            const productId = resolveCartProductId(item);
-            if (!productId) continue;
+                    const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
+                    const stock = typeof product?.quantity === 'number' ? Math.max(1, product.quantity) : undefined;
+                    const requestedQuantityRaw =
+                        quantityOverrides[productId] !== undefined
+                            ? Number(quantityOverrides[productId])
+                            : Number(item.quantity);
+                    const requestedQuantity = Math.max(0, Number.isFinite(requestedQuantityRaw) ? requestedQuantityRaw : 0);
+                    if (requestedQuantity <= 0) {
+                        return null;
+                    }
 
-            const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
-            const stock = typeof product?.quantity === 'number' ? Math.max(1, product.quantity) : undefined;
-            const requestedQuantity = Math.max(1, Number(item.quantity) || 1);
-            const safeQuantity = stock !== undefined ? Math.min(requestedQuantity, stock) : requestedQuantity;
+                    const safeQuantity = stock !== undefined ? Math.min(requestedQuantity, stock) : requestedQuantity;
 
-            await addToCart({ productId, quantity: safeQuantity }).unwrap();
-        }
+                    return {
+                        productId,
+                        quantity: Math.max(1, safeQuantity),
+                    };
+                })
+                .filter(Boolean) as { productId: string; quantity: number }[];
 
-        await refetch();
-    }, [addToCart, cartNormalization.rebuildableItems, clearCart, refetch]);
+            await clearCart().unwrap();
+
+            for (const line of linesToKeep) {
+                await addToCart({ productId: line.productId, quantity: line.quantity }).unwrap();
+            }
+
+            await refetch();
+        },
+        [addToCart, cartNormalization.rebuildableItems, clearCart, refetch],
+    );
 
     React.useEffect(() => {
         if (!cart || isSanitizingCart || !cartNormalization.hasInconsistency) {
@@ -334,21 +356,7 @@ export default function CartScreen() {
         if (!productId) {
             throw new Error('Produit invalide');
         }
-
-        await removeFromCart(productId).unwrap();
-
-        const refreshedResult = await refetch();
-        const refreshedCart = refreshedResult?.data as CartType | undefined;
-        const remainingQuantity = getProductTotalQuantityFromRawLines(
-            (refreshedCart?.products || []) as CartItemType[],
-            productId,
-        );
-
-        // Safety net for legacy duplicated lines: retry removal once if needed.
-        if (remainingQuantity > 0) {
-            await removeFromCart(productId).unwrap();
-            await refetch();
-        }
+        await rebuildCartFromSanitizedLines({ removeProductIds: [productId] });
     };
 
     const handleRemove = (item: CartItemType) => {
@@ -399,10 +407,10 @@ export default function CartScreen() {
             throw new Error('Produit invalide');
         }
         const hasRawDuplicates = (rawDuplicateCountByProductId.get(productId) || 0) > 1;
-        const normalizeDuplicateLines = async () => {
-            await removeFromCart(productId).unwrap();
-            await addToCart({ productId, quantity: nextQuantity }).unwrap();
-            await refetch();
+        const rebuildWithQuantity = async () => {
+            await rebuildCartFromSanitizedLines({
+                quantityOverrides: { [productId]: nextQuantity },
+            });
         };
 
         if (nextQuantity <= 0) {
@@ -410,9 +418,9 @@ export default function CartScreen() {
             return;
         }
 
-        if (hasRawDuplicates) {
-            // Normalize legacy duplicate lines into one product line before applying quantity.
-            await normalizeDuplicateLines();
+        if (hasRawDuplicates || cartNormalization.hasInconsistency) {
+            // Rebuild from normalized lines to avoid duplicated/legacy rows exploding quantities.
+            await rebuildWithQuantity();
             return;
         }
 
@@ -427,7 +435,7 @@ export default function CartScreen() {
         );
 
         if (actualTotal !== nextQuantity) {
-            await normalizeDuplicateLines();
+            await rebuildWithQuantity();
         }
     };
 

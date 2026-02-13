@@ -15,38 +15,41 @@ interface StatusBadgeProps {
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, style }) => {
-    const getStatusConfig = (status: StatusType) => {
-        const statusLower = status.toLowerCase();
+    const getStatusConfig = (statusValue: StatusType) => {
+        const statusLower = statusValue.toLowerCase();
 
         // Statuts de commande
         if (statusLower === 'pending') {
             return { color: Colors.warning, label: 'En attente' };
         }
         if (statusLower === 'confirmed') {
-            return { color: Colors.info, label: 'Confirmée' };
+            return { color: Colors.info, label: 'Confirmee' };
+        }
+        if (statusLower === 'shipped') {
+            return { color: Colors.primary, label: 'Expediee' };
         }
         if (statusLower === 'preparing') {
-            return { color: Colors.accent, label: 'En préparation' };
+            return { color: Colors.accent, label: 'En preparation' };
         }
         if (statusLower === 'ready') {
-            return { color: Colors.success, label: 'Prête' };
+            return { color: Colors.success, label: 'Prete' };
         }
         if (statusLower === 'in_transit') {
             return { color: Colors.primary, label: 'En transit' };
         }
         if (statusLower === 'delivered') {
-            return { color: Colors.success, label: 'Livrée' };
+            return { color: Colors.success, label: 'Livree' };
         }
         if (statusLower === 'cancelled') {
-            return { color: Colors.error, label: 'Annulée' };
+            return { color: Colors.error, label: 'Annulee' };
         }
 
         // Statuts de livraison
         if (statusLower === 'assigned') {
-            return { color: Colors.info, label: 'Assignée' };
+            return { color: Colors.info, label: 'Assignee' };
         }
         if (statusLower === 'picked_up') {
-            return { color: Colors.accent, label: 'Récupérée' };
+            return { color: Colors.accent, label: 'Recuperee' };
         }
 
         // Statuts KYC
@@ -54,14 +57,14 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, style }) => {
             return { color: Colors.gray400, label: 'Non soumis' };
         }
         if (statusLower === 'approved') {
-            return { color: Colors.success, label: 'Approuvé' };
+            return { color: Colors.success, label: 'Approuve' };
         }
         if (statusLower === 'rejected') {
-            return { color: Colors.error, label: 'Rejeté' };
+            return { color: Colors.error, label: 'Rejete' };
         }
 
-        // Défaut
-        return { color: Colors.gray400, label: status };
+        // Defaut
+        return { color: Colors.gray400, label: statusValue };
     };
 
     const { color, label } = getStatusConfig(status);
@@ -94,3 +97,4 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
     },
 });
+

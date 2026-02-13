@@ -437,6 +437,18 @@ export default function MyShopScreen() {
                                         <Text style={styles.quickActionHint}>Mes annonces</Text>
                                     </TouchableOpacity>
 
+                                    <TouchableOpacity
+                                        style={styles.quickActionItem}
+                                        onPress={() => router.push('/orders?view=sales')}
+                                        activeOpacity={0.85}
+                                    >
+                                        <LinearGradient colors={Gradients.success} style={styles.quickActionIcon}>
+                                            <Ionicons name="receipt-outline" size={20} color={Colors.white} />
+                                        </LinearGradient>
+                                        <Text style={styles.quickActionTitle}>Commandes</Text>
+                                        <Text style={styles.quickActionHint}>Boutique</Text>
+                                    </TouchableOpacity>
+
                                     <TouchableOpacity style={styles.quickActionItem} onPress={startEdit} activeOpacity={0.85}>
                                         <LinearGradient colors={Gradients.primary} style={styles.quickActionIcon}>
                                             <Ionicons name="create-outline" size={20} color={Colors.white} />

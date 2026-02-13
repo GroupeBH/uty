@@ -1,9 +1,13 @@
 /**
- * Composant OrderCard - Carte de commande
+ * Carte de commande (achat ou vente)
  */
 
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
-import { Order } from '@/types';
+import {
+    Order,
+    getOrderItemName,
+    getOrderPartyName,
+} from '@/types/order';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -12,47 +16,62 @@ import { StatusBadge } from './ui/StatusBadge';
 
 interface OrderCardProps {
     order: Order;
+    perspective: 'buyer' | 'seller';
 }
 
-export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
-    const router = useRouter();
+const formatDate = (dateString?: string) => {
+    if (!dateString) return 'Date inconnue';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) return 'Date inconnue';
 
-    const formatDate = (dateString: string) => {
-        const date = new Date(dateString);
-        return date.toLocaleDateString('fr-FR', {
-            day: '2-digit',
-            month: 'short',
-            year: 'numeric',
-        });
-    };
+    return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+    });
+};
+
+const formatAmount = (amount?: number) => `${Number(amount || 0).toFixed(2)} EUR`;
+
+export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
+    const router = useRouter();
+    const counterpartyLabel =
+        perspective === 'seller'
+            ? `Client: ${getOrderPartyName(order.userId, 'Client inconnu')}`
+            : `Boutique: ${getOrderPartyName(order.sellerId, 'Vendeur inconnu')}`;
 
     return (
         <TouchableOpacity
             style={styles.card}
-            onPress={() => router.push({
-                pathname: '/(client)/order/[id]',
-                params: { id: order.id }
-            })}
+            onPress={() =>
+                router.push({
+                    pathname: '/order/[id]',
+                    params: {
+                        id: order._id,
+                        view: perspective === 'seller' ? 'sales' : 'purchases',
+                    },
+                })
+            }
             activeOpacity={0.9}
         >
-            {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerLeft}>
-                    <Text style={styles.orderNumber}>#{order.orderNumber}</Text>
+                    <Text style={styles.orderNumber}>Commande #{order._id.slice(-8).toUpperCase()}</Text>
                     <Text style={styles.date}>{formatDate(order.createdAt)}</Text>
                 </View>
                 <StatusBadge status={order.status} />
             </View>
 
-            {/* Items */}
+            <Text style={styles.counterpartyText}>{counterpartyLabel}</Text>
+
             <View style={styles.items}>
                 <Text style={styles.itemsText}>
                     {order.items.length} article{order.items.length > 1 ? 's' : ''}
                 </Text>
                 <View style={styles.itemsPreview}>
                     {order.items.slice(0, 3).map((item, index) => (
-                        <Text key={index} style={styles.itemName} numberOfLines={1}>
-                            • {item.product.name}
+                        <Text key={`${order._id}-item-${index}`} style={styles.itemName} numberOfLines={1}>
+                            - {getOrderItemName(item)}
                         </Text>
                     ))}
                     {order.items.length > 3 && (
@@ -63,11 +82,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order }) => {
                 </View>
             </View>
 
-            {/* Footer */}
             <View style={styles.footer}>
                 <View style={styles.totalContainer}>
                     <Text style={styles.totalLabel}>Total</Text>
-                    <Text style={styles.totalAmount}>{order.total.toFixed(2)} €</Text>
+                    <Text style={styles.totalAmount}>{formatAmount(order.totalAmount)}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={Colors.gray400} />
             </View>
@@ -87,10 +105,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.md,
     },
     headerLeft: {
         flex: 1,
+        paddingRight: Spacing.sm,
     },
     orderNumber: {
         fontSize: Typography.fontSize.lg,
@@ -101,6 +120,11 @@ const styles = StyleSheet.create({
     date: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
+    },
+    counterpartyText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        marginBottom: Spacing.md,
     },
     items: {
         marginBottom: Spacing.lg,
@@ -137,11 +161,11 @@ const styles = StyleSheet.create({
     totalContainer: {
         flexDirection: 'row',
         alignItems: 'baseline',
+        gap: Spacing.sm,
     },
     totalLabel: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
-        marginRight: Spacing.sm,
     },
     totalAmount: {
         fontSize: Typography.fontSize.xl,
