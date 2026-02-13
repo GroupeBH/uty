@@ -26,6 +26,13 @@ export default function ProfileScreen() {
     const router = useRouter();
     const { user, logout, isLoading, isLoggingOut } = useAuth();
     const { data: announcements } = useGetMyAnnouncementsQuery();
+    const hasDeliveryRole = Boolean(
+        user?.roles?.some((role) =>
+            ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(
+                (role || '').toLowerCase(),
+            ),
+        ),
+    );
 
     const handleLogout = () => {
         Alert.alert(
@@ -93,6 +100,15 @@ export default function ProfileScreen() {
                     subtitle: 'Gerer boutique et KYC',
                     gradient: Gradients.accent,
                     onPress: () => router.push('/my-shop'),
+                },
+                {
+                    icon: 'bicycle-outline',
+                    label: hasDeliveryRole ? 'Profil livreur' : 'Devenir livreur',
+                    subtitle: hasDeliveryRole
+                        ? 'Statut actif et disponibilite'
+                        : 'Activez votre compte de livraison',
+                    gradient: Gradients.success,
+                    onPress: () => router.push('/become-delivery'),
                 },
                 {
                     icon: 'location-outline',

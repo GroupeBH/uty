@@ -3,6 +3,7 @@ export enum Role {
     Admin = 'admin',
     Seller = 'seller',
     Driver = 'driver',
+    DeliveryPerson = 'delivery_person',
 }
 
 export interface GeoLocation {

@@ -8,11 +8,11 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useAddToCartMutation, useCheckoutCartMutation, useGetCartQuery, useRemoveFromCartMutation, useSetDeliveryLocationMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
+import { useAddToCartMutation, useCheckoutCartMutation, useClearCartMutation, useGetCartQuery, useRemoveFromCartMutation, useSetDeliveryLocationMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Announcement } from '@/types/announcement';
-import { CartProduct as CartItemType } from '@/types/cart';
+import { Cart as CartType, CartProduct as CartItemType } from '@/types/cart';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -59,12 +59,32 @@ const resolveCartProductId = (item: CartItemType): string | null => {
     return toIdString((item.productId as Announcement)?._id || item.productId);
 };
 
+const getProductTotalQuantityFromRawLines = (products: CartItemType[] | undefined, productId: string): number => {
+    if (!products || products.length === 0) return 0;
+    return products.reduce((sum, line) => {
+        const resolvedId = resolveCartProductId(line);
+        if (resolvedId !== productId) return sum;
+        return sum + Math.max(0, Number(line.quantity) || 0);
+    }, 0);
+};
+
+const resolveAnnouncementSellerId = (product: Announcement | undefined): string | null => {
+    if (!product) return null;
+    return toIdString(
+        (product as any)?.shop?.user?._id ||
+        (product as any)?.shop?.user ||
+        (product as any)?.user?._id ||
+        (product as any)?.user,
+    );
+};
+
 export default function CartScreen() {
     const router = useRouter();
     const { data: cart, isLoading, isFetching, refetch } = useGetCartQuery();
     const { data: currencies = [] } = useGetCurrenciesQuery();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [addToCart] = useAddToCartMutation();
+    const [clearCart] = useClearCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
     const [checkoutCart, { isLoading: isCheckoutLoading }] = useCheckoutCartMutation();
     const [setDeliveryLocation] = useSetDeliveryLocationMutation();
@@ -72,6 +92,8 @@ export default function CartScreen() {
     const [mapVisible, setMapVisible] = React.useState(false);
     const [checkoutModalVisible, setCheckoutModalVisible] = React.useState(false);
     const [deliveryAddress, setDeliveryAddress] = React.useState('');
+    const [isSanitizingCart, setIsSanitizingCart] = React.useState(false);
+    const lastSanitizedSignatureRef = React.useRef<string | null>(null);
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
         title: string;
@@ -91,9 +113,7 @@ export default function CartScreen() {
         showCancel: false,
         onConfirm: undefined,
     });
-    // const [clearCart] = useClearCartMutation();
-
-    const parseApiErrorMessage = (error: any, fallback: string) => {
+    const parseApiErrorMessage = React.useCallback((error: any, fallback: string) => {
         if (!error) return fallback;
 
         if (typeof error === 'string') return error;
@@ -109,13 +129,13 @@ export default function CartScreen() {
         if (typeof error?.message === 'string') return error.message;
 
         return fallback;
-    };
+    }, []);
 
-    const hideAlert = () => {
+    const hideAlert = React.useCallback(() => {
         setAlertState((prev) => ({ ...prev, visible: false, onConfirm: undefined }));
-    };
+    }, []);
 
-    const showAlert = (params: Omit<typeof alertState, 'visible'>) => {
+    const showAlert = React.useCallback((params: Omit<typeof alertState, 'visible'>) => {
         setAlertState({
             ...params,
             visible: true,
@@ -123,9 +143,162 @@ export default function CartScreen() {
             cancelText: params.cancelText || 'Annuler',
             showCancel: params.showCancel || false,
         });
-    };
+    }, []);
+
+    const rawCartProducts = React.useMemo(
+        () => ((cart?.products || []) as CartItemType[]),
+        [cart?.products],
+    );
+
+    const cartNormalization = React.useMemo(() => {
+        const rawDuplicateCountByProductId = new Map<string, number>();
+        const quantityByProductId = new Map<string, number>();
+        const representativeByProductId = new Map<string, CartItemType>();
+        let invalidProductIdCount = 0;
+
+        rawCartProducts.forEach((item) => {
+            const productId = resolveCartProductId(item);
+            if (!productId) {
+                invalidProductIdCount += 1;
+                return;
+            }
+
+            rawDuplicateCountByProductId.set(
+                productId,
+                (rawDuplicateCountByProductId.get(productId) || 0) + 1,
+            );
+            quantityByProductId.set(
+                productId,
+                (quantityByProductId.get(productId) || 0) + Math.max(1, Number(item.quantity) || 1),
+            );
+
+            const representative = representativeByProductId.get(productId);
+            if (!representative) {
+                representativeByProductId.set(productId, {
+                    ...item,
+                    productId: typeof item.productId === 'object' ? item.productId : productId,
+                    _id: toIdString(item._id) || item._id,
+                });
+                return;
+            }
+
+            if (typeof representative.productId === 'string' && typeof item.productId === 'object') {
+                representative.productId = item.productId;
+            }
+        });
+
+        const mergedItems: CartItemType[] = Array.from(quantityByProductId.entries()).map(
+            ([productId, quantity]) => {
+                const representative = representativeByProductId.get(productId)!;
+                return {
+                    ...representative,
+                    quantity,
+                };
+            },
+        );
+
+        const rebuildableItems = mergedItems.filter((item) => {
+            if (typeof item.productId !== 'object') return false;
+            return Boolean(resolveAnnouncementSellerId(item.productId as Announcement));
+        });
+
+        const invalidSellerCount = mergedItems.length - rebuildableItems.length;
+        const hasDuplicates = Array.from(rawDuplicateCountByProductId.values()).some((count) => count > 1);
+        const hasInconsistency = hasDuplicates || invalidProductIdCount > 0 || invalidSellerCount > 0;
+
+        return {
+            mergedItems,
+            rebuildableItems,
+            rawDuplicateCountByProductId,
+            rawCount: rawCartProducts.length,
+            uniqueCount: mergedItems.length,
+            invalidProductIdCount,
+            invalidSellerCount,
+            hasDuplicates,
+            hasInconsistency,
+        };
+    }, [rawCartProducts]);
+
+    const cartItems = cartNormalization.mergedItems;
+    const rawDuplicateCountByProductId = cartNormalization.rawDuplicateCountByProductId;
+
+    const rebuildCartFromSanitizedLines = React.useCallback(async () => {
+        const linesToKeep = cartNormalization.rebuildableItems;
+
+        await clearCart().unwrap();
+
+        for (const item of linesToKeep) {
+            const productId = resolveCartProductId(item);
+            if (!productId) continue;
+
+            const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
+            const stock = typeof product?.quantity === 'number' ? Math.max(1, product.quantity) : undefined;
+            const requestedQuantity = Math.max(1, Number(item.quantity) || 1);
+            const safeQuantity = stock !== undefined ? Math.min(requestedQuantity, stock) : requestedQuantity;
+
+            await addToCart({ productId, quantity: safeQuantity }).unwrap();
+        }
+
+        await refetch();
+    }, [addToCart, cartNormalization.rebuildableItems, clearCart, refetch]);
+
+    React.useEffect(() => {
+        if (!cart || isSanitizingCart || !cartNormalization.hasInconsistency) {
+            return;
+        }
+
+        const signature = `${cart._id}-${cart.updatedAt}-${cartNormalization.rawCount}-${cartNormalization.uniqueCount}-${cartNormalization.invalidProductIdCount}-${cartNormalization.invalidSellerCount}`;
+        if (lastSanitizedSignatureRef.current === signature) {
+            return;
+        }
+
+        lastSanitizedSignatureRef.current = signature;
+        setIsSanitizingCart(true);
+
+        (async () => {
+            try {
+                await rebuildCartFromSanitizedLines();
+
+                const removedInvalid = cartNormalization.invalidProductIdCount + cartNormalization.invalidSellerCount;
+                if (removedInvalid > 0 || cartNormalization.hasDuplicates) {
+                    showAlert({
+                        title: 'Panier optimise',
+                        message: removedInvalid > 0
+                            ? `${removedInvalid} article(s) invalide(s) ont ete retires automatiquement.`
+                            : 'Les doublons ont ete fusionnes automatiquement.',
+                        type: 'info',
+                    });
+                }
+            } catch (error) {
+                showAlert({
+                    title: 'Panier incoherent',
+                    message: parseApiErrorMessage(
+                        error,
+                        'Impossible de corriger automatiquement le panier. Reessayez plus tard.',
+                    ),
+                    type: 'error',
+                });
+            } finally {
+                setIsSanitizingCart(false);
+            }
+        })();
+    }, [
+        cart,
+        cartNormalization.hasDuplicates,
+        cartNormalization.hasInconsistency,
+        cartNormalization.invalidProductIdCount,
+        cartNormalization.invalidSellerCount,
+        cartNormalization.rawCount,
+        cartNormalization.uniqueCount,
+        isSanitizingCart,
+        parseApiErrorMessage,
+        rebuildCartFromSanitizedLines,
+        showAlert,
+    ]);
 
     const handleIncrement = async (item: CartItemType) => {
+        if (isSanitizingCart) return;
+
         const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
         const productStock = product?.quantity ?? Number.POSITIVE_INFINITY;
         if (item.quantity >= productStock) return;
@@ -142,6 +315,7 @@ export default function CartScreen() {
     };
 
     const handleDecrement = async (item: CartItemType) => {
+        if (isSanitizingCart) return;
         if (item.quantity <= 1) return;
 
         try {
@@ -161,18 +335,24 @@ export default function CartScreen() {
             throw new Error('Produit invalide');
         }
 
-        const updatedCart = await removeFromCart(productId).unwrap();
-        const updatedProducts = (updatedCart?.products || []) as CartItemType[];
-        const stillExists = updatedProducts.some((raw) => resolveCartProductId(raw) === productId);
+        await removeFromCart(productId).unwrap();
 
-        if (stillExists) {
-            throw new Error('Suppression incomplete');
+        const refreshedResult = await refetch();
+        const refreshedCart = refreshedResult?.data as CartType | undefined;
+        const remainingQuantity = getProductTotalQuantityFromRawLines(
+            (refreshedCart?.products || []) as CartItemType[],
+            productId,
+        );
+
+        // Safety net for legacy duplicated lines: retry removal once if needed.
+        if (remainingQuantity > 0) {
+            await removeFromCart(productId).unwrap();
+            await refetch();
         }
-
-        await refetch();
     };
 
     const handleRemove = (item: CartItemType) => {
+        if (isSanitizingCart) return;
         showAlert({
             title: 'Retirer du panier',
             message: 'Voulez-vous retirer cet article du panier ?',
@@ -219,6 +399,11 @@ export default function CartScreen() {
             throw new Error('Produit invalide');
         }
         const hasRawDuplicates = (rawDuplicateCountByProductId.get(productId) || 0) > 1;
+        const normalizeDuplicateLines = async () => {
+            await removeFromCart(productId).unwrap();
+            await addToCart({ productId, quantity: nextQuantity }).unwrap();
+            await refetch();
+        };
 
         if (nextQuantity <= 0) {
             await removeProductFromCart(item);
@@ -227,16 +412,35 @@ export default function CartScreen() {
 
         if (hasRawDuplicates) {
             // Normalize legacy duplicate lines into one product line before applying quantity.
-            await removeFromCart(productId).unwrap();
-            await addToCart({ productId, quantity: nextQuantity }).unwrap();
-            await refetch();
+            await normalizeDuplicateLines();
             return;
         }
 
         await updateCartItem({ itemId: productId, quantity: nextQuantity }).unwrap();
+
+        // Verify server state after update to avoid inconsistent quantities.
+        const refreshedResult = await refetch();
+        const refreshedCart = refreshedResult?.data as CartType | undefined;
+        const actualTotal = getProductTotalQuantityFromRawLines(
+            (refreshedCart?.products || []) as CartItemType[],
+            productId,
+        );
+
+        if (actualTotal !== nextQuantity) {
+            await normalizeDuplicateLines();
+        }
     };
 
     const handleCheckout = () => {
+        if (isSanitizingCart) {
+            showAlert({
+                title: 'Panier en cours',
+                message: 'Correction du panier en cours. Reessayez dans quelques secondes.',
+                type: 'info',
+            });
+            return;
+        }
+
         if (!hasDeliveryCoordinates) {
             showAlert({
                 title: 'Adresse requise',
@@ -246,63 +450,8 @@ export default function CartScreen() {
             return;
         }
 
-        if (!normalizedDeliveryAddress) {
-            showAlert({
-                title: isResolvingDeliveryAddress ? 'Adresse en cours' : 'Adresse indisponible',
-                message: isResolvingDeliveryAddress
-                    ? 'Recherche de votre adresse en cours. Reessayez dans un instant.'
-                    : 'Impossible de recuperer une adresse nominale. Ouvrez la carte puis validez de nouveau.',
-                type: 'warning',
-            });
-            return;
-        }
-
         setCheckoutModalVisible(true);
     };
-
-    const cartItems = React.useMemo(() => {
-        const source = cart?.products || [];
-        const mergedByProduct = new Map<string, CartItemType>();
-
-        source.forEach((item) => {
-            const resolvedId = resolveCartProductId(item);
-            if (!resolvedId) return;
-
-            const existing = mergedByProduct.get(resolvedId);
-            if (!existing) {
-                mergedByProduct.set(resolvedId, {
-                    ...item,
-                    productId: typeof item.productId === 'object' ? item.productId : resolvedId,
-                    quantity: Math.max(1, item.quantity || 1),
-                    _id: toIdString(item._id) || item._id,
-                });
-                return;
-            }
-
-            existing.quantity += Math.max(1, item.quantity || 1);
-
-            // Prefer populated product object for better UI (image/price/stock).
-            if (typeof existing.productId === 'string' && typeof item.productId === 'object') {
-                existing.productId = item.productId;
-            }
-
-            if (!existing._id && item._id) {
-                existing._id = toIdString(item._id) || item._id;
-            }
-        });
-
-        return Array.from(mergedByProduct.values());
-    }, [cart?.products]);
-
-    const rawDuplicateCountByProductId = React.useMemo(() => {
-        const countByProductId = new Map<string, number>();
-        (cart?.products || []).forEach((item) => {
-            const resolvedId = resolveCartProductId(item);
-            if (!resolvedId) return;
-            countByProductId.set(resolvedId, (countByProductId.get(resolvedId) || 0) + 1);
-        });
-        return countByProductId;
-    }, [cart?.products]);
 
     const currencyById = React.useMemo(() => {
         const map = new Map<string, any>();
@@ -409,6 +558,15 @@ export default function CartScreen() {
         : hasDeliveryCoordinates
             ? (isResolvingDeliveryAddress ? 'Resolution de l adresse...' : 'Adresse enregistree (nom indisponible)')
             : '';
+    const deliveryCoordinatesFallback =
+        typeof deliveryLat === 'number' && typeof deliveryLng === 'number'
+            ? `${deliveryLat.toFixed(5)}, ${deliveryLng.toFixed(5)}`
+            : '';
+    const checkoutAddressPreview = deliveryDisplayLabel
+        ? deliveryDisplayLabel
+        : deliveryCoordinatesFallback
+            ? `Coordonnees: ${deliveryCoordinatesFallback}`
+            : 'Non definie';
     const deliveryModeLabel =
         deliveryMode === 'walking'
             ? 'Marche'
@@ -470,16 +628,18 @@ export default function CartScreen() {
 
     const handleCheckoutConfirm = async () => {
         try {
-            if (!normalizedDeliveryAddress) {
+            if (isSanitizingCart) {
                 showAlert({
-                    title: 'Adresse requise',
-                    message: 'Une adresse de livraison textuelle est necessaire pour continuer.',
-                    type: 'warning',
+                    title: 'Panier en cours',
+                    message: 'La correction du panier est en cours. Reessayez dans un instant.',
+                    type: 'info',
                 });
                 return;
             }
 
-            const payload = { deliveryAddress: normalizedDeliveryAddress };
+            const payload = normalizedDeliveryAddress
+                ? { deliveryAddress: normalizedDeliveryAddress }
+                : {};
             const orders = await checkoutCart(payload).unwrap();
             setCheckoutModalVisible(false);
 
@@ -613,6 +773,14 @@ export default function CartScreen() {
                             <Text style={styles.groupedNoticeTitle}>Commandes groupees par vendeur</Text>
                             <Text style={styles.groupedNoticeText}>Chaque vendeur a sa section, livraison calculee automatiquement.</Text>
                         </View>
+                        {isSanitizingCart ? (
+                            <View style={styles.sanitizeNotice}>
+                                <Ionicons name="sync-outline" size={14} color={Colors.primary} />
+                                <Text style={styles.sanitizeNoticeText}>
+                                    Correction du panier en cours...
+                                </Text>
+                            </View>
+                        ) : null}
                         <View style={styles.deliveryCard}>
                             <View style={styles.deliveryHeader}>
                                 <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
@@ -696,7 +864,7 @@ export default function CartScreen() {
                             <View style={styles.checkoutModalRow}>
                                 <Text style={styles.checkoutModalLabel}>Adresse</Text>
                                 <Text style={styles.checkoutModalValue} numberOfLines={2}>
-                                    {deliveryDisplayLabel || (isResolvingDeliveryAddress ? 'Resolution en cours...' : 'Non definie')}
+                                    {checkoutAddressPreview}
                                 </Text>
                             </View>
                             <View style={styles.checkoutModalRow}>
@@ -725,7 +893,7 @@ export default function CartScreen() {
                                 size="lg"
                                 onPress={handleCheckoutConfirm}
                                 loading={isCheckoutLoading}
-                                disabled={isCheckoutLoading || !normalizedDeliveryAddress}
+                                disabled={isCheckoutLoading || isSanitizingCart}
                                 style={styles.checkoutModalConfirmButton}
                             />
                         </View>
@@ -750,6 +918,7 @@ export default function CartScreen() {
                         variant="primary"
                         size="lg"
                         onPress={handleCheckout}
+                        disabled={isSanitizingCart}
                         style={styles.checkoutButton}
                     />
                 </SafeAreaView>
@@ -871,6 +1040,23 @@ const styles = StyleSheet.create({
     groupedNoticeText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray500,
+    },
+    sanitizeNotice: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        backgroundColor: Colors.primary + '12',
+        borderWidth: 1,
+        borderColor: Colors.primary + '30',
+        borderRadius: BorderRadius.md,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        marginBottom: Spacing.md,
+    },
+    sanitizeNoticeText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     deliveryCard: {
         backgroundColor: Colors.white,
