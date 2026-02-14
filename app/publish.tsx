@@ -43,6 +43,45 @@ const BASE_STEPS = [
     { key: 'photos', title: 'Photos', icon: 'images-outline' as const },
 ];
 
+const STEP_COPY: Record<string, { title: string; subtitle: string; tip: string }> = {
+    category: {
+        title: 'Choisissez la bonne catégorie',
+        subtitle: "Classez votre annonce pour la rendre facile à trouver par les acheteurs.",
+        tip: 'Astuce: choisissez la catégorie la plus spécifique possible.',
+    },
+    details: {
+        title: "Décrivez clairement l'annonce",
+        subtitle: 'Un titre clair et un bon prix augmentent fortement vos chances de vente.',
+        tip: 'Ajoutez un nom précis et une description utile.',
+    },
+    delivery: {
+        title: 'Configurez la livraison',
+        subtitle: 'Indiquez la récupération et les informations utiles pour le livreur.',
+        tip: 'Activez la livraison seulement si vous avez un point de pickup fiable.',
+    },
+    attributes: {
+        title: 'Renseignez les caractéristiques',
+        subtitle: 'Ces détails permettent des filtres plus précis dans la recherche.',
+        tip: 'Remplissez les champs obligatoires pour de meilleures performances.',
+    },
+    photos: {
+        title: 'Ajoutez des photos de qualité',
+        subtitle: 'Les annonces avec images claires convertissent mieux.',
+        tip: 'Mettez la meilleure photo en premier, elle sera principale.',
+    },
+};
+
+const BASE_FORM_FIELDS = [
+    'name',
+    'description',
+    'price',
+    'quantity',
+    'currency',
+    'isDeliverable',
+    'pickupLocation',
+    'weightClass',
+];
+
 export default function PublishScreen() {
     const router = useRouter();
     const { requireAuth } = useAuth();
@@ -76,7 +115,7 @@ export default function PublishScreen() {
         pickupLongitude: '',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
-    const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
+    const [images, setImages] = useState<{ uri: string; name: string; type: string }[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [mapVisible, setMapVisible] = useState(false);
@@ -135,19 +174,9 @@ export default function PublishScreen() {
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
-    const baseFormFields = [
-        'name',
-        'description',
-        'price',
-        'quantity',
-        'currency',
-        'isDeliverable',
-        'pickupLocation',
-        'weightClass',
-    ];
     const filteredAttributes = React.useMemo(() => {
         if (!categoryAttributes) return [];
-        return categoryAttributes.filter(attr => !baseFormFields.includes(attr.name));
+        return categoryAttributes.filter(attr => !BASE_FORM_FIELDS.includes(attr.name));
     }, [categoryAttributes]);
 
     // Calculer les étapes dynamiquement en fonction des attributs
@@ -167,13 +196,19 @@ export default function PublishScreen() {
         [STEPS]
     );
 
+    const activeStep = React.useMemo(
+        () => STEPS.find((step) => step.id === currentStep) || STEPS[0],
+        [STEPS, currentStep]
+    );
+    const activeStepCopy = STEP_COPY[activeStep?.key || 'details'] || STEP_COPY.details;
+
     // Debug: Log category attributes when they change
     React.useEffect(() => {
         if (categoryAttributes) {
             console.log('📋 Category Attributes:', categoryAttributes);
             console.log('📋 Number of attributes:', categoryAttributes.length);
             
-            const filtered = categoryAttributes.filter(attr => baseFormFields.includes(attr.name));
+            const filtered = categoryAttributes.filter(attr => BASE_FORM_FIELDS.includes(attr.name));
             if (filtered.length > 0) {
                 console.log('⚠️ Attributs filtrés (conflit avec champs de base):', filtered.map(a => a.name));
             }
@@ -207,14 +242,6 @@ export default function PublishScreen() {
             setCategoryPath([...categoryPath, category]);
         } else {
             setCategoryPath([...categoryPath, category]);
-            setSelectedLeafCategory(null);
-        }
-    };
-
-    const handleCategoryBack = () => {
-        if (categoryPath.length > 0) {
-            const newPath = categoryPath.slice(0, -1);
-            setCategoryPath(newPath);
             setSelectedLeafCategory(null);
         }
     };
@@ -276,7 +303,7 @@ export default function PublishScreen() {
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus�e', message: 'Nous avons besoin de la permission pour acc�der � vos photos.', variant: 'error' });
+            showAlert({ title: 'Permission refusée', message: 'Nous avons besoin de la permission pour accéder à vos photos.', variant: 'error' });
             return;
         }
 
@@ -296,7 +323,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr�parer les images', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de préparer les images', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -306,7 +333,7 @@ export default function PublishScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus�e', message: 'Nous avons besoin de la permission pour utiliser la cam�ra.', variant: 'error' });
+            showAlert({ title: 'Permission refusée', message: 'Nous avons besoin de la permission pour utiliser la caméra.', variant: 'error' });
             return;
         }
 
@@ -324,7 +351,7 @@ export default function PublishScreen() {
                 setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr�parer la photo', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de préparer la photo', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -349,21 +376,21 @@ export default function PublishScreen() {
         const attributesStepId = getStepId('attributes');
         const photosStepId = getStepId('photos');
 
-        // �tape 1: Cat�gorie
+        // Étape 1: Catégorie
         if (step === categoryStepId) {
             if (!selectedLeafCategory) {
-                showAlert({ title: 'Erreur', message: 'Veuillez s�lectionner une cat�gorie', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Veuillez sélectionner une catégorie', variant: 'error' });
                 return false;
             }
         }
 
-        // �tape 2: D�tails de base
+        // Étape 2: Détails de base
         if (step === detailsStepId) {
             if (!formData.name?.trim()) {
                 newErrors.name = 'Le nom est obligatoire';
             }
             if (!formData.price || parseFloat(formData.price) <= 0) {
-                newErrors.price = 'Le prix doit �tre sup�rieur � 0';
+                newErrors.price = 'Le prix doit être supérieur à 0';
             }
 
             if (Object.keys(newErrors).length > 0) {
@@ -373,10 +400,10 @@ export default function PublishScreen() {
             }
         }
 
-        // �tape 3: Livraison
+        // Étape 3: Livraison
         if (step === deliveryStepId) {
             if (formData.isDeliverable && !formData.pickupAddress?.trim()) {
-                newErrors.pickupAddress = "L'adresse de r�cup�ration est obligatoire";
+                newErrors.pickupAddress = "L'adresse de récupération est obligatoire";
             }
             if (formData.isDeliverable && (!formData.weightClass || formData.weightClass.length === 0)) {
                 newErrors.weightClass = 'La classe de poids est obligatoire';
@@ -385,7 +412,7 @@ export default function PublishScreen() {
                 const latitude = parseCoordinate(formData.pickupLatitude);
                 const longitude = parseCoordinate(formData.pickupLongitude);
                 if (typeof latitude !== 'number' || typeof longitude !== 'number') {
-                    newErrors.pickupLocation = 'Veuillez s�lectionner un point sur la carte';
+                    newErrors.pickupLocation = 'Veuillez sélectionner un point sur la carte';
                 }
             }
 
@@ -396,7 +423,7 @@ export default function PublishScreen() {
             }
         }
 
-        // �tape 4: Attributs dynamiques (seulement si pr�sents)
+        // Étape 4: Attributs dynamiques (seulement si présents)
         if (step === attributesStepId && filteredAttributes.length > 0) {
             for (const attr of filteredAttributes) {
                 if (attr.required && !dynamicAttributes[attr.name]) {
@@ -411,7 +438,7 @@ export default function PublishScreen() {
             }
         }
 
-        // �tape Photos
+        // Étape Photos
         if (step === photosStepId) {
             if (images.length === 0) {
                 showAlert({ title: 'Erreur', message: 'Veuillez ajouter au moins une photo', variant: 'error' });
@@ -442,7 +469,7 @@ export default function PublishScreen() {
         if (!validateStep(currentStep)) return;
 
         if (!selectedLeafCategory) {
-            showAlert({ title: 'Erreur', message: 'Veuillez s�lectionner une cat�gorie', variant: 'error' });
+            showAlert({ title: 'Erreur', message: 'Veuillez sélectionner une catégorie', variant: 'error' });
             return;
         }
 
@@ -482,7 +509,7 @@ export default function PublishScreen() {
                 if (typeof latitude !== 'number' || typeof longitude !== 'number') {
                     showAlert({
                         title: 'Erreur',
-                        message: 'Veuillez s�lectionner un point de r�cup�ration sur la carte',
+                        message: 'Veuillez sélectionner un point de récupération sur la carte',
                         variant: 'error',
                     });
                     return;
@@ -612,6 +639,39 @@ export default function PublishScreen() {
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
                 >
+                    <View style={styles.stepHeroContainer}>
+                        <LinearGradient colors={Gradients.primaryVertical} style={styles.stepHeroGradient}>
+                            <View style={styles.stepHeroTopRow}>
+                                <View style={styles.stepHeroBadge}>
+                                    <Ionicons name="sparkles-outline" size={14} color={Colors.accent} />
+                                    <Text style={styles.stepHeroBadgeText}>Etape {currentStep} / {STEPS.length}</Text>
+                                </View>
+                                <Text style={styles.stepHeroCounter}>
+                                    {Math.round(((currentStep - 1) / Math.max(STEPS.length - 1, 1)) * 100)}%
+                                </Text>
+                            </View>
+
+                            <View style={styles.stepHeroMainRow}>
+                                <View style={styles.stepHeroIcon}>
+                                    <Ionicons
+                                        name={(activeStep?.icon || 'sparkles-outline') as any}
+                                        size={22}
+                                        color={Colors.white}
+                                    />
+                                </View>
+                                <View style={styles.stepHeroTextBlock}>
+                                    <Text style={styles.stepHeroTitle}>{activeStepCopy.title}</Text>
+                                    <Text style={styles.stepHeroSubtitle}>{activeStepCopy.subtitle}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.stepHeroTip}>
+                                <Ionicons name="checkmark-circle-outline" size={16} color={Colors.accent} />
+                                <Text style={styles.stepHeroTipText}>{activeStepCopy.tip}</Text>
+                            </View>
+                        </LinearGradient>
+                    </View>
+
                     {/* Step 1: Sélection Catégorie */}
                     {currentStep === getStepId('category') && (
                         <View style={styles.stepContent}>
@@ -715,19 +775,19 @@ export default function PublishScreen() {
                                         <Ionicons name="checkmark-circle" size={28} color={Colors.white} />
                                     </View>
                                     <View style={styles.leafSelectedContent}>
-                                        <Text style={styles.leafSelectedTitle}>Cat??gorie s??lectionn??e</Text>
+                                        <Text style={styles.leafSelectedTitle}>Catégorie sélectionnée</Text>
                                         <Text style={styles.leafSelectedSubtitle}>
                                             {selectedLeafCategory.name}
                                         </Text>
                                         <Text style={styles.leafSelectedHint}>
-                                            Vous pouvez continuer vers l'??tape suivante.
+                                            Vous pouvez continuer vers l&apos;etape suivante.
                                         </Text>
                                     </View>
                                 </View>
                             ) : (
                                 <View style={styles.emptyContainer}>
                                     <Ionicons name="folder-open-outline" size={64} color={Colors.gray300} />
-                                    <Text style={styles.emptyText}>Aucune cat??gorie disponible</Text>
+                                    <Text style={styles.emptyText}>Aucune catégorie disponible</Text>
                                 </View>
                             )}
                         </View>
@@ -736,7 +796,7 @@ export default function PublishScreen() {
                     {/* Step 2: Détails du Produit */}
                     {currentStep === getStepId('details') && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>📝 Détails de l'annonce</Text>
+                            <Text style={styles.stepTitle}>📝 Détails de l&apos;annonce</Text>
                             <Text style={styles.stepSubtitle}>
                                 Remplissez les informations sur votre produit ou service
                             </Text>
@@ -744,7 +804,7 @@ export default function PublishScreen() {
                             {/* Nom */}
                             <View style={styles.inputGroup}>
                                 <Text style={styles.inputLabel}>
-                                    Nom de l'annonce <Text style={styles.required}>*</Text>
+                                    Nom de l&apos;annonce <Text style={styles.required}>*</Text>
                                 </Text>
                                 <View style={[styles.inputContainer, errors.name && styles.inputError]}>
                                     <Ionicons name="pricetag-outline" size={20} color={Colors.gray400} />
@@ -820,7 +880,7 @@ export default function PublishScreen() {
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>🚚 Livraison</Text>
                             <Text style={styles.stepSubtitle}>
-                                Définissez si l'annonce est livrable et le point de récupération
+                                Définissez si l&apos;annonce est livrable et le point de récupération
                             </Text>
 
                             <View style={styles.deliveryCard}>
@@ -989,7 +1049,7 @@ export default function PublishScreen() {
                         <View style={styles.stepContent}>
                             <Text style={styles.stepTitle}>📸 Ajoutez des photos</Text>
                             <Text style={styles.stepSubtitle}>
-                                Ajoutez jusqu'à 10 photos de qualité ({images.length}/10)
+                                Ajoutez jusqu&apos;a 10 photos de qualite ({images.length}/10)
                             </Text>
 
                             {/* Grid des images */}
@@ -1108,7 +1168,7 @@ export default function PublishScreen() {
                                 ) : (
                                     <>
                                         <Ionicons name="checkmark-circle" size={24} color={Colors.primary} />
-                                        <Text style={styles.publishButtonText}>Publier l'annonce</Text>
+                                        <Text style={styles.publishButtonText}>Publier l&apos;annonce</Text>
                                     </>
                                 )}
                             </LinearGradient>
@@ -1188,19 +1248,24 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.xl,
-        paddingVertical: Spacing.lg,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.md,
         backgroundColor: Colors.white,
         borderBottomWidth: 1,
         borderBottomColor: Colors.gray100,
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     headerTitle: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
     },
@@ -1209,17 +1274,21 @@ const styles = StyleSheet.create({
     },
     progressContainer: {
         backgroundColor: Colors.white,
-        paddingHorizontal: Spacing.xl,
-        paddingVertical: Spacing.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.gray100,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
+        ...Shadows.sm,
     },
     progressTrack: {
-        height: 6,
+        height: 8,
         backgroundColor: Colors.gray100,
         borderRadius: BorderRadius.full,
         overflow: 'hidden',
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.md,
     },
     progressFill: {
         height: '100%',
@@ -1229,19 +1298,23 @@ const styles = StyleSheet.create({
     stepsIndicator: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        alignItems: 'flex-start',
     },
     stepItem: {
         alignItems: 'center',
         flex: 1,
+        paddingHorizontal: 2,
     },
     stepIconContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         backgroundColor: Colors.gray100,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: Spacing.xs,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     stepIconActive: {
         backgroundColor: Colors.primary,
@@ -1250,9 +1323,10 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.success,
     },
     stepLabel: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.medium,
+        fontSize: 11,
+        fontWeight: Typography.fontWeight.semibold,
         color: Colors.gray400,
+        textAlign: 'center',
     },
     stepLabelActive: {
         color: Colors.textPrimary,
@@ -1265,32 +1339,120 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        paddingBottom: Spacing.xxxl,
+        paddingBottom: Spacing.lg,
+        paddingTop: Spacing.sm,
     },
     stepContent: {
-        padding: Spacing.xl,
+        padding: Spacing.lg,
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.md,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
     },
     stepTitle: {
-        fontSize: Typography.fontSize.xxl,
+        fontSize: Typography.fontSize.xl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
+        marginBottom: Spacing.xs,
     },
     stepSubtitle: {
-        fontSize: Typography.fontSize.base,
+        fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
-        marginBottom: Spacing.xl,
-        lineHeight: 22,
+        marginBottom: Spacing.lg,
+        lineHeight: 20,
+    },
+    stepHeroContainer: {
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+        ...Shadows.md,
+    },
+    stepHeroGradient: {
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        gap: Spacing.md,
+    },
+    stepHeroTopRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    stepHeroBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        backgroundColor: 'rgba(255, 255, 255, 0.14)',
+    },
+    stepHeroBadgeText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
+    },
+    stepHeroCounter: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.accent,
+    },
+    stepHeroMainRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    stepHeroIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    },
+    stepHeroTextBlock: {
+        flex: 1,
+    },
+    stepHeroTitle: {
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
+    stepHeroSubtitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.medium,
+        color: Colors.white + 'DD',
+        lineHeight: 19,
+    },
+    stepHeroTip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255, 255, 255, 0.16)',
+        paddingTop: Spacing.sm,
+    },
+    stepHeroTipText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.white + 'E6',
     },
     breadcrumb: {
         flexDirection: 'row',
         alignItems: 'center',
         flexWrap: 'wrap',
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray50,
         padding: Spacing.md,
         borderRadius: BorderRadius.lg,
         marginBottom: Spacing.lg,
         gap: Spacing.xs,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
     },
     breadcrumbItem: {
         flexDirection: 'row',
@@ -1310,10 +1472,11 @@ const styles = StyleSheet.create({
     categoriesGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: Spacing.md,
+        justifyContent: 'space-between',
     },
     categoryCard: {
         width: '48%',
+        marginBottom: Spacing.md,
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
@@ -1389,9 +1552,9 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         paddingHorizontal: Spacing.lg,
         gap: Spacing.md,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
-        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        minHeight: 52,
     },
     input: {
         flex: 1,
@@ -1412,9 +1575,8 @@ const styles = StyleSheet.create({
     textAreaContainer: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.lg,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
-        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     textArea: {
         padding: Spacing.lg,
@@ -1433,13 +1595,12 @@ const styles = StyleSheet.create({
         marginRight: 0,
     },
     deliveryCard: {
-        marginTop: Spacing.lg,
+        marginTop: Spacing.sm,
         padding: Spacing.lg,
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray50,
         borderRadius: BorderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.gray100,
-        ...Shadows.sm,
+        borderColor: Colors.gray200,
     },
     deliveryHeader: {
         flexDirection: 'row',
@@ -1556,7 +1717,7 @@ const styles = StyleSheet.create({
     imagesGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: Spacing.md,
+        gap: Spacing.sm,
     },
     imageItem: {
         width: '31%',
@@ -1796,11 +1957,15 @@ const styles = StyleSheet.create({
     navigationBar: {
         flexDirection: 'row',
         gap: Spacing.md,
-        padding: Spacing.xl,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        paddingBottom: Spacing.lg,
         backgroundColor: Colors.white,
         borderTopWidth: 1,
-        borderTopColor: Colors.gray100,
-        ...Shadows.xl,
+        borderTopColor: Colors.gray200,
+        borderTopLeftRadius: BorderRadius.xl,
+        borderTopRightRadius: BorderRadius.xl,
+        ...Shadows.lg,
     },
     previousButton: {
         flex: 1,
@@ -1808,10 +1973,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.white,
-        borderWidth: 2,
+        borderWidth: 1,
         borderColor: Colors.primary,
-        borderRadius: BorderRadius.xl,
-        paddingVertical: Spacing.lg,
+        borderRadius: BorderRadius.lg,
+        minHeight: 52,
         gap: Spacing.sm,
     },
     previousButtonText: {
@@ -1829,7 +1994,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.lg,
+        minHeight: 52,
         gap: Spacing.sm,
     },
     nextButtonText: {
@@ -1850,7 +2015,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.lg,
+        minHeight: 52,
         gap: Spacing.sm,
     },
     publishButtonText: {
