@@ -37,6 +37,8 @@ export default function AuthModal() {
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
+    const [isPhoneFocused, setIsPhoneFocused] = useState(false);
+    const [isPinFocused, setIsPinFocused] = useState(false);
 
     // Alert state
     const [alert, setAlert] = useState<{
@@ -73,7 +75,7 @@ export default function AuthModal() {
                 useNativeDriver: true,
             }),
         ]).start();
-    }, []);
+    }, [fadeAnim, slideAnim]);
 
     const showAlert = (
         title: string,
@@ -188,168 +190,255 @@ export default function AuthModal() {
                         <ScrollView
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
                         >
-                    {/* Header */}
-                    <View style={styles.header}>
-                        <TouchableOpacity
-                            style={styles.closeButton}
-                            onPress={() => router.back()}
-                        >
-                            <Ionicons name="close" size={28} color={Colors.textPrimary} />
-                        </TouchableOpacity>
-                    </View>
+                            <View pointerEvents="none" style={styles.colorOrbWarm} />
+                            <View pointerEvents="none" style={styles.colorOrbCool} />
+                            <View style={styles.handle} />
 
-                    {/* Illustration */}
-                    <View style={styles.illustrationContainer}>
-                        <LinearGradient
-                            colors={mode === 'register' ? Gradients.cool : Gradients.primary}
-                            style={styles.iconCircle}
-                        >
-                            <Ionicons
-                                name={mode === 'register' ? 'person-add-outline' : 'log-in-outline'}
-                                size={64}
-                                color={Colors.white}
-                            />
-                        </LinearGradient>
-                    </View>
-
-                    {/* Toggle Tabs */}
-                    <View style={styles.tabsContainer}>
-                        <TouchableOpacity
-                            style={[styles.tab, mode === 'register' && styles.tabActive]}
-                            onPress={() => setMode('register')}
-                        >
-                            <Text
-                                style={[
-                                    styles.tabText,
-                                    mode === 'register' && styles.tabTextActive,
-                                ]}
-                            >
-                                S'inscrire
-                            </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.tab, mode === 'login' && styles.tabActive]}
-                            onPress={() => setMode('login')}
-                        >
-                            <Text
-                                style={[
-                                    styles.tabText,
-                                    mode === 'login' && styles.tabTextActive,
-                                ]}
-                            >
-                                Se connecter
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {/* Title */}
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.title}>
-                            {mode === 'register' ? 'Créer un compte' : 'Bon retour !'}
-                        </Text>
-                        <Text style={styles.subtitle}>
-                            {mode === 'register'
-                                ? 'Entrez votre numéro pour commencer'
-                                : 'Connectez-vous pour continuer'}
-                        </Text>
-                    </View>
-
-                    {/* Form */}
-                    <View style={styles.form}>
-                        {/* Phone */}
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Numéro de téléphone</Text>
-                            <View style={styles.inputContainer}>
-                                <Ionicons name="call-outline" size={20} color={Colors.gray400} />
-                                <TextInput
-                                    style={styles.input}
-                                    value={phone}
-                                    onChangeText={setPhone}
-                                    placeholder="Ex: 0812345678"
-                                    placeholderTextColor={Colors.gray400}
-                                    keyboardType="phone-pad"
-                                    autoCapitalize="none"
-                                />
+                            <View style={styles.header}>
+                                <LinearGradient
+                                    colors={mode === 'register' ? Gradients.accent : Gradients.primary}
+                                    style={styles.brandBadge}
+                                >
+                                    <Ionicons name="shield-checkmark-outline" size={14} color={Colors.white} />
+                                    <Text style={styles.brandBadgeText}>UTY Secure</Text>
+                                </LinearGradient>
+                                <TouchableOpacity
+                                    style={styles.closeButton}
+                                    onPress={() => router.back()}
+                                >
+                                    <Ionicons name="close" size={22} color={Colors.textPrimary} />
+                                </TouchableOpacity>
                             </View>
-                        </View>
 
-                        {/* PIN (only for login) */}
-                        {mode === 'login' && (
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.label}>Code PIN</Text>
-                                <View style={styles.inputContainer}>
-                                    <Ionicons
-                                        name="lock-closed-outline"
-                                        size={20}
-                                        color={Colors.gray400}
-                                    />
-                                    <TextInput
-                                        style={styles.input}
-                                        value={pin}
-                                        onChangeText={setPin}
-                                        placeholder="4 chiffres"
-                                        placeholderTextColor={Colors.gray400}
-                                        secureTextEntry={!showPin}
-                                        keyboardType="number-pad"
-                                        maxLength={4}
-                                    />
-                                    <TouchableOpacity onPress={() => setShowPin(!showPin)}>
-                                        <Ionicons
-                                            name={showPin ? 'eye-off-outline' : 'eye-outline'}
-                                            size={20}
-                                            color={Colors.gray400}
-                                        />
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        )}
-
-                        {/* Submit Button */}
-                        <TouchableOpacity
-                            style={[styles.submitButton, isLoading && styles.disabledButton]}
-                            onPress={mode === 'register' ? handleRegister : handleLogin}
-                            disabled={isLoading}
-                        >
                             <LinearGradient
                                 colors={mode === 'register' ? Gradients.cool : Gradients.primary}
-                                style={styles.submitGradient}
+                                style={styles.heroCard}
                             >
-                                {isLoading ? (
-                                    <Text style={styles.submitButtonText}>
-                                        {mode === 'register' ? 'Envoi...' : 'Connexion...'}
+                                <View style={styles.heroIconCircle}>
+                                    <Ionicons
+                                        name={mode === 'register' ? 'person-add-outline' : 'log-in-outline'}
+                                        size={36}
+                                        color={Colors.white}
+                                    />
+                                </View>
+                                <View style={styles.heroTextWrap}>
+                                    <Text style={styles.heroTitle}>
+                                        {mode === 'register' ? 'Creer un compte' : 'Connexion rapide'}
                                     </Text>
-                                ) : (
-                                    <>
-                                        <Text style={styles.submitButtonText}>
-                                            {mode === 'register'
-                                                ? 'Recevoir le code'
-                                                : 'Se connecter'}
-                                        </Text>
-                                        <Ionicons
-                                            name="arrow-forward"
-                                            size={20}
-                                            color={Colors.white}
-                                        />
-                                    </>
-                                )}
+                                    <Text style={styles.heroSubtitle}>
+                                        {mode === 'register'
+                                            ? 'Inscrivez-vous en 1 minute via OTP'
+                                            : 'Retrouvez votre compte en toute securite'}
+                                    </Text>
+                                </View>
                             </LinearGradient>
-                        </TouchableOpacity>
 
-                        {/* Info Box (only for register) */}
-                        {mode === 'register' && (
-                            <View style={styles.infoBox}>
-                                <Ionicons
-                                    name="information-circle-outline"
-                                    size={20}
-                                    color={Colors.accent}
-                                />
-                                <Text style={styles.infoText}>
-                                    Un code de vérification sera envoyé à ce numéro
+                            <View style={styles.tabsContainer}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.tab,
+                                        mode === 'register' && styles.tabActiveRegister,
+                                    ]}
+                                    onPress={() => setMode('register')}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.tabText,
+                                            mode === 'register' && styles.tabTextActive,
+                                        ]}
+                                    >
+                                        S&apos;inscrire
+                                    </Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.tab,
+                                        mode === 'login' && styles.tabActiveLogin,
+                                    ]}
+                                    onPress={() => setMode('login')}
+                                >
+                                    <Text
+                                        style={[
+                                            styles.tabText,
+                                            mode === 'login' && styles.tabTextActive,
+                                        ]}
+                                    >
+                                        Se connecter
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.titleContainer}>
+                                <Text style={styles.title}>
+                                    {mode === 'register' ? 'Bienvenue' : 'Bon retour'}
+                                </Text>
+                                <Text style={styles.subtitle}>
+                                    {mode === 'register'
+                                        ? 'Entrez votre numero pour recevoir un code de verification.'
+                                        : 'Entrez votre numero et votre PIN pour continuer.'}
                                 </Text>
                             </View>
-                        )}
-                    </View>
+
+                            <View style={styles.form}>
+                                <View style={styles.inputGroup}>
+                                    <Text style={styles.label}>Numero de telephone</Text>
+                                    <View
+                                        style={[
+                                            styles.inputContainer,
+                                            isPhoneFocused &&
+                                                (mode === 'register'
+                                                    ? styles.inputContainerFocusedWarm
+                                                    : styles.inputContainerFocusedCool),
+                                        ]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.inputPrefixBadge,
+                                                mode === 'register'
+                                                    ? styles.inputPrefixBadgeWarm
+                                                    : styles.inputPrefixBadgeCool,
+                                            ]}
+                                        >
+                                            <Text style={styles.inputPrefixText}>TEL</Text>
+                                        </View>
+                                        <Ionicons name="call-outline" size={19} color={Colors.gray500} />
+                                        <TextInput
+                                            style={styles.input}
+                                            value={phone}
+                                            onChangeText={setPhone}
+                                            onFocus={() => setIsPhoneFocused(true)}
+                                            onBlur={() => setIsPhoneFocused(false)}
+                                            placeholder="Ex: 0812345678"
+                                            placeholderTextColor={Colors.gray400}
+                                            keyboardType="phone-pad"
+                                            autoCapitalize="none"
+                                        />
+                                    </View>
+                                </View>
+
+                                {mode === 'login' && (
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Code PIN</Text>
+                                        <View
+                                            style={[
+                                                styles.inputContainer,
+                                                isPinFocused &&
+                                                    (mode === 'register'
+                                                        ? styles.inputContainerFocusedWarm
+                                                        : styles.inputContainerFocusedCool),
+                                            ]}
+                                        >
+                                            <View
+                                                style={[
+                                                    styles.inputPrefixBadge,
+                                                    mode === 'register'
+                                                        ? styles.inputPrefixBadgeWarm
+                                                        : styles.inputPrefixBadgeCool,
+                                                ]}
+                                            >
+                                                <Text style={styles.inputPrefixText}>PIN</Text>
+                                            </View>
+                                            <Ionicons
+                                                name="lock-closed-outline"
+                                                size={19}
+                                                color={Colors.gray500}
+                                            />
+                                            <TextInput
+                                                style={styles.input}
+                                                value={pin}
+                                                onChangeText={setPin}
+                                                onFocus={() => setIsPinFocused(true)}
+                                                onBlur={() => setIsPinFocused(false)}
+                                                placeholder="4 chiffres"
+                                                placeholderTextColor={Colors.gray400}
+                                                secureTextEntry={!showPin}
+                                                keyboardType="number-pad"
+                                                maxLength={4}
+                                            />
+                                            <TouchableOpacity onPress={() => setShowPin(!showPin)} style={styles.eyeButton}>
+                                                <Ionicons
+                                                    name={showPin ? 'eye-off-outline' : 'eye-outline'}
+                                                    size={18}
+                                                    color={Colors.gray500}
+                                                />
+                                            </TouchableOpacity>
+                                        </View>
+                                        <View style={styles.pinHintRow}>
+                                            <Ionicons name="information-circle-outline" size={14} color={Colors.gray500} />
+                                            <Text style={styles.pinHintText}>Le PIN contient exactement 4 chiffres</Text>
+                                        </View>
+                                    </View>
+                                )}
+
+                                <TouchableOpacity
+                                    style={[styles.submitButton, isLoading && styles.disabledButton]}
+                                    onPress={mode === 'register' ? handleRegister : handleLogin}
+                                    disabled={isLoading}
+                                >
+                                    <LinearGradient
+                                        colors={mode === 'register' ? Gradients.cool : Gradients.primary}
+                                        style={styles.submitGradient}
+                                    >
+                                        {isLoading ? (
+                                            <Text style={styles.submitButtonText}>
+                                                {mode === 'register' ? 'Envoi...' : 'Connexion...'}
+                                            </Text>
+                                        ) : (
+                                            <>
+                                                <Text style={styles.submitButtonText}>
+                                                    {mode === 'register'
+                                                        ? 'Recevoir le code'
+                                                        : 'Se connecter'}
+                                                </Text>
+                                                <View
+                                                    style={[
+                                                        styles.submitIconWrap,
+                                                        mode === 'register'
+                                                            ? styles.submitIconWrapWarm
+                                                            : styles.submitIconWrapCool,
+                                                    ]}
+                                                >
+                                                    <Ionicons
+                                                        name="arrow-forward"
+                                                        size={18}
+                                                        color={Colors.primary}
+                                                    />
+                                                </View>
+                                            </>
+                                        )}
+                                    </LinearGradient>
+                                </TouchableOpacity>
+
+                                {mode === 'register' ? (
+                                    <View style={styles.infoBox}>
+                                        <Ionicons
+                                            name="information-circle-outline"
+                                            size={18}
+                                            color={Colors.accentDark}
+                                        />
+                                        <Text style={styles.infoText}>
+                                            Un code OTP vous sera envoye sur ce numero.
+                                        </Text>
+                                    </View>
+                                ) : null}
+
+                                <View style={styles.trustRow}>
+                                    <View style={[styles.trustChip, styles.trustChipPrimary]}>
+                                        <Ionicons name="shield-outline" size={13} color={Colors.primaryDark} />
+                                        <Text style={[styles.trustChipText, styles.trustChipTextPrimary]}>Securise</Text>
+                                    </View>
+                                    <View style={[styles.trustChip, styles.trustChipWarning]}>
+                                        <Ionicons name="flash-outline" size={13} color={Colors.accentDark} />
+                                        <Text style={[styles.trustChipText, styles.trustChipTextWarning]}>Rapide</Text>
+                                    </View>
+                                    <View style={[styles.trustChip, styles.trustChipInfo]}>
+                                        <Ionicons name="lock-closed-outline" size={13} color={Colors.info} />
+                                        <Text style={[styles.trustChipText, styles.trustChipTextInfo]}>Prive</Text>
+                                    </View>
+                                </View>
+                            </View>
                         </ScrollView>
                     </KeyboardAvoidingView>
                 </Animated.View>
@@ -374,70 +463,146 @@ export default function AuthModal() {
 const styles = StyleSheet.create({
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        backgroundColor: 'rgba(8, 19, 37, 0.42)',
+        justifyContent: 'flex-end',
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0, 0, 0, 0.3)',
+        backgroundColor: 'rgba(9, 26, 52, 0.28)',
     },
     container: {
         flex: 1,
     },
     animatedContainer: {
         flex: 1,
-        backgroundColor: Colors.white,
+        backgroundColor: '#F7FAFF',
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
-        marginTop: Spacing.xxxl,
+        marginTop: Spacing.massive,
         ...Shadows.xl,
     },
     scrollContent: {
         flexGrow: 1,
         paddingHorizontal: Spacing.xxl,
-        paddingBottom: Spacing.xxxl,
+        paddingBottom: Spacing.huge,
+        position: 'relative',
+    },
+    colorOrbWarm: {
+        position: 'absolute',
+        top: 82,
+        right: -26,
+        width: 108,
+        height: 108,
+        borderRadius: 54,
+        backgroundColor: Colors.accent + '33',
+    },
+    colorOrbCool: {
+        position: 'absolute',
+        top: 158,
+        left: -38,
+        width: 130,
+        height: 130,
+        borderRadius: 65,
+        backgroundColor: Colors.info + '26',
+    },
+    handle: {
+        alignSelf: 'center',
+        width: 54,
+        height: 5,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray300,
+        marginTop: Spacing.sm,
+        marginBottom: Spacing.md,
     },
     header: {
-        paddingVertical: Spacing.lg,
-        alignItems: 'flex-end',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    brandBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
+    },
+    brandBadgeText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     closeButton: {
-        width: 48,
-        height: 48,
+        width: 42,
+        height: 42,
         alignItems: 'center',
         justifyContent: 'center',
         borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray100,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         ...Shadows.sm,
     },
-    illustrationContainer: {
+    heroCard: {
+        borderRadius: BorderRadius.xxl,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.lg,
+        flexDirection: 'row',
         alignItems: 'center',
-        marginVertical: Spacing.xxl,
+        gap: Spacing.md,
+        marginBottom: Spacing.xl,
+        ...Shadows.lg,
     },
-    iconCircle: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
+    heroIconCircle: {
+        width: 62,
+        height: 62,
+        borderRadius: 31,
+        backgroundColor: '#FFFFFF2D',
+        borderWidth: 1,
+        borderColor: '#FFFFFF4D',
         alignItems: 'center',
         justifyContent: 'center',
-        ...Shadows.xl,
+    },
+    heroTextWrap: {
+        flex: 1,
+        gap: 2,
+    },
+    heroTitle: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    heroSubtitle: {
+        color: Colors.white + 'E8',
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
     },
     tabsContainer: {
         flexDirection: 'row',
-        backgroundColor: Colors.gray50,
+        backgroundColor: Colors.primary + '0A',
         borderRadius: BorderRadius.xxl,
-        padding: Spacing.xs,
-        marginBottom: Spacing.xxl,
+        padding: 5,
+        marginBottom: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         ...Shadows.sm,
     },
     tab: {
         flex: 1,
-        paddingVertical: Spacing.lg,
+        minHeight: 46,
         alignItems: 'center',
+        justifyContent: 'center',
         borderRadius: BorderRadius.xl,
     },
-    tabActive: {
-        backgroundColor: Colors.white,
-        ...Shadows.md,
+    tabActiveRegister: {
+        backgroundColor: Colors.accentDark,
+        ...Shadows.sm,
+    },
+    tabActiveLogin: {
+        backgroundColor: Colors.primary,
+        ...Shadows.sm,
     },
     tabText: {
         fontSize: Typography.fontSize.base,
@@ -445,57 +610,100 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
     },
     tabTextActive: {
-        color: Colors.primary,
+        color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
     },
     titleContainer: {
-        marginBottom: Spacing.xxl,
+        marginBottom: Spacing.xl,
+        gap: Spacing.xs,
     },
     title: {
-        fontSize: Typography.fontSize.xxxl,
+        fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.md,
         textAlign: 'center',
     },
     subtitle: {
-        fontSize: Typography.fontSize.base,
+        fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
-        lineHeight: 24,
+        lineHeight: 22,
         textAlign: 'center',
     },
     form: {
-        gap: Spacing.xl,
+        gap: Spacing.lg,
     },
     inputGroup: {
-        gap: Spacing.md,
+        gap: Spacing.sm,
     },
     label: {
-        fontSize: Typography.fontSize.base,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
-        marginLeft: Spacing.xs,
+        marginLeft: 2,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
-        paddingHorizontal: Spacing.lg,
-        gap: Spacing.md,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
-        ...Shadows.md,
+        paddingHorizontal: Spacing.md,
+        gap: Spacing.sm,
+        borderWidth: 1.5,
+        borderColor: Colors.gray200,
+        ...Shadows.sm,
+    },
+    inputContainerFocusedWarm: {
+        borderColor: Colors.accentDark,
+        backgroundColor: Colors.accent + '12',
+    },
+    inputContainerFocusedCool: {
+        borderColor: Colors.primary,
+        backgroundColor: Colors.primary + '0A',
+    },
+    inputPrefixBadge: {
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    inputPrefixBadgeWarm: {
+        backgroundColor: Colors.accentDark,
+    },
+    inputPrefixBadgeCool: {
+        backgroundColor: Colors.primary,
+    },
+    inputPrefixText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white,
     },
     input: {
         flex: 1,
-        height: 56,
+        height: 54,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
     },
+    eyeButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.gray100,
+    },
+    pinHintRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginLeft: 2,
+    },
+    pinHintText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.medium,
+    },
     submitButton: {
-        marginTop: Spacing.xxl,
+        marginTop: Spacing.sm,
         borderRadius: BorderRadius.xxl,
         overflow: 'hidden',
         ...Shadows.lg,
@@ -504,14 +712,29 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: Spacing.sm,
         paddingVertical: Spacing.lg,
-        gap: Spacing.md,
     },
     submitButtonText: {
-        fontSize: Typography.fontSize.lg,
+        fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
-        letterSpacing: 0.5,
+        letterSpacing: 0.2,
+    },
+    submitIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '66',
+    },
+    submitIconWrapWarm: {
+        backgroundColor: Colors.white + 'EC',
+    },
+    submitIconWrapCool: {
+        backgroundColor: Colors.white,
     },
     disabledButton: {
         opacity: 0.6,
@@ -519,18 +742,59 @@ const styles = StyleSheet.create({
     infoBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.md,
-        padding: Spacing.lg,
-        backgroundColor: Colors.accent + '15',
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+        backgroundColor: Colors.accent + '1F',
         borderRadius: BorderRadius.xl,
-        borderLeftWidth: 4,
-        borderLeftColor: Colors.accent,
-        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.accent + '52',
     },
     infoText: {
         flex: 1,
         fontSize: Typography.fontSize.sm,
-        color: Colors.textSecondary,
+        color: Colors.gray700,
         lineHeight: 20,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    trustRow: {
+        marginTop: Spacing.xs,
+        flexDirection: 'row',
+        gap: Spacing.xs,
+        flexWrap: 'wrap',
+    },
+    trustChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    trustChipPrimary: {
+        borderColor: Colors.primary + '24',
+        backgroundColor: Colors.primary + '10',
+    },
+    trustChipWarning: {
+        borderColor: Colors.accentDark + '3D',
+        backgroundColor: Colors.accent + '1F',
+    },
+    trustChipInfo: {
+        borderColor: Colors.info + '35',
+        backgroundColor: Colors.info + '16',
+    },
+    trustChipText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    trustChipTextPrimary: {
+        color: Colors.primaryDark,
+    },
+    trustChipTextWarning: {
+        color: Colors.accentDark,
+    },
+    trustChipTextInfo: {
+        color: Colors.info,
     },
 });

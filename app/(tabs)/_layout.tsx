@@ -1,4 +1,5 @@
-import { Tabs } from 'expo-router';
+import { useAuth } from '@/hooks/useAuth';
+import { Tabs, useRouter } from 'expo-router';
 import React from 'react';
 
 import { HapticTab } from '@/components/haptic-tab';
@@ -8,6 +9,8 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const router = useRouter();
+  const { isAuthenticated } = useAuth();
 
   return (
     <Tabs
@@ -81,6 +84,14 @@ export default function TabLayout() {
               color={color} 
             />
           ),
+        }}
+        listeners={{
+          tabPress: (event) => {
+            if (!isAuthenticated) {
+              event.preventDefault();
+              router.push('/modal');
+            }
+          },
         }}
       />
       <Tabs.Screen

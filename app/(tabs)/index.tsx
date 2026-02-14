@@ -4,7 +4,9 @@ import { FAB } from '@/components/FAB';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductCardSkeleton, QuickActionSkeleton } from '@/components/SkeletonLoader';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -62,6 +64,38 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
     </View>
 );
 
+const CATEGORY_GRADIENTS = [
+    Gradients.cool,
+    Gradients.warm,
+    Gradients.success,
+    Gradients.accent,
+    Gradients.primary,
+    Gradients.sunset,
+    Gradients.ocean,
+];
+
+const resolveCategoryIcon = (name?: string, backendIcon?: string): keyof typeof Ionicons.glyphMap => {
+    const value = `${name || ''} ${backendIcon || ''}`.toLowerCase();
+
+    if (value.includes('elect') || value.includes('tech') || value.includes('digit')) return 'hardware-chip-outline';
+    if (value.includes('mode') || value.includes('fashion') || value.includes('vet')) return 'shirt-outline';
+    if (value.includes('maison') || value.includes('home') || value.includes('meuble')) return 'home-outline';
+    if (value.includes('sport')) return 'football-outline';
+    if (value.includes('livre') || value.includes('book')) return 'book-outline';
+    if (value.includes('beaute') || value.includes('beauty') || value.includes('cosmet')) return 'sparkles-outline';
+    if (value.includes('auto') || value.includes('vehic')) return 'car-sport-outline';
+    if (value.includes('service')) return 'briefcase-outline';
+    return 'grid-outline';
+};
+
+const getAnnouncementCategoryId = (announcement: any): string | null => {
+    const value = announcement?.category;
+    if (!value) return null;
+    if (typeof value === 'string') return value;
+    if (typeof value === 'object' && value?._id) return String(value._id);
+    return null;
+};
+
 const QUICK_ACTIONS = [
     { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
     { id: '2', title: 'Mes annonces', icon: 'list-outline', gradient: Gradients.primary, route: '/my-announcements' },
@@ -69,57 +103,63 @@ const QUICK_ACTIONS = [
     { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
 ];
 
-const CATEGORIES = [
-    { id: '1', name: 'Électronique', icon: 'hardware-chip-outline', gradient: Gradients.cool },
-    { id: '2', name: 'Mode', icon: 'shirt-outline', gradient: Gradients.warm },
-    { id: '3', name: 'Maison', icon: 'home-outline', gradient: Gradients.success },
-    { id: '4', name: 'Sports', icon: 'football-outline', gradient: Gradients.accent },
-    { id: '5', name: 'Livres', icon: 'book-outline', gradient: Gradients.primary },
-    { id: '6', name: 'Beauté', icon: 'sparkles-outline', gradient: Gradients.sunset },
-];
-
 export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const router = useRouter();
+    const { user, isAuthenticated, requireAuth } = useAuth();
     const [notifications] = useState(3);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchFocused, setSearchFocused] = useState(false);
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
 
     const { data: announcements, isLoading, error, refetch } = useGetAnnouncementsQuery();
+    const {
+        data: categoriesData = [],
+        isLoading: isCategoriesLoading,
+        refetch: refetchCategories,
+    } = useGetCategoriesQuery();
 
-    // Calculer les statistiques
-    const stats = useMemo(() => {
-        if (!announcements) return { total: 0, recent: 0, popular: 0 };
-        
-        const now = new Date().getTime();
-        const oneDayAgo = now - 24 * 60 * 60 * 1000;
-        
-        const recentCount = announcements.filter((a: any) => {
-            const createdAt = new Date(a.createdAt || a._id).getTime();
-            return createdAt > oneDayAgo;
-        }).length;
+    const greetingName = isAuthenticated
+        ? user?.firstName?.trim() || 'Utilisateur'
+        : 'Visiteur';
+    const greetingLine = `Bonjour ${greetingName}`;
 
-        return {
-            total: announcements.length,
-            recent: recentCount,
-            popular: Math.min(10, announcements.length),
-        };
+    const openProfile = React.useCallback(() => {
+        if (isAuthenticated) {
+            router.push('/profile');
+            return;
+        }
+        requireAuth('Vous devez etre connecte pour acceder au profil.');
+    }, [isAuthenticated, requireAuth, router]);
+
+    const categoryCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const announcement of announcements || []) {
+            const categoryId = getAnnouncementCategoryId(announcement);
+            if (!categoryId) continue;
+            counts.set(categoryId, (counts.get(categoryId) || 0) + 1);
+        }
+        return counts;
     }, [announcements]);
+
+    const homeCategories = useMemo(() => {
+        const activeCategories = categoriesData.filter((category: any) => category?.isActive !== false);
+        const topLevel = activeCategories.filter((category: any) => !category?.parentId);
+        const source = topLevel.length > 0 ? topLevel : activeCategories;
+
+        return source.slice(0, 10).map((category: any, index: number) => ({
+            id: String(category._id),
+            name: category.name || 'Categorie',
+            icon: resolveCategoryIcon(category.name, category.icon),
+            gradient: CATEGORY_GRADIENTS[index % CATEGORY_GRADIENTS.length],
+            count: categoryCounts.get(String(category._id)) || 0,
+        }));
+    }, [categoriesData, categoryCounts]);
 
     const onRefresh = async () => {
         setRefreshing(true);
-        await refetch();
+        await Promise.allSettled([refetch(), refetchCategories()]);
         setRefreshing(false);
     };
-
-    // Animations du header au scroll
-    const headerTranslateY = scrollY.interpolate({
-        inputRange: [0, 80],
-        outputRange: [0, -20],
-        extrapolate: 'clamp',
-    });
 
     const greetingOpacity = scrollY.interpolate({
         inputRange: [0, 40],
@@ -176,7 +216,7 @@ export default function HomeScreen() {
                         <View style={styles.userSection}>
                             <TouchableOpacity 
                                 style={styles.avatarButton}
-                                onPress={() => router.push('/profile')}
+                                onPress={openProfile}
                                 activeOpacity={0.8}
                             >
                                 <LinearGradient
@@ -198,8 +238,12 @@ export default function HomeScreen() {
                                     }
                                 ]}
                             >
-                                <Text style={styles.greeting}>Bonjour 👋</Text>
-                                <Text style={styles.userName}>Utilisateur</Text>
+                                <Text style={styles.greeting}>{greetingLine}</Text>
+                                <Text style={styles.userName}>
+                                    {isAuthenticated
+                                        ? 'Heureux de vous revoir'
+                                        : 'Explorez les annonces du moment'}
+                                </Text>
                             </Animated.View>
                         </View>
 
@@ -218,7 +262,7 @@ export default function HomeScreen() {
                             
                             <TouchableOpacity
                                 style={styles.modernHeaderButton}
-                                onPress={() => router.push('/profile')}
+                                onPress={openProfile}
                                 accessibilityLabel="Notifications"
                                 activeOpacity={0.7}
                             >
@@ -350,15 +394,30 @@ export default function HomeScreen() {
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={styles.categoriesContainer}
                     >
-                        {CATEGORIES.map((category) => (
-                            <CategoryCard
-                                key={category.id}
-                                name={category.name}
-                                icon={category.icon as any}
-                                gradient={category.gradient}
-                                onPress={() => router.push('/search')}
-                            />
-                        ))}
+                        {isCategoriesLoading && homeCategories.length === 0
+                            ? [1, 2, 3, 4, 5].map((item) => (
+                                  <View key={item} style={styles.categoryLoadingPill} />
+                              ))
+                            : homeCategories.map((category) => (
+                                  <CategoryCard
+                                      key={category.id}
+                                      name={category.name}
+                                      icon={category.icon}
+                                      gradient={category.gradient}
+                                      count={category.count}
+                                      onPress={() =>
+                                          router.push({
+                                              pathname: '/search',
+                                              params: { categoryId: category.id },
+                                          })
+                                      }
+                                  />
+                              ))}
+                        {!isCategoriesLoading && homeCategories.length === 0 ? (
+                            <Text style={styles.emptyCategoriesText}>
+                                Aucune categorie disponible pour le moment.
+                            </Text>
+                        ) : null}
                     </ScrollView>
                 </View>
 
@@ -776,6 +835,21 @@ const styles = StyleSheet.create({
     },
     categoriesContainer: {
         paddingVertical: Spacing.sm,
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    categoryLoadingPill: {
+        width: 82,
+        height: 100,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray100,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    emptyCategoriesText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.medium,
     },
     section: {
         paddingHorizontal: Spacing.xl,

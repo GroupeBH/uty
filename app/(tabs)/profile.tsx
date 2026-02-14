@@ -4,6 +4,7 @@
  */
 
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
@@ -24,8 +25,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ProfileScreen() {
     const router = useRouter();
-    const { user, logout, isLoading, isLoggingOut } = useAuth();
-    const { data: announcements } = useGetMyAnnouncementsQuery();
+    const { user, logout, isLoading, isAuthenticated } = useAuth();
+    const { data: announcements } = useGetMyAnnouncementsQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+    const [isLogoutConfirmVisible, setIsLogoutConfirmVisible] = React.useState(false);
+    const [logoutErrorMessage, setLogoutErrorMessage] = React.useState('');
+
+    React.useEffect(() => {
+        if (!isLoading && !isAuthenticated) {
+            router.replace('/(tabs)');
+        }
+    }, [isAuthenticated, isLoading, router]);
+
     const hasDeliveryRole = Boolean(
         user?.roles?.some((role) =>
             ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(
@@ -35,24 +48,24 @@ export default function ProfileScreen() {
     );
 
     const handleLogout = () => {
-        Alert.alert(
-            'Déconnexion',
-            'Êtes-vous sûr de vouloir vous déconnecter ?',
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Déconnexion',
-                    style: 'destructive',
-                    onPress: async () => {
-                        await logout();
-                        router.replace('/(auth)/login');
-                    },
-                },
-            ]
-        );
+        setIsLogoutConfirmVisible(true);
     };
 
-    if (isLoading) {
+    const confirmLogout = async () => {
+        try {
+            setIsLoggingOut(true);
+            setIsLogoutConfirmVisible(false);
+            await logout();
+            router.replace('/(tabs)');
+        } catch (error: any) {
+            setLogoutErrorMessage(error?.message || 'Erreur lors de la deconnexion.');
+        } finally {
+            setIsLoggingOut(false);
+        }
+    };
+
+
+    if (isLoading || !isAuthenticated) {
         return <LoadingSpinner fullScreen />;
     }
 
@@ -165,6 +178,8 @@ export default function ProfileScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header avec gradient */}
             <LinearGradient colors={Gradients.primary} style={styles.header}>
+                <View style={styles.headerOrnamentOne} />
+                <View style={styles.headerOrnamentTwo} />
                 <View style={styles.headerContent}>
                     <View style={styles.avatarContainer}>
                         {user?.image ? (
@@ -186,6 +201,22 @@ export default function ProfileScreen() {
                     </Text>
                     <Text style={styles.userPhone}>{user?.phone || user?.verified_phone}</Text>
                     {user?.email && <Text style={styles.userEmail}>{user.email}</Text>}
+                    <View style={styles.userChipsRow}>
+                        <View style={styles.userChip}>
+                            <Ionicons name="shield-checkmark-outline" size={13} color={Colors.white} />
+                            <Text style={styles.userChipText}>Compte actif</Text>
+                        </View>
+                        <View style={styles.userChip}>
+                            <Ionicons
+                                name={hasDeliveryRole ? 'bicycle-outline' : 'person-outline'}
+                                size={13}
+                                color={Colors.white}
+                            />
+                            <Text style={styles.userChipText}>
+                                {hasDeliveryRole ? 'Mode livreur' : 'Mode client'}
+                            </Text>
+                        </View>
+                    </View>
                 </View>
             </LinearGradient>
 
@@ -267,6 +298,32 @@ export default function ProfileScreen() {
                 {/* Version */}
                 <Text style={styles.version}>Version 1.0.0</Text>
             </ScrollView>
+
+            <CustomAlert
+                visible={isLogoutConfirmVisible}
+                title="Confirmer la deconnexion"
+                message="Voulez-vous vraiment vous deconnecter de votre compte ?"
+                type="warning"
+                showCancel
+                cancelText="Annuler"
+                confirmText={isLoggingOut ? 'Deconnexion...' : 'Se deconnecter'}
+                onCancel={() => {
+                    if (!isLoggingOut) setIsLogoutConfirmVisible(false);
+                }}
+                onConfirm={() => {
+                    if (!isLoggingOut) {
+                        void confirmLogout();
+                    }
+                }}
+            />
+            <CustomAlert
+                visible={Boolean(logoutErrorMessage)}
+                title="Erreur"
+                message={logoutErrorMessage}
+                type="error"
+                confirmText="Fermer"
+                onConfirm={() => setLogoutErrorMessage('')}
+            />
         </SafeAreaView>
     );
 }
@@ -282,7 +339,26 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.xl,
         borderBottomLeftRadius: BorderRadius.xxxl,
         borderBottomRightRadius: BorderRadius.xxxl,
+        overflow: 'hidden',
         ...Shadows.lg,
+    },
+    headerOrnamentOne: {
+        position: 'absolute',
+        top: -36,
+        right: -26,
+        width: 132,
+        height: 132,
+        borderRadius: 66,
+        backgroundColor: Colors.white + '1A',
+    },
+    headerOrnamentTwo: {
+        position: 'absolute',
+        bottom: -34,
+        left: -22,
+        width: 118,
+        height: 118,
+        borderRadius: 59,
+        backgroundColor: Colors.accent + '24',
     },
     headerContent: {
         alignItems: 'center',
@@ -340,12 +416,36 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.white + 'BB',
     },
+    userChipsRow: {
+        marginTop: Spacing.md,
+        flexDirection: 'row',
+        gap: Spacing.xs,
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+    },
+    userChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.white + '33',
+        backgroundColor: Colors.white + '1A',
+    },
+    userChipText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     scrollView: {
         flex: 1,
     },
     scrollContent: {
         padding: Spacing.lg,
         paddingBottom: 100,
+        marginTop: -Spacing.md,
     },
     statsContainer: {
         flexDirection: 'row',
@@ -358,6 +458,8 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         padding: Spacing.lg,
         alignItems: 'center',
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
         ...Shadows.md,
     },
     statGradient: {
@@ -393,6 +495,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: Colors.gray100,
         ...Shadows.sm,
     },
     menuItem: {
