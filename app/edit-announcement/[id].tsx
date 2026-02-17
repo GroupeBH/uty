@@ -244,7 +244,7 @@ export default function EditAnnouncementScreen() {
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour acc??der ?? vos photos.', variant: 'error' });
+            showAlert({ title: 'Permission refusee', message: 'Nous avons besoin de la permission pour acceder a vos photos.', variant: 'error' });
             return;
         }
 
@@ -268,7 +268,7 @@ export default function EditAnnouncementScreen() {
                 });
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer les images', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de preparer les images', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -278,7 +278,7 @@ export default function EditAnnouncementScreen() {
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            showAlert({ title: 'Permission refus??e', message: 'Nous avons besoin de la permission pour utiliser la cam??ra.', variant: 'error' });
+            showAlert({ title: 'Permission refusee', message: 'Nous avons besoin de la permission pour utiliser la camera.', variant: 'error' });
             return;
         }
 
@@ -297,7 +297,7 @@ export default function EditAnnouncementScreen() {
                 });
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de pr??parer la photo', variant: 'error' });
+                showAlert({ title: 'Erreur', message: 'Impossible de preparer la photo', variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }

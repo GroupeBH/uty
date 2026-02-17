@@ -10,6 +10,7 @@ import {
 } from '@/store/slices/authSlice';
 import { useLogoutMutation } from '@/store/api/authApi';
 import { tokenService } from '@/services/tokenService';
+import { deleteFcmDeviceToken } from '@/services/notifications/pushNotifications';
 import { storage } from '@/utils/storage';
 
 export const useAuth = () => {
@@ -28,6 +29,11 @@ export const useAuth = () => {
         } catch (error) {
             console.error('Logout API error:', error);
         } finally {
+            try {
+                await deleteFcmDeviceToken();
+            } catch (error) {
+                console.error('Error deleting FCM device token:', error);
+            }
             await tokenService.clearTokens();
             await storage.clearAuth();
             dispatch(logoutAction());

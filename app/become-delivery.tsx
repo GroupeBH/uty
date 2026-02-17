@@ -1,15 +1,19 @@
 import { CustomAlert } from '@/components/ui/CustomAlert';
+import { KycFlowModal } from '@/components/kyc/KycFlowModal';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useBecomeDeliveryPersonMutation } from '@/store/api/deliveryPersonsApi';
+import { useGetMyKycEligibilityQuery, useGetMyKycQuery } from '@/store/api/usersApi';
 import { useAppDispatch } from '@/store/hooks';
 import { setUser } from '@/store/slices/authSlice';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
     ActivityIndicator,
+    Image,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -32,6 +36,11 @@ const VEHICLE_OPTIONS: { value: VehicleType; label: string; icon: keyof typeof I
 ];
 
 const DELIVERY_ROLE_KEYS = ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'];
+const DELIVERY_STEPS = [
+    { id: 1, title: 'KYC', icon: 'shield-checkmark-outline' as const },
+    { id: 2, title: 'Photo', icon: 'camera-outline' as const },
+    { id: 3, title: 'Vehicule', icon: 'bicycle-outline' as const },
+];
 
 export default function BecomeDeliveryScreen() {
     const router = useRouter();
@@ -43,6 +52,11 @@ export default function BecomeDeliveryScreen() {
     const [licensePlate, setLicensePlate] = React.useState('');
     const [vehicleType, setVehicleType] = React.useState<VehicleType>('motorcycle');
     const [isAvailable, setIsAvailable] = React.useState(true);
+    const [step, setStep] = React.useState(1);
+    const [profileImageUrl, setProfileImageUrl] = React.useState<string>((user?.image || '').trim());
+    const [profileImagePreview, setProfileImagePreview] = React.useState<string>((user?.image || '').trim());
+    const [isCapturingProfileImage, setIsCapturingProfileImage] = React.useState(false);
+    const [kycModalVisible, setKycModalVisible] = React.useState(false);
     const [deliveryLookupId, setDeliveryLookupId] = React.useState('');
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
@@ -56,9 +70,24 @@ export default function BecomeDeliveryScreen() {
         type: 'info',
     });
 
+    const { data: kycEligibility, refetch: refetchKycEligibility, isFetching: isCheckingKyc } =
+        useGetMyKycEligibilityQuery(undefined, { skip: !user?._id });
+    const { data: myKyc, refetch: refetchMyKyc } = useGetMyKycQuery(undefined, { skip: !user?._id });
+    const isKycApproved = kycEligibility?.isKycApproved === true;
+    const kycStatus = (kycEligibility?.kycStatus || 'not_submitted').toLowerCase();
+
     React.useEffect(() => {
         requireAuth('Vous devez etre connecte pour devenir livreur.');
     }, [requireAuth]);
+
+    React.useEffect(() => {
+        const incomingImage = (user?.image || '').trim();
+        if (!incomingImage) {
+            return;
+        }
+        setProfileImageUrl((prev) => prev || incomingImage);
+        setProfileImagePreview((prev) => prev || incomingImage);
+    }, [user?.image]);
 
     const hasDeliveryRole = React.useMemo(
         () =>
@@ -91,23 +120,129 @@ export default function BecomeDeliveryScreen() {
         return fallback;
     };
 
+    const getResolvedProfileImage = () => {
+        const fallbackSelfieFromKyc =
+            typeof myKyc?.kyc?.selfieUrl === 'string' ? myKyc.kyc.selfieUrl.trim() : '';
+        const fallbackImageFromProfile = (user?.image || '').trim();
+        return profileImageUrl.trim() || fallbackSelfieFromKyc || fallbackImageFromProfile;
+    };
+
+    const validateCurrentStep = () => {
+        if (step === 1 && !isKycApproved) {
+            showAlert(
+                'KYC requis',
+                'Vous devez d abord valider votre KYC pour continuer.',
+                'warning',
+            );
+            setKycModalVisible(true);
+            return false;
+        }
+
+        if (step === 2 && !getResolvedProfileImage()) {
+            showAlert(
+                'Photo requise',
+                'Capturez votre photo de profil avant de continuer.',
+                'warning',
+            );
+            return false;
+        }
+
+        if (step === 3 && !model.trim()) {
+            showAlert('Modele requis', 'Veuillez saisir le modele de votre vehicule.', 'warning');
+            return false;
+        }
+
+        if (step === 3 && !licensePlate.trim()) {
+            showAlert('Plaque requise', 'Veuillez saisir le numero de plaque.', 'warning');
+            return false;
+        }
+
+        return true;
+    };
+
+    const goNext = () => {
+        if (!validateCurrentStep()) {
+            return;
+        }
+        setStep((prev) => Math.min(prev + 1, DELIVERY_STEPS.length));
+    };
+
+    const goPrevious = () => {
+        setStep((prev) => Math.max(prev - 1, 1));
+    };
+
+    const captureProfileImage = async () => {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (permission.status !== 'granted') {
+            showAlert('Permission requise', 'Autorisez la camera pour capturer votre photo de profil.', 'warning');
+            return;
+        }
+
+        setIsCapturingProfileImage(true);
+        try {
+            const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.8,
+                base64: true,
+                cameraType: ImagePicker.CameraType.front,
+            });
+
+            if (result.canceled || !result.assets?.length) {
+                return;
+            }
+
+            const asset = result.assets[0];
+            if (!asset.base64) {
+                showAlert('Capture invalide', 'Impossible de lire la photo capturee.', 'error');
+                return;
+            }
+
+            const mimeType =
+                asset.mimeType && asset.mimeType.startsWith('image/') ? asset.mimeType : 'image/jpeg';
+            const dataUrl = `data:${mimeType};base64,${asset.base64}`;
+            setProfileImageUrl(dataUrl);
+            setProfileImagePreview(asset.uri);
+        } finally {
+            setIsCapturingProfileImage(false);
+        }
+    };
+
     const handleSubmit = async () => {
         if (!requireAuth('Vous devez etre connecte pour devenir livreur.')) {
             return;
         }
 
-        if (!model.trim()) {
-            showAlert('Modele requis', 'Veuillez saisir le modele de votre vehicule.', 'warning');
+        if (!validateCurrentStep()) {
             return;
         }
 
-        if (!licensePlate.trim()) {
-            showAlert('Plaque requise', 'Veuillez saisir le numero de plaque.', 'warning');
+        if (!isKycApproved) {
+            showAlert(
+                'KYC requis',
+                'Votre KYC doit etre approuve avant l activation du profil livreur.',
+                'warning',
+            );
+            setStep(1);
+            setKycModalVisible(true);
+            return;
+        }
+
+        const resolvedProfileImage = getResolvedProfileImage();
+
+        if (!resolvedProfileImage) {
+            showAlert(
+                'Photo de profil requise',
+                'Capturez une photo de profil pour finaliser votre inscription livreur.',
+                'warning',
+            );
+            setStep(2);
             return;
         }
 
         try {
             await becomeDeliveryPerson({
+                profileImageUrl: resolvedProfileImage,
                 vehicle: {
                     model: model.trim(),
                     licensePlate: licensePlate.trim().toUpperCase(),
@@ -124,6 +259,7 @@ export default function BecomeDeliveryScreen() {
                     setUser({
                         ...user,
                         roles: mergedRoles,
+                        image: resolvedProfileImage,
                     }),
                 );
             }
@@ -146,6 +282,195 @@ export default function BecomeDeliveryScreen() {
         }
     };
 
+    const renderStepIndicators = () => (
+        <View style={styles.stepsRow}>
+            {DELIVERY_STEPS.map((item) => {
+                const isActive = item.id === step;
+                const isDone = item.id < step;
+                return (
+                    <View key={item.id} style={styles.stepItem}>
+                        <View
+                            style={[
+                                styles.stepIconWrap,
+                                isActive && styles.stepIconWrapActive,
+                                isDone && styles.stepIconWrapDone,
+                            ]}
+                        >
+                            <Ionicons
+                                name={isDone ? 'checkmark' : item.icon}
+                                size={16}
+                                color={isActive || isDone ? Colors.white : Colors.gray500}
+                            />
+                        </View>
+                        <Text
+                            style={[
+                                styles.stepLabel,
+                                isActive && styles.stepLabelActive,
+                                isDone && styles.stepLabelDone,
+                            ]}
+                        >
+                            {item.title}
+                        </Text>
+                    </View>
+                );
+            })}
+        </View>
+    );
+
+    const renderStepContent = () => {
+        if (step === 1) {
+            return (
+                <>
+                    <Text style={styles.sectionTitle}>Etape 1: Verification KYC</Text>
+                    <Text style={styles.sectionHint}>
+                        Le KYC approuve est obligatoire avant l activation du profil livreur.
+                    </Text>
+
+                    <View style={styles.kycCard}>
+                        <View style={styles.kycHeader}>
+                            <Text style={styles.kycTitle}>Statut KYC</Text>
+                            <View style={[styles.kycBadge, isKycApproved && styles.kycBadgeApproved]}>
+                                <Text style={[styles.kycBadgeText, isKycApproved && styles.kycBadgeTextApproved]}>
+                                    {isKycApproved
+                                        ? 'Approuve'
+                                        : kycStatus === 'pending'
+                                        ? 'En attente'
+                                        : kycStatus === 'rejected'
+                                        ? 'Rejete'
+                                        : 'Non soumis'}
+                                </Text>
+                            </View>
+                        </View>
+                        <Text style={styles.kycDescription}>
+                            Si le statut n est pas approuve, ouvrez le modal KYC pour capturer vos documents.
+                        </Text>
+                        <TouchableOpacity
+                            style={styles.kycActionButton}
+                            onPress={() => setKycModalVisible(true)}
+                        >
+                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
+                            <Text style={styles.kycActionText}>
+                                {isKycApproved ? 'Mettre a jour mon KYC' : 'Faire mon KYC maintenant'}
+                            </Text>
+                        </TouchableOpacity>
+                        {isCheckingKyc ? <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.xs }} /> : null}
+                    </View>
+                </>
+            );
+        }
+
+        if (step === 2) {
+            return (
+                <>
+                    <Text style={styles.sectionTitle}>Etape 2: Photo de profil</Text>
+                    <Text style={styles.sectionHint}>
+                        Cette photo est envoyee comme `profileImageUrl` pour verifier votre identite livreur.
+                    </Text>
+
+                    <Text style={styles.label}>Photo de profil livreur *</Text>
+                    <TouchableOpacity style={styles.profilePhotoCard} onPress={captureProfileImage} activeOpacity={0.85}>
+                        {profileImagePreview ? (
+                            <Image source={{ uri: profileImagePreview }} style={styles.profilePhotoImage} />
+                        ) : (
+                            <View style={styles.profilePhotoPlaceholder}>
+                                <Ionicons name="camera-outline" size={24} color={Colors.primary} />
+                                <Text style={styles.profilePhotoPlaceholderText}>Capturer votre photo de profil</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.profilePhotoActionButton} onPress={captureProfileImage} activeOpacity={0.85}>
+                        {isCapturingProfileImage ? (
+                            <ActivityIndicator color={Colors.primary} />
+                        ) : (
+                            <>
+                                <Ionicons name={profileImagePreview ? 'refresh-outline' : 'camera'} size={16} color={Colors.primary} />
+                                <Text style={styles.profilePhotoActionText}>
+                                    {profileImagePreview ? 'Reprendre la photo' : 'Demarrer la capture'}
+                                </Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                </>
+            );
+        }
+
+        return (
+            <>
+                <Text style={styles.sectionTitle}>Etape 3: Informations vehicule</Text>
+                <Text style={styles.sectionHint}>
+                    Renseignez votre vehicule pour recevoir vos missions de livraison.
+                </Text>
+
+                <Text style={styles.label}>Type de vehicule *</Text>
+                <View style={styles.vehicleTypesRow}>
+                    {VEHICLE_OPTIONS.map((option) => {
+                        const selected = vehicleType === option.value;
+                        return (
+                            <TouchableOpacity
+                                key={option.value}
+                                style={[
+                                    styles.vehicleChip,
+                                    selected && styles.vehicleChipSelected,
+                                ]}
+                                onPress={() => setVehicleType(option.value)}
+                            >
+                                <Ionicons
+                                    name={option.icon}
+                                    size={16}
+                                    color={selected ? Colors.white : Colors.gray500}
+                                />
+                                <Text
+                                    style={[
+                                        styles.vehicleChipText,
+                                        selected && styles.vehicleChipTextSelected,
+                                    ]}
+                                >
+                                    {option.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </View>
+
+                <Text style={styles.label}>Modele *</Text>
+                <TextInput
+                    value={model}
+                    onChangeText={setModel}
+                    style={styles.input}
+                    placeholder="Ex: Yamaha NMAX 155"
+                    placeholderTextColor={Colors.gray400}
+                />
+
+                <Text style={styles.label}>Plaque d immatriculation *</Text>
+                <TextInput
+                    value={licensePlate}
+                    onChangeText={setLicensePlate}
+                    style={styles.input}
+                    placeholder="Ex: AB-123-CD"
+                    autoCapitalize="characters"
+                    placeholderTextColor={Colors.gray400}
+                />
+
+                <View style={styles.switchRow}>
+                    <View style={styles.switchCopy}>
+                        <Text style={styles.switchTitle}>Disponible immediatement</Text>
+                        <Text style={styles.switchHint}>
+                            Activez pour recevoir des missions des maintenant.
+                        </Text>
+                    </View>
+                    <Switch
+                        value={isAvailable}
+                        onValueChange={setIsAvailable}
+                        trackColor={{ false: Colors.gray300, true: Colors.primary + '70' }}
+                        thumbColor={isAvailable ? Colors.primary : Colors.gray500}
+                    />
+                </View>
+            </>
+        );
+    };
+
+    const progress = `${step}/${DELIVERY_STEPS.length}`;
+
     return (
         <SafeAreaView style={styles.container}>
             <KeyboardAvoidingView
@@ -157,7 +482,11 @@ export default function BecomeDeliveryScreen() {
                         <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
                     </TouchableOpacity>
                     <Text style={styles.headerTitle}>Devenir livreur</Text>
-                    <View style={styles.headerButtonPlaceholder} />
+                    {hasDeliveryRole ? (
+                        <View style={styles.headerButtonPlaceholder} />
+                    ) : (
+                        <Text style={styles.headerProgress}>{progress}</Text>
+                    )}
                 </View>
 
                 <ScrollView
@@ -219,92 +548,49 @@ export default function BecomeDeliveryScreen() {
                         </View>
                     ) : (
                         <View style={styles.formCard}>
-                            <Text style={styles.sectionTitle}>Informations vehicule</Text>
+                            <Text style={styles.sectionTitle}>Inscription livreur en 3 etapes</Text>
                             <Text style={styles.sectionHint}>
-                                Ces informations servent a valider votre capacite de livraison.
+                                Validez d abord le KYC, ajoutez votre photo puis configurez le vehicule.
                             </Text>
 
-                            <Text style={styles.label}>Type de vehicule *</Text>
-                            <View style={styles.vehicleTypesRow}>
-                                {VEHICLE_OPTIONS.map((option) => {
-                                    const selected = vehicleType === option.value;
-                                    return (
-                                        <TouchableOpacity
-                                            key={option.value}
-                                            style={[
-                                                styles.vehicleChip,
-                                                selected && styles.vehicleChipSelected,
-                                            ]}
-                                            onPress={() => setVehicleType(option.value)}
-                                        >
-                                            <Ionicons
-                                                name={option.icon}
-                                                size={16}
-                                                color={selected ? Colors.white : Colors.gray500}
-                                            />
-                                            <Text
-                                                style={[
-                                                    styles.vehicleChipText,
-                                                    selected && styles.vehicleChipTextSelected,
-                                                ]}
-                                            >
-                                                {option.label}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    );
-                                })}
+                            {renderStepIndicators()}
+                            {renderStepContent()}
+
+                            <View style={styles.navigationRow}>
+                                <TouchableOpacity
+                                    style={[styles.navButtonGhost, step === 1 && styles.navButtonGhostDisabled]}
+                                    onPress={goPrevious}
+                                    disabled={step === 1}
+                                >
+                                    <Text style={styles.navButtonGhostText}>Precedent</Text>
+                                </TouchableOpacity>
+
+                                {step < DELIVERY_STEPS.length ? (
+                                    <TouchableOpacity style={styles.navButton} onPress={goNext}>
+                                        <LinearGradient colors={Gradients.primary} style={styles.navButtonGradient}>
+                                            <Text style={styles.navButtonText}>Suivant</Text>
+                                            <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={[styles.navButton, isLoading && styles.navButtonDisabled]}
+                                        onPress={handleSubmit}
+                                        disabled={isLoading}
+                                    >
+                                        <LinearGradient colors={Gradients.accent} style={styles.navButtonGradient}>
+                                            {isLoading ? (
+                                                <ActivityIndicator color={Colors.primary} />
+                                            ) : (
+                                                <>
+                                                    <Ionicons name="checkmark-circle-outline" size={18} color={Colors.primary} />
+                                                    <Text style={styles.navButtonTextAccent}>Activer mon profil livreur</Text>
+                                                </>
+                                            )}
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                )}
                             </View>
-
-                            <Text style={styles.label}>Modele *</Text>
-                            <TextInput
-                                value={model}
-                                onChangeText={setModel}
-                                style={styles.input}
-                                placeholder="Ex: Yamaha NMAX 155"
-                                placeholderTextColor={Colors.gray400}
-                            />
-
-                            <Text style={styles.label}>Plaque d immatriculation *</Text>
-                            <TextInput
-                                value={licensePlate}
-                                onChangeText={setLicensePlate}
-                                style={styles.input}
-                                placeholder="Ex: AB-123-CD"
-                                autoCapitalize="characters"
-                                placeholderTextColor={Colors.gray400}
-                            />
-
-                            <View style={styles.switchRow}>
-                                <View style={styles.switchCopy}>
-                                    <Text style={styles.switchTitle}>Disponible immediatement</Text>
-                                    <Text style={styles.switchHint}>
-                                        Activez pour recevoir des missions des maintenant.
-                                    </Text>
-                                </View>
-                                <Switch
-                                    value={isAvailable}
-                                    onValueChange={setIsAvailable}
-                                    trackColor={{ false: Colors.gray300, true: Colors.primary + '70' }}
-                                    thumbColor={isAvailable ? Colors.primary : Colors.gray500}
-                                />
-                            </View>
-
-                            <TouchableOpacity
-                                style={[styles.submitButton, isLoading && styles.submitButtonDisabled]}
-                                onPress={handleSubmit}
-                                disabled={isLoading}
-                            >
-                                <LinearGradient colors={Gradients.accent} style={styles.submitButtonGradient}>
-                                    {isLoading ? (
-                                        <ActivityIndicator color={Colors.primary} />
-                                    ) : (
-                                        <>
-                                            <Ionicons name="checkmark-circle-outline" size={18} color={Colors.primary} />
-                                            <Text style={styles.submitButtonText}>Activer mon profil livreur</Text>
-                                        </>
-                                    )}
-                                </LinearGradient>
-                            </TouchableOpacity>
                         </View>
                     )}
                 </ScrollView>
@@ -322,6 +608,19 @@ export default function BecomeDeliveryScreen() {
                     if (wasSuccess) {
                         router.back();
                     }
+                }}
+            />
+
+            <KycFlowModal
+                visible={kycModalVisible}
+                initialFullName={`${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim()}
+                onClose={() => setKycModalVisible(false)}
+                onSuccess={async (result) => {
+                    if (result?.selfieUrl) {
+                        setProfileImageUrl(result.selfieUrl);
+                        setProfileImagePreview(result.selfieUrl);
+                    }
+                    await Promise.allSettled([refetchKycEligibility(), refetchMyKyc()]);
                 }}
             />
         </SafeAreaView>
@@ -357,6 +656,13 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.lg,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.extrabold,
+    },
+    headerProgress: {
+        minWidth: 40,
+        textAlign: 'right',
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
     },
     scroll: {
         flex: 1,
@@ -439,6 +745,46 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         marginBottom: Spacing.md,
     },
+    stepsRow: {
+        flexDirection: 'row',
+        marginBottom: Spacing.md,
+    },
+    stepItem: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    stepIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: Colors.gray100,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    stepIconWrapActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    stepIconWrapDone: {
+        backgroundColor: Colors.success,
+        borderColor: Colors.success,
+    },
+    stepLabel: {
+        marginTop: Spacing.xs,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    stepLabelActive: {
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    stepLabelDone: {
+        color: Colors.success,
+        fontWeight: Typography.fontWeight.bold,
+    },
     label: {
         marginTop: Spacing.sm,
         marginBottom: Spacing.xs,
@@ -484,6 +830,111 @@ const styles = StyleSheet.create({
         color: Colors.textPrimary,
         fontSize: Typography.fontSize.base,
     },
+    kycCard: {
+        marginBottom: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.primary + '33',
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.primary + '08',
+        padding: Spacing.md,
+    },
+    kycHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    kycTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    kycBadge: {
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.warning + '88',
+        backgroundColor: Colors.warning + '1A',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+    },
+    kycBadgeApproved: {
+        borderColor: Colors.success + '88',
+        backgroundColor: Colors.success + '1A',
+    },
+    kycBadgeText: {
+        color: Colors.warning,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    kycBadgeTextApproved: {
+        color: Colors.success,
+    },
+    kycDescription: {
+        marginTop: Spacing.xs,
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
+    },
+    kycActionButton: {
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.primary + '44',
+        backgroundColor: Colors.white,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+        paddingVertical: Spacing.sm,
+    },
+    kycActionText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    profilePhotoCard: {
+        height: 170,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderStyle: 'dashed',
+        borderColor: Colors.gray300,
+        backgroundColor: Colors.gray50,
+        overflow: 'hidden',
+    },
+    profilePhotoImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    profilePhotoPlaceholder: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+    },
+    profilePhotoPlaceholderText: {
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.medium,
+        textAlign: 'center',
+    },
+    profilePhotoActionButton: {
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.primary + '44',
+        backgroundColor: Colors.primary + '10',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+        paddingVertical: Spacing.sm,
+    },
+    profilePhotoActionText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
     switchRow: {
         marginTop: Spacing.lg,
         backgroundColor: Colors.gray50,
@@ -508,6 +959,54 @@ const styles = StyleSheet.create({
         marginTop: 2,
         color: Colors.textSecondary,
         fontSize: Typography.fontSize.xs,
+    },
+    navigationRow: {
+        marginTop: Spacing.lg,
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    navButtonGhost: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray300,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white,
+        paddingVertical: Spacing.md,
+    },
+    navButtonGhostDisabled: {
+        opacity: 0.45,
+    },
+    navButtonGhostText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    navButton: {
+        flex: 1.3,
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
+    navButtonDisabled: {
+        opacity: 0.85,
+    },
+    navButtonGradient: {
+        minHeight: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+    },
+    navButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    navButtonTextAccent: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     submitButton: {
         marginTop: Spacing.lg,

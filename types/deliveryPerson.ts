@@ -7,6 +7,7 @@ export interface DeliveryVehicle {
 }
 
 export interface BecomeDeliveryPersonRequest {
+    profileImageUrl: string;
     vehicle: DeliveryVehicle;
     isAvailable?: boolean;
 }

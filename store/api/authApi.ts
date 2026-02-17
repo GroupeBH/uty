@@ -89,12 +89,13 @@ export const authApi = baseApi.injectEndpoints({
                 method: 'POST',
             }),
         }),
-        updateFcmToken: builder.mutation<void, { fcmToken: string }>({
-            query: (dto) => ({
+        updateFcmToken: builder.mutation<User, { fcmToken: string }>({
+            query: ({ fcmToken }) => ({
                 url: '/auth/fcm-token',
                 method: 'PATCH',
-                body: dto,
+                body: { fcmToken },
             }),
+            invalidatesTags: ['User'],
         }),
     }),
 });

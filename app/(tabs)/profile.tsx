@@ -8,6 +8,7 @@ import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetOrdersQuery } from '@/store/api/ordersApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -27,6 +28,9 @@ export default function ProfileScreen() {
     const router = useRouter();
     const { user, logout, isLoading, isAuthenticated } = useAuth();
     const { data: announcements } = useGetMyAnnouncementsQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const { data: orders } = useGetOrdersQuery(undefined, {
         skip: !isAuthenticated,
     });
     const [isLoggingOut, setIsLoggingOut] = React.useState(false);
@@ -80,7 +84,7 @@ export default function ProfileScreen() {
         },
         {
             label: 'Commandes',
-            value: 0, // TODO: Récupérer depuis l'API
+            value: orders?.length || 0,
             icon: 'receipt-outline',
             color: Colors.success,
             gradient: Gradients.success,

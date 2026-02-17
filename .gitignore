@@ -17,6 +17,10 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Firebase files are required for remote EAS builds when using RN Firebase plugins.
+# Keep Android file versioned, and provide iOS file via env/secret if needed.
+# google-services.json
+GoogleService-Info.plist
 
 # Metro
 .metro-health-check*

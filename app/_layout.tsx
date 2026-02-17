@@ -7,6 +7,7 @@ import { Provider } from 'react-redux';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useAuthInitialization } from '@/hooks/useAuthInitialization';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -17,6 +18,7 @@ function RootLayoutContent() {
   
   // Initialize authentication on app start
   useAuthInitialization();
+  usePushNotifications();
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
