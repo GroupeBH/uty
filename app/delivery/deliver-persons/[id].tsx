@@ -1,6 +1,7 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { useDeliveryStream } from '@/hooks/useDeliveryStream';
 import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
 import {
     useAcceptDeliveryMutation,
@@ -148,7 +149,7 @@ export default function DriverDeliveryDetailScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id?: string }>();
     const deliveryId = (id || '').trim();
-    const { user, requireAuth } = useAuth();
+    const { user, isAuthenticated, requireAuth } = useAuth();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
     React.useEffect(() => {
@@ -164,7 +165,6 @@ export default function DriverDeliveryDetailScreen() {
     });
     const { data: tracking, refetch: refetchTracking } = useGetDeliveryTrackingQuery(deliveryId, {
         skip: !deliveryId,
-        pollingInterval: 5000,
     });
     const { data: deliveryProfile } = useGetMyDeliveryPersonProfileQuery(undefined, {
         skip: !hasDriverRole,
@@ -236,6 +236,20 @@ export default function DriverDeliveryDetailScreen() {
     const refetchAll = React.useCallback(async () => {
         await Promise.allSettled([refetchDelivery(), refetchTracking()]);
     }, [refetchDelivery, refetchTracking]);
+
+    const lastStreamRefreshRef = React.useRef(0);
+    const refreshFromStream = React.useCallback(() => {
+        const now = Date.now();
+        if (now - lastStreamRefreshRef.current < 1200) return;
+        lastStreamRefreshRef.current = now;
+        void refetchAll();
+    }, [refetchAll]);
+
+    const { connectionState } = useDeliveryStream({
+        deliveryId,
+        enabled: Boolean(deliveryId && isAuthenticated),
+        onMessage: refreshFromStream,
+    });
 
     const runAction = React.useCallback(async (action: () => Promise<any>, successMessage: string) => {
         try {
@@ -356,6 +370,12 @@ export default function DriverDeliveryDetailScreen() {
 
     const step = stepIndex(status);
     const progress = step <= 0 ? 0 : ((step - 1) / (STEP_LABELS.length - 1)) * 100;
+    const liveLabel =
+        connectionState === 'connected'
+            ? 'LIVE'
+            : connectionState === 'connecting'
+              ? 'Connecting...'
+              : 'Auto refresh';
 
     return (
         <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -380,7 +400,7 @@ export default function DriverDeliveryDetailScreen() {
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 <View style={styles.card}>
-                    <View style={styles.row}><Text style={styles.cardTitle}>ORDER STATUS: {statusLabel(status).toUpperCase()}</Text><Text style={styles.small}>Updated just now</Text></View>
+                    <View style={styles.row}><Text style={styles.cardTitle}>ORDER STATUS: {statusLabel(status).toUpperCase()}</Text><Text style={styles.small}>{liveLabel}</Text></View>
                     <View style={styles.track}><View style={[styles.fill, { width: `${progress}%` }]} /></View>
                     <View style={styles.stepsRow}>
                         {STEP_LABELS.map((label, index) => {
@@ -526,4 +546,3 @@ const styles = StyleSheet.create({
     emptyBtn: { marginTop: Spacing.sm, borderRadius: BorderRadius.md, borderWidth: 1, borderColor: UI.border, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
     emptyBtnText: { color: UI.text, fontWeight: Typography.fontWeight.bold },
 });
-

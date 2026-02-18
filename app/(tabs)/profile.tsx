@@ -9,6 +9,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
+import { useGetMyShopQuery } from '@/store/api/shopsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -33,6 +34,9 @@ export default function ProfileScreen() {
     const { data: orders } = useGetOrdersQuery(undefined, {
         skip: !isAuthenticated,
     });
+    const { data: myShop } = useGetMyShopQuery(undefined, {
+        skip: !isAuthenticated,
+    });
     const [isLoggingOut, setIsLoggingOut] = React.useState(false);
     const [isLogoutConfirmVisible, setIsLogoutConfirmVisible] = React.useState(false);
     const [logoutErrorMessage, setLogoutErrorMessage] = React.useState('');
@@ -50,6 +54,12 @@ export default function ProfileScreen() {
             ),
         ),
     );
+    const hasSellerRole = Boolean(
+        user?.roles?.some((role) =>
+            ['seller', 'admin'].includes((role || '').toLowerCase()),
+        ),
+    );
+    const sellerSpaceReady = Boolean(hasSellerRole || myShop?._id);
 
     const handleLogout = () => {
         setIsLogoutConfirmVisible(true);
@@ -113,19 +123,30 @@ export default function ProfileScreen() {
                 },
                 {
                     icon: 'storefront-outline',
-                    label: 'Ma boutique',
-                    subtitle: 'Gerer boutique et KYC',
+                    label: 'Espace vendeur',
+                    subtitle: sellerSpaceReady
+                        ? 'Acceder aux tabs vendeur'
+                        : 'Activer votre espace vendeur',
                     gradient: Gradients.accent,
-                    onPress: () => router.push('/my-shop'),
+                    onPress: () =>
+                        router.push((sellerSpaceReady ? '/seller' : '/my-shop') as any),
+                },
+                {
+                    icon: 'swap-horizontal-outline',
+                    label: "Changer d'espace",
+                    subtitle: 'Basculer entre client, vendeur et livreur',
+                    gradient: Gradients.primary,
+                    onPress: () => router.push('/spaces'),
                 },
                 {
                     icon: 'bicycle-outline',
-                    label: hasDeliveryRole ? 'Profil livreur' : 'Devenir livreur',
+                    label: hasDeliveryRole ? 'Espace livreur' : 'Devenir livreur',
                     subtitle: hasDeliveryRole
-                        ? 'Statut actif et disponibilite'
+                        ? 'Acceder aux tabs livreur'
                         : 'Activez votre compte de livraison',
                     gradient: Gradients.success,
-                    onPress: () => router.push('/become-delivery'),
+                    onPress: () =>
+                        router.push((hasDeliveryRole ? '/delivery-persons' : '/become-delivery') as any),
                 },
                 ...(hasDeliveryRole
                     ? [
@@ -134,7 +155,7 @@ export default function ProfileScreen() {
                               label: 'Livraisons disponibles',
                               subtitle: 'Voir et accepter les courses',
                               gradient: Gradients.cool,
-                              onPress: () => router.push('/delivery/deliver-persons'),
+                              onPress: () => router.push('/delivery-persons/pool'),
                           },
                       ]
                     : []),

@@ -130,7 +130,13 @@ const formatDuration = (seconds?: number): string => {
     return remain > 0 ? `${hours} h ${remain} min` : `${hours} h`;
 };
 
-export default function DriverDeliveriesPoolScreen() {
+type DriverDeliveriesPoolScreenProps = {
+    showBackButton?: boolean;
+};
+
+export default function DriverDeliveriesPoolScreen({
+    showBackButton = true,
+}: DriverDeliveriesPoolScreenProps) {
     const router = useRouter();
     const { user, requireAuth } = useAuth();
     const [acceptDelivery, { isLoading: isAcceptingAny }] = useAcceptDeliveryMutation();
@@ -249,9 +255,13 @@ export default function DriverDeliveriesPoolScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
             <View style={styles.header}>
-                <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                    <Ionicons name="arrow-back" size={18} color={Colors.primary} />
-                </TouchableOpacity>
+                {showBackButton ? (
+                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                        <Ionicons name="arrow-back" size={18} color={Colors.primary} />
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.headerSpacer} />
+                )}
                 <View style={styles.headerBody}>
                     <Text style={styles.headerTitle}>Livraisons disponibles</Text>
                     <Text style={styles.headerSubtitle}>
@@ -437,6 +447,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.gray50,
+    },
+    headerSpacer: {
+        width: 34,
+        height: 34,
     },
     refreshButton: {
         width: 34,

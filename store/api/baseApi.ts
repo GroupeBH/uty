@@ -8,7 +8,7 @@ import { storage } from '@/utils/storage';
 import { BaseQueryFn, createApi, FetchArgs, fetchBaseQuery, FetchBaseQueryError } from '@reduxjs/toolkit/query/react';
 
 // URL de l'API - à configurer dans .env
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200';
 
 /**
  * BaseQuery avec gestion automatique des tokens

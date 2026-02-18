@@ -1,6 +1,7 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { useDeliveryStream } from '@/hooks/useDeliveryStream';
 import {
     useGeneratePickupQrMutation,
     useGetDeliveryMessagesQuery,
@@ -154,18 +155,16 @@ const openCall = async (phone: string | null, label: string) => {
 
 export default function SellerDeliveryDetailScreen() {
     const router = useRouter();
-    const { user } = useAuth();
+    const { user, isAuthenticated } = useAuth();
     const { id } = useLocalSearchParams<{ id?: string }>();
     const deliveryId = (id || '').trim();
 
     const { data: delivery, isLoading, refetch } = useGetDeliveryQuery(deliveryId, { skip: !deliveryId });
     const { data: tracking, refetch: refetchTracking } = useGetDeliveryTrackingQuery(deliveryId, {
         skip: !deliveryId,
-        pollingInterval: 5000,
     });
     const { data: messages = [], refetch: refetchMessages } = useGetDeliveryMessagesQuery(deliveryId, {
         skip: !deliveryId,
-        pollingInterval: 8000,
     });
     const [generatePickupQr, { isLoading: isGeneratingQr }] = useGeneratePickupQrMutation();
     const [sellerConfirmPickup, { isLoading: isMarkingReady }] = useSellerConfirmPickupMutation();
@@ -235,9 +234,23 @@ export default function SellerDeliveryDetailScreen() {
     const canGenerateCode = isSellerOwner && ['assigned', 'at_pickup', 'in_transit'].includes(status);
     const canMarkReady = isSellerOwner && !sellerPickupConfirmed && ['assigned', 'at_pickup', 'in_transit'].includes(status);
 
-    const onRefreshAll = async () => {
+    const onRefreshAll = React.useCallback(async () => {
         await Promise.allSettled([refetch(), refetchTracking(), refetchMessages()]);
-    };
+    }, [refetch, refetchMessages, refetchTracking]);
+
+    const lastStreamRefreshRef = React.useRef(0);
+    const refreshFromStream = React.useCallback(() => {
+        const now = Date.now();
+        if (now - lastStreamRefreshRef.current < 1200) return;
+        lastStreamRefreshRef.current = now;
+        void onRefreshAll();
+    }, [onRefreshAll]);
+
+    const { connectionState } = useDeliveryStream({
+        deliveryId,
+        enabled: Boolean(deliveryId && isAuthenticated),
+        onMessage: refreshFromStream,
+    });
 
     const onGenerateCode = async () => {
         if (!deliveryId) return;
@@ -289,6 +302,12 @@ export default function SellerDeliveryDetailScreen() {
     }
 
     const codeLabel = codeFromPayload(pickupQrPayload, deliveryId);
+    const liveLabel =
+        connectionState === 'connected'
+            ? 'LIVE'
+            : connectionState === 'connecting'
+              ? 'Connecting...'
+              : 'Auto refresh';
 
     return (
         <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -311,6 +330,7 @@ export default function SellerDeliveryDetailScreen() {
                         <Text style={styles.title}>Status: {statusLabel(status)}</Text>
                         <Text style={styles.percent}>{progress}%</Text>
                     </View>
+                    <Text style={styles.meta}>{liveLabel}</Text>
                     <View style={styles.track}><View style={[styles.fill, { width: `${progress}%` }]} /></View>
                     <View style={styles.row}>
                         <Text style={styles.meta}>Seller pickup: {sellerPickupConfirmed ? 'confirmed' : 'pending'}</Text>
