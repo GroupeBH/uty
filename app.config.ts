@@ -75,6 +75,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
         android: {
             package: 'com.uty',
+            versionCode: 26,
             ...(hasFirebaseApp ? { googleServicesFile: androidGoogleServicesFile } : {}),
             adaptiveIcon: {
                 backgroundColor: '#E6F4FE',
