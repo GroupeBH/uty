@@ -7,6 +7,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
+import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -22,24 +23,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Function to simulate getting popular announcements based on views, comments, or cart additions
-const getPopularAnnouncements = (allAnnouncements: any[]) => {
-    // In a real app, this would come from the API with proper sorting
-    // For now, we'll sort by a combination of viewCount, commentCount, and cartAdditions
-    return [...allAnnouncements]
-        .sort((a, b) => {
-            const scoreA = (a.viewCount || 0) + (a.commentCount || 0) + (a.cartAdditions || 0);
-            const scoreB = (b.viewCount || 0) + (b.commentCount || 0) + (b.cartAdditions || 0);
-            return scoreB - scoreA;
-        })
-        .slice(0, 10); // Take top 10 popular announcements
-};
-
 // Function to get recent announcements
 const getRecentAnnouncements = (allAnnouncements: any[]) => {
     return [...allAnnouncements]
         .sort((a, b) => new Date(b.createdAt || b._id).getTime() - new Date(a.createdAt || a._id).getTime())
         .slice(0, 10); // Take 10 most recent
+};
+
+const getRecommendedAnnouncements = (allAnnouncements: any[]) => {
+    return [...allAnnouncements]
+        .sort((a, b) => {
+            const engagementA = (a.viewCount || 0) + (a.commentCount || 0) + (a.cartAdditions || 0);
+            const engagementB = (b.viewCount || 0) + (b.commentCount || 0) + (b.cartAdditions || 0);
+
+            if (engagementA !== engagementB) {
+                return engagementB - engagementA;
+            }
+
+            const dateA = new Date(a.createdAt || a._id).getTime();
+            const dateB = new Date(b.createdAt || b._id).getTime();
+            return dateB - dateA;
+        })
+        .slice(0, 8);
 };
 
 // Component to render announcement pairs horizontally
@@ -88,12 +93,84 @@ const resolveCategoryIcon = (name?: string, backendIcon?: string): keyof typeof 
     return 'grid-outline';
 };
 
-const getAnnouncementCategoryId = (announcement: any): string | null => {
-    const value = announcement?.category;
+const toIdString = (value: any): string | null => {
     if (!value) return null;
-    if (typeof value === 'string') return value;
-    if (typeof value === 'object' && value?._id) return String(value._id);
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    }
+    if (typeof value === 'object') {
+        if (value?._id) return toIdString(value._id);
+        if (value?.id) return toIdString(value.id);
+    }
     return null;
+};
+
+const getAnnouncementCategoryId = (announcement: any): string | null => {
+    return toIdString(announcement?.category);
+};
+
+const getAnnouncementCategoryCandidates = (announcement: any): string[] => {
+    const ids = new Set<string>();
+    const mainCategoryId = getAnnouncementCategoryId(announcement);
+    if (mainCategoryId) {
+        ids.add(mainCategoryId);
+    }
+
+    const ancestors = Array.isArray(announcement?.categoryAncestors)
+        ? announcement.categoryAncestors
+        : [];
+    ancestors.forEach((ancestor) => {
+        const ancestorId = toIdString(ancestor);
+        if (ancestorId) {
+            ids.add(ancestorId);
+        }
+    });
+
+    return Array.from(ids);
+};
+
+const getUserPreferredCategoryIds = (user: any): string[] => {
+    const values = Array.isArray(user?.preferredCategories) ? user.preferredCategories : [];
+    return Array.from(
+        new Set(
+            values
+                .map((value) => toIdString(value))
+                .filter((value): value is string => Boolean(value)),
+        ),
+    );
+};
+
+const mergeAnnouncementLists = (primary: any[], secondary: any[], limit: number): any[] => {
+    const result: any[] = [];
+    const seenIds = new Set<string>();
+
+    const pushUnique = (items: any[]) => {
+        for (const item of items) {
+            if (!item || result.length >= limit) break;
+            const id =
+                toIdString(item._id) ||
+                `${toIdString(item?.category) || 'no-category'}-${item?.createdAt || ''}-${item?.name || ''}-${result.length}`;
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+            result.push(item);
+        }
+    };
+
+    pushUnique(primary || []);
+    if (result.length < limit) {
+        pushUnique(secondary || []);
+    }
+
+    return result.slice(0, limit);
+};
+
+const toAnnouncementPairs = (items: any[]): any[][] => {
+    const pairs: any[][] = [];
+    for (let i = 0; i < items.length; i += 2) {
+        pairs.push([items[i], items[i + 1]]);
+    }
+    return pairs;
 };
 
 const QUICK_ACTIONS = [
@@ -107,7 +184,6 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const router = useRouter();
     const { user, isAuthenticated, requireAuth } = useAuth();
-    const [notifications] = useState(3);
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -117,11 +193,26 @@ export default function HomeScreen() {
         isLoading: isCategoriesLoading,
         refetch: refetchCategories,
     } = useGetCategoriesQuery();
+    const { data: myNotifications = [] } = useGetMyNotificationsQuery(
+        { limit: 50 },
+        { skip: !isAuthenticated },
+    );
 
     const greetingName = isAuthenticated
         ? user?.firstName?.trim() || 'Utilisateur'
         : 'Visiteur';
     const greetingLine = `Bonjour ${greetingName}`;
+    const unreadNotificationsCount = myNotifications.filter((item) => !item.isReaded).length;
+    const preferredCategoryIds = useMemo(
+        () => (isAuthenticated ? getUserPreferredCategoryIds(user) : []),
+        [isAuthenticated, user],
+    );
+    const preferredCategorySet = useMemo(
+        () => new Set(preferredCategoryIds),
+        [preferredCategoryIds],
+    );
+    const shouldPersonalizeAnnouncements =
+        isAuthenticated && preferredCategorySet.size > 0;
 
     const openProfile = React.useCallback(() => {
         if (isAuthenticated) {
@@ -130,6 +221,90 @@ export default function HomeScreen() {
         }
         requireAuth('Vous devez etre connecte pour acceder au profil.');
     }, [isAuthenticated, requireAuth, router]);
+
+    const openNotifications = React.useCallback(() => {
+        if (isAuthenticated) {
+            router.push('/notifications');
+            return;
+        }
+        requireAuth('Connectez-vous pour acceder aux notifications.');
+    }, [isAuthenticated, requireAuth, router]);
+
+    const personalizedAnnouncementBuckets = useMemo(() => {
+        const allAnnouncements = announcements || [];
+        if (!shouldPersonalizeAnnouncements) {
+            return {
+                preferred: allAnnouncements,
+                others: [] as any[],
+            };
+        }
+
+        const preferred: any[] = [];
+        const others: any[] = [];
+
+        allAnnouncements.forEach((announcement) => {
+            const categoryCandidates = getAnnouncementCategoryCandidates(announcement);
+            const matchesPreference = categoryCandidates.some((categoryId) =>
+                preferredCategorySet.has(categoryId),
+            );
+
+            if (matchesPreference) {
+                preferred.push(announcement);
+            } else {
+                others.push(announcement);
+            }
+        });
+
+        return { preferred, others };
+    }, [announcements, preferredCategorySet, shouldPersonalizeAnnouncements]);
+
+    const recommendedAnnouncements = useMemo(() => {
+        if (!shouldPersonalizeAnnouncements) {
+            return [] as any[];
+        }
+        return getRecommendedAnnouncements(personalizedAnnouncementBuckets.preferred);
+    }, [personalizedAnnouncementBuckets.preferred, shouldPersonalizeAnnouncements]);
+
+    const recommendedAnnouncementPairs = useMemo(
+        () => toAnnouncementPairs(recommendedAnnouncements),
+        [recommendedAnnouncements],
+    );
+
+    const recommendedAnnouncementIdSet = useMemo(
+        () =>
+            new Set(
+                recommendedAnnouncements
+                    .map((item) => toIdString(item?._id))
+                    .filter((value): value is string => Boolean(value)),
+            ),
+        [recommendedAnnouncements],
+    );
+
+    const recentAnnouncements = useMemo(() => {
+        const allAnnouncements = announcements || [];
+        if (!shouldPersonalizeAnnouncements) {
+            return getRecentAnnouncements(allAnnouncements);
+        }
+
+        const preferredPool = personalizedAnnouncementBuckets.preferred.filter((announcement) => {
+            const announcementId = toIdString(announcement?._id);
+            return announcementId ? !recommendedAnnouncementIdSet.has(announcementId) : true;
+        });
+
+        const preferred = getRecentAnnouncements(preferredPool);
+        const fallback = getRecentAnnouncements(personalizedAnnouncementBuckets.others);
+        return mergeAnnouncementLists(preferred, fallback, 10);
+    }, [
+        announcements,
+        personalizedAnnouncementBuckets,
+        recommendedAnnouncementIdSet,
+        shouldPersonalizeAnnouncements,
+    ]);
+
+    const recentAnnouncementPairs = useMemo(
+        () => toAnnouncementPairs(recentAnnouncements),
+        [recentAnnouncements],
+    );
 
     const categoryCounts = useMemo(() => {
         const counts = new Map<string, number>();
@@ -262,15 +437,15 @@ export default function HomeScreen() {
                             
                             <TouchableOpacity
                                 style={styles.modernHeaderButton}
-                                onPress={openProfile}
+                                onPress={openNotifications}
                                 accessibilityLabel="Notifications"
                                 activeOpacity={0.7}
                             >
                                 <View style={styles.headerButtonInner}>
                                     <Ionicons name="notifications-outline" size={22} color={Colors.white} />
-                                    {notifications > 0 && (
+                                    {unreadNotificationsCount > 0 && (
                                         <View style={styles.modernBadge}>
-                                            <Text style={styles.modernBadgeText}>{notifications}</Text>
+                                            <Text style={styles.modernBadgeText}>{unreadNotificationsCount}</Text>
                                         </View>
                                     )}
                                 </View>
@@ -465,93 +640,51 @@ export default function HomeScreen() {
                     )}
                 </View>
 
-                {/* Popular Announcements - Horizontal Scroll */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>🔥 Annonces populaires</Text>
-                        <TouchableOpacity onPress={() => router.push('/search')}>
-                            <Text style={styles.seeAll}>Voir tout</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {isLoading ? (
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.horizontalScrollContainer}
-                        >
-                            <View style={styles.pairContainer}>
-                                <View style={styles.pairItem}>
-                                    <ProductCardSkeleton />
-                                </View>
-                                <View style={styles.pairItem}>
-                                    <ProductCardSkeleton />
-                                </View>
-                            </View>
-                            <View style={styles.pairContainer}>
-                                <View style={styles.pairItem}>
-                                    <ProductCardSkeleton />
-                                </View>
-                                <View style={styles.pairItem}>
-                                    <ProductCardSkeleton />
-                                </View>
-                            </View>
-                        </ScrollView>
-                    ) : error ? (
-                        <View style={styles.errorContainer}>
-                            <Ionicons name="alert-circle-outline" size={48} color={Colors.error} />
-                            <Text style={styles.errorText}>Impossible de charger les annonces</Text>
-                            <TouchableOpacity
-                                style={styles.retryButton}
-                                onPress={() => refetch()}
-                            >
-                                <Text style={styles.retryButtonText}>Réessayer</Text>
-                                <Ionicons name="refresh" size={16} color={Colors.white} />
+                {shouldPersonalizeAnnouncements && (
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>✨ Pour vous</Text>
+                            <TouchableOpacity onPress={() => router.push('/search')}>
+                                <Text style={styles.seeAll}>Voir tout</Text>
                             </TouchableOpacity>
                         </View>
-                    ) : !announcements || announcements.length === 0 ? (
-                        <View style={styles.emptyContainer}>
-                            <Ionicons name="cube" size={48} color={Colors.gray300} />
-                            <Text style={styles.emptyText}>Aucune annonce disponible</Text>
-                            <Text style={styles.emptySubtext}>Revenez plus tard pour voir de nouvelles annonces</Text>
-                        </View>
-                    ) : (
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.horizontalScrollContainer}
-                        >
-                            {(() => {
-                                // Create pairs of popular announcements
-                                const popular = getPopularAnnouncements(announcements);
-                                const pairs = [];
-                                for (let i = 0; i < popular.length; i += 2) {
-                                    pairs.push([popular[i], popular[i + 1]]);
-                                }
-                                return pairs.map((pair, index) => (
-                                    <View key={`popular-pair-${index}`} style={styles.pairContainer}>
-                                        <View style={styles.pairItem}>
-                                            <ProductCard
-                                                product={pair[0]}
-                                                onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                                onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                            />
-                                        </View>
-                                        {pair[1] && (
-                                            <View style={styles.pairItem}>
-                                                <ProductCard
-                                                    product={pair[1]}
-                                                    onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                                />
-                                            </View>
-                                        )}
+                        <Text style={styles.preferenceHint}>
+                            Selection basee sur vos preferences.
+                        </Text>
+
+                        {isLoading ? (
+                            <>
+                                <View style={styles.pairContainer}>
+                                    <View style={styles.pairItem}>
+                                        <ProductCardSkeleton />
                                     </View>
-                                ));
-                            })()}
-                        </ScrollView>
-                    )}
-                </View>
+                                    <View style={styles.pairItem}>
+                                        <ProductCardSkeleton />
+                                    </View>
+                                </View>
+                            </>
+                        ) : recommendedAnnouncements.length === 0 ? (
+                            <View style={styles.emptyContainer}>
+                                <Ionicons name="sparkles-outline" size={44} color={Colors.gray300} />
+                                <Text style={styles.emptyText}>Pas encore de recommandations</Text>
+                                <Text style={styles.emptySubtext}>
+                                    Vos categories preferees n ont pas encore d annonces.
+                                </Text>
+                            </View>
+                        ) : (
+                            <>
+                                {recommendedAnnouncementPairs.map((pair, index) => (
+                                    <AnnouncementPairRow
+                                        key={`recommended-pair-${index}`}
+                                        pair={pair}
+                                        onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
+                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                    />
+                                ))}
+                            </>
+                        )}
+                    </View>
+                )}
 
                 {/* Recent Announcements - Grid Layout */}
                 <View style={styles.section}>
@@ -561,6 +694,11 @@ export default function HomeScreen() {
                             <Text style={styles.seeAll}>Voir tout</Text>
                         </TouchableOpacity>
                     </View>
+                    {shouldPersonalizeAnnouncements && (
+                        <Text style={styles.preferenceHint}>
+                            Vos préférences passent en premier.
+                        </Text>
+                    )}
 
                     {isLoading ? (
                         <>
@@ -601,22 +739,14 @@ export default function HomeScreen() {
                         </View>
                     ) : (
                         <>
-                            {(() => {
-                                // Create pairs of recent announcements
-                                const recent = getRecentAnnouncements(announcements);
-                                const pairs = [];
-                                for (let i = 0; i < recent.length; i += 2) {
-                                    pairs.push([recent[i], recent[i + 1]]);
-                                }
-                                return pairs.map((pair, index) => (
-                                    <AnnouncementPairRow
-                                        key={`recent-pair-${index}`}
-                                        pair={pair}
-                                        onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                    />
-                                ));
-                            })()}
+                            {recentAnnouncementPairs.map((pair, index) => (
+                                <AnnouncementPairRow
+                                    key={`recent-pair-${index}`}
+                                    pair={pair}
+                                    onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
+                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                />
+                            ))}
                         </>
                     )}
                 </View>
@@ -871,6 +1001,13 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.accent,
+    },
+    preferenceHint: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        marginTop: -Spacing.sm,
+        marginBottom: Spacing.md,
+        fontWeight: Typography.fontWeight.semibold,
     },
     quickActionsScroll: {
         flexDirection: 'row',

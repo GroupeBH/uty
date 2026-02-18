@@ -16,6 +16,48 @@ export interface DeliveryGeoPoint {
     coordinates: number[];
 }
 
+export interface DeliveryRouteWaypoint {
+    lat?: number;
+    lng?: number;
+    latitude?: number;
+    longitude?: number;
+    coordinates?: number[];
+}
+
+export interface DeliveryRouteStep {
+    instruction?: string;
+    htmlInstructions?: string;
+    distance?: number;
+    distanceMeters?: number;
+    duration?: number;
+    durationSeconds?: number;
+    startLocation?: DeliveryRouteWaypoint;
+    endLocation?: DeliveryRouteWaypoint;
+    start?: DeliveryRouteWaypoint;
+    end?: DeliveryRouteWaypoint;
+}
+
+export interface DeliveryCalculatedRoute {
+    summary?: string;
+    overviewPolyline?: string;
+    polyline?: string | { points?: string };
+    encodedPolyline?: string;
+    coordinates?: (number[] | DeliveryRouteWaypoint)[];
+    routeCoordinates?: (number[] | DeliveryRouteWaypoint)[];
+    path?: (number[] | DeliveryRouteWaypoint)[];
+    steps?: DeliveryRouteStep[];
+    routeSteps?: DeliveryRouteStep[];
+    legs?: {
+        distance?: number;
+        duration?: number;
+        steps?: DeliveryRouteStep[];
+    }[];
+    distanceKm?: number;
+    distanceMeters?: number;
+    durationMin?: number;
+    durationSeconds?: number;
+}
+
 export interface DeliveryMessage {
     senderId: string | OrderParty;
     senderRole: 'buyer' | 'seller' | 'delivery_person';
@@ -52,6 +94,8 @@ export interface Delivery {
     arrivedAtPickupAt?: string | null;
     arrivedAtDropoffAt?: string | null;
     deliveredAt?: string | null;
+    route?: DeliveryCalculatedRoute | null;
+    calculatedRoute?: DeliveryCalculatedRoute | null;
     messages?: DeliveryMessage[];
     createdAt?: string;
     updatedAt?: string;
@@ -81,6 +125,8 @@ export interface DeliveryTracking {
     arrivedAtPickupAt: string | null;
     arrivedAtDropoffAt: string | null;
     deliveredAt: string | null;
+    route?: DeliveryCalculatedRoute | null;
+    calculatedRoute?: DeliveryCalculatedRoute | null;
 }
 
 export interface RequestDeliveryDto {

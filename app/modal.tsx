@@ -12,7 +12,7 @@ import { setCredentials } from '@/store/slices/authSlice';
 import { storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -31,9 +31,16 @@ type AuthMode = 'register' | 'login';
 
 export default function AuthModal() {
     const router = useRouter();
+    const params = useLocalSearchParams<{
+        mode?: string;
+        title?: string;
+        reason?: string;
+        source?: string;
+    }>();
     const dispatch = useAppDispatch();
     
-    const [mode, setMode] = useState<AuthMode>('register');
+    const initialMode: AuthMode = params.mode === 'login' ? 'login' : 'register';
+    const [mode, setMode] = useState<AuthMode>(initialMode);
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
@@ -60,6 +67,18 @@ export default function AuthModal() {
 
     const [requestOtp, { isLoading: isRequestingOtp }] = useRequestOtpMutation();
     const [login, { isLoading: isLoggingIn }] = useLoginMutation();
+
+    const authRequiredTitle = (params.title || '').toString().trim();
+    const authRequiredMessage = (params.reason || '').toString().trim();
+    const showAuthRequiredNotice = authRequiredTitle.length > 0 || authRequiredMessage.length > 0;
+
+    useEffect(() => {
+        if (params.mode === 'login') {
+            setMode('login');
+        } else if (params.mode === 'register') {
+            setMode('register');
+        }
+    }, [params.mode]);
 
     useEffect(() => {
         Animated.parallel([
@@ -234,6 +253,33 @@ export default function AuthModal() {
                                     </Text>
                                 </View>
                             </LinearGradient>
+
+                            {showAuthRequiredNotice ? (
+                                <View style={styles.authRequiredCard}>
+                                    <LinearGradient
+                                        colors={['#FFF4E6', '#FFE9CC']}
+                                        style={styles.authRequiredTop}
+                                    >
+                                        <View style={styles.authRequiredIconWrap}>
+                                            <Ionicons name="lock-closed-outline" size={18} color={Colors.accentDark} />
+                                        </View>
+                                        <View style={styles.authRequiredTextWrap}>
+                                            <Text style={styles.authRequiredTitle}>
+                                                {authRequiredTitle || 'Connexion requise'}
+                                            </Text>
+                                            <Text style={styles.authRequiredSubtitle}>
+                                                {authRequiredMessage || 'Connectez-vous pour continuer.'}
+                                            </Text>
+                                        </View>
+                                    </LinearGradient>
+                                    <View style={styles.authRequiredFooter}>
+                                        <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
+                                        <Text style={styles.authRequiredFooterText}>
+                                            Connexion rapide et securisee en quelques secondes.
+                                        </Text>
+                                    </View>
+                                </View>
+                            ) : null}
 
                             <View style={styles.tabsContainer}>
                                 <TouchableOpacity
@@ -578,6 +624,62 @@ const styles = StyleSheet.create({
         color: Colors.white + 'E8',
         fontSize: Typography.fontSize.sm,
         lineHeight: 20,
+    },
+    authRequiredCard: {
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.accent + '55',
+        marginBottom: Spacing.lg,
+        overflow: 'hidden',
+        ...Shadows.md,
+    },
+    authRequiredTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+    },
+    authRequiredIconWrap: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.accent + '50',
+    },
+    authRequiredTextWrap: {
+        flex: 1,
+    },
+    authRequiredTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    authRequiredSubtitle: {
+        marginTop: 3,
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 19,
+    },
+    authRequiredFooter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+        backgroundColor: Colors.primary + '08',
+    },
+    authRequiredFooterText: {
+        flex: 1,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     tabsContainer: {
         flexDirection: 'row',

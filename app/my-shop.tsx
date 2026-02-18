@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetMyShopQuery, useUpdateShopMutation } from '@/store/api/shopsApi';
 import { Announcement } from '@/types/announcement';
+import { formatCurrencyAmount } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -41,6 +42,12 @@ const KYC_REQUIREMENTS = [
     'Ne portez ni lunettes noires ni couvre-visage.',
     'La piece doit etre lisible, sans reflets ni coupe.',
     'Les donnees servent uniquement a la verification vendeur.',
+];
+
+const SELLER_BENEFITS = [
+    'Publiez vos annonces avec un profil marchand verifie.',
+    'Centralisez commandes, livraisons et performances.',
+    'Renforcez la confiance client avec votre identite KYC.',
 ];
 
 const KYC_TOTAL_CHECKS = 4;
@@ -330,10 +337,8 @@ export default function MyShopScreen() {
     const kycProgressPercent = Math.round((kycCompletedChecks / KYC_TOTAL_CHECKS) * 100);
     const kycReady = kycCompletedChecks === KYC_TOTAL_CHECKS;
 
-    const formatPrice = (value?: number) => {
-        if (!Number.isFinite(value)) return 'Prix non defini';
-        return `${Number(value).toFixed(2)} EUR`;
-    };
+    const formatPrice = (value?: number, currency?: Announcement['currency']) =>
+        formatCurrencyAmount(value, currency, { fallbackText: 'Prix non defini' });
 
     const formatDate = (value?: string) => {
         if (!value) return 'Date inconnue';
@@ -359,15 +364,55 @@ export default function MyShopScreen() {
 
                 {missingShop ? (
                     <View style={styles.centerWrap}>
-                        <View style={styles.emptyCard}>
-                            <Ionicons name="storefront-outline" size={56} color={Colors.primary} />
-                            <Text style={styles.emptyTitle}>Aucune boutique</Text>
-                            <Text style={styles.emptyText}>Creez votre boutique pour activer le mode vendeur.</Text>
-                            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/create-shop')}>
-                                <LinearGradient colors={Gradients.accent} style={styles.primaryBtnGradient}>
-                                    <Text style={styles.primaryBtnTextAccent}>Creer ma boutique</Text>
-                                </LinearGradient>
-                            </TouchableOpacity>
+                        <LinearGradient
+                            colors={['#0E172A', '#1E3A8A', '#0B1220']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.emptyHeroCard}
+                        >
+                            <View style={styles.emptyGlowOne} />
+                            <View style={styles.emptyGlowTwo} />
+
+                            <View style={styles.emptyHeroHeader}>
+                                <View style={styles.emptyHeroIconWrap}>
+                                    <Ionicons name="storefront-outline" size={30} color={Colors.white} />
+                                </View>
+                                <View style={styles.emptyHeroTextWrap}>
+                                    <Text style={styles.emptyHeroEyebrow}>Espace vendeur</Text>
+                                    <Text style={styles.emptyHeroTitle}>Lancez votre boutique UTY</Text>
+                                </View>
+                            </View>
+
+                            <Text style={styles.emptyHeroDescription}>
+                                Une boutique active debloque la publication d annonces et le suivi complet de vos ventes.
+                            </Text>
+
+                            <View style={styles.emptyBenefitsList}>
+                                {SELLER_BENEFITS.map((benefit) => (
+                                    <View key={benefit} style={styles.emptyBenefitItem}>
+                                        <Ionicons name="checkmark-circle" size={16} color={Colors.accent} />
+                                        <Text style={styles.emptyBenefitText}>{benefit}</Text>
+                                    </View>
+                                ))}
+                            </View>
+
+                            <View style={styles.emptyHeroActions}>
+                                <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/create-shop')}>
+                                    <LinearGradient colors={Gradients.accent} style={styles.primaryBtnGradient}>
+                                        <Text style={styles.primaryBtnTextAccent}>Creer ma boutique</Text>
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.emptySecondaryBtn} onPress={() => refetch()}>
+                                    <Ionicons name="refresh-outline" size={15} color={Colors.white} />
+                                    <Text style={styles.emptySecondaryBtnText}>Actualiser</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </LinearGradient>
+                        <View style={styles.emptyFootnoteCard}>
+                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
+                            <Text style={styles.emptyFootnoteText}>
+                                Le KYC vendeur est requis avant publication.
+                            </Text>
                         </View>
                     </View>
                 ) : !shop ? (
@@ -522,7 +567,9 @@ export default function MyShopScreen() {
                                                     <Text style={styles.announcementName} numberOfLines={1}>
                                                         {announcement.name || 'Annonce sans titre'}
                                                     </Text>
-                                                    <Text style={styles.announcementPrice}>{formatPrice(announcement.price)}</Text>
+                                                    <Text style={styles.announcementPrice}>
+                                                        {formatPrice(announcement.price, announcement.currency)}
+                                                    </Text>
                                                     <View style={styles.announcementMetaRow}>
                                                         <Text style={styles.announcementMetaText}>{announcement.views || 0} vues</Text>
                                                         <Text style={styles.announcementMetaText}>•</Text>
@@ -820,6 +867,122 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: Typography.fontSize.lg, color: Colors.textPrimary, fontWeight: Typography.fontWeight.extrabold },
     headerMeta: { minWidth: 40, textAlign: 'right', color: Colors.gray500 },
     centerWrap: { flex: 1, justifyContent: 'center', padding: Spacing.xl },
+    emptyHeroCard: {
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xl,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: Colors.white + '22',
+        ...Shadows.lg,
+    },
+    emptyGlowOne: {
+        position: 'absolute',
+        width: 180,
+        height: 180,
+        borderRadius: 90,
+        top: -70,
+        right: -50,
+        backgroundColor: Colors.white + '14',
+    },
+    emptyGlowTwo: {
+        position: 'absolute',
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        bottom: -40,
+        left: -30,
+        backgroundColor: Colors.accent + '3A',
+    },
+    emptyHeroHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    emptyHeroIconWrap: {
+        width: 54,
+        height: 54,
+        borderRadius: 27,
+        backgroundColor: Colors.white + '22',
+        borderWidth: 1,
+        borderColor: Colors.white + '55',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    emptyHeroTextWrap: {
+        flex: 1,
+    },
+    emptyHeroEyebrow: {
+        color: Colors.accent,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        letterSpacing: 0.5,
+    },
+    emptyHeroTitle: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    emptyHeroDescription: {
+        marginTop: Spacing.md,
+        color: Colors.white + 'D5',
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
+    },
+    emptyBenefitsList: {
+        marginTop: Spacing.lg,
+        gap: Spacing.sm,
+    },
+    emptyBenefitItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.xs,
+    },
+    emptyBenefitText: {
+        flex: 1,
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 19,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    emptyHeroActions: {
+        marginTop: Spacing.lg,
+        gap: Spacing.sm,
+    },
+    emptySecondaryBtn: {
+        height: 44,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.white + '44',
+        backgroundColor: Colors.white + '16',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+    },
+    emptySecondaryBtnText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    emptyFootnoteCard: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '25',
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+    },
+    emptyFootnoteText: {
+        flex: 1,
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     emptyCard: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,

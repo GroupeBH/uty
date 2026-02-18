@@ -11,7 +11,9 @@ import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
+import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { Category } from '@/types/category';
+import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -107,6 +109,7 @@ export default function PublishScreen() {
         name: '',
         description: '',
         price: '',
+        currency: DEFAULT_CURRENCY_CODE,
         quantity: '1',
         isDeliverable: false,
         weightClass: [] as string[],
@@ -168,9 +171,27 @@ export default function PublishScreen() {
     // Queries
     const currentParentId = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]._id : null;
     const { data: currentLevelCategories, isLoading: categoriesLoading } = useGetCategoriesByParentQuery(currentParentId);
+    const { data: currencies = [] } = useGetCurrenciesQuery();
     const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
         selectedLeafCategory?._id || '',
         { skip: !selectedLeafCategory }
+    );
+    const activeCurrencies = React.useMemo(
+        () => currencies.filter((currency) => currency.isActive !== false),
+        [currencies],
+    );
+    const currencyOptions = React.useMemo(
+        () =>
+            activeCurrencies.length > 0
+                ? activeCurrencies
+                : [
+                      {
+                          _id: DEFAULT_CURRENCY_CODE,
+                          code: DEFAULT_CURRENCY_CODE,
+                          symbol: DEFAULT_CURRENCY_SYMBOL,
+                      },
+                  ],
+        [activeCurrencies],
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
@@ -217,6 +238,24 @@ export default function PublishScreen() {
             console.log('✅ Number of filtered attributes:', filteredAttributes.length);
         }
     }, [categoryAttributes, filteredAttributes]);
+
+    useEffect(() => {
+        if (activeCurrencies.length === 0) {
+            return;
+        }
+
+        setFormData((prev: any) => {
+            const normalizedCurrency = resolveCurrencySelectionValue(prev.currency, activeCurrencies);
+            if (prev.currency === normalizedCurrency) {
+                return prev;
+            }
+
+            return {
+                ...prev,
+                currency: normalizedCurrency,
+            };
+        });
+    }, [activeCurrencies]);
 
     // Ajuster currentStep si le nombre d'étapes change
     React.useEffect(() => {
@@ -392,6 +431,9 @@ export default function PublishScreen() {
             if (!formData.price || parseFloat(formData.price) <= 0) {
                 newErrors.price = 'Le prix doit être supérieur à 0';
             }
+            if (!formData.currency) {
+                newErrors.currency = 'La devise est obligatoire';
+            }
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
@@ -494,6 +536,10 @@ export default function PublishScreen() {
             if (formData.price) {
                 formDataToSend.append('price', formData.price);
             }
+            formDataToSend.append(
+                'currency',
+                resolveCurrencySelectionValue(formData.currency, activeCurrencies),
+            );
             if (formData.quantity) {
                 formDataToSend.append('quantity', formData.quantity);
             }
@@ -840,7 +886,7 @@ export default function PublishScreen() {
                             <View style={styles.row}>
                                 <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
                                     <Text style={styles.inputLabel}>
-                                        Prix (€) <Text style={styles.required}>*</Text>
+                                        Prix <Text style={styles.required}>*</Text>
                                     </Text>
                                     <View style={[styles.inputContainer, errors.price && styles.inputError]}>
                                         <Ionicons name="cash-outline" size={20} color={Colors.gray400} />
@@ -870,6 +916,43 @@ export default function PublishScreen() {
                                         />
                                     </View>
                                 </View>
+                            </View>
+
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>
+                                    Devise <Text style={styles.required}>*</Text>
+                                </Text>
+                                <View style={styles.weightChips}>
+                                    {currencyOptions.map((currency) => {
+                                        const optionValue = currency._id || currency.code;
+                                        const isActive =
+                                            formData.currency === optionValue ||
+                                            formData.currency === currency.code;
+
+                                        return (
+                                            <TouchableOpacity
+                                                key={optionValue}
+                                                style={[
+                                                    styles.weightChip,
+                                                    isActive && styles.weightChipActive,
+                                                ]}
+                                                onPress={() => handleInputChange('currency', optionValue)}
+                                                activeOpacity={0.8}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.weightChipText,
+                                                        isActive && styles.weightChipTextActive,
+                                                    ]}
+                                                >
+                                                    {currency.code}
+                                                    {currency.symbol ? ` (${currency.symbol})` : ''}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                                {errors.currency && <Text style={styles.errorText}>{errors.currency}</Text>}
                             </View>
 
                         </View>

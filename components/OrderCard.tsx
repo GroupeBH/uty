@@ -6,8 +6,10 @@ import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/
 import {
     Order,
     getOrderItemName,
+    getOrderItemProduct,
     getOrderPartyName,
 } from '@/types/order';
+import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -31,10 +33,19 @@ const formatDate = (dateString?: string) => {
     });
 };
 
-const formatAmount = (amount?: number) => `${Number(amount || 0).toFixed(2)} EUR`;
+const getOrderCurrency = (order: Order) => {
+    for (const item of order.items || []) {
+        const product = getOrderItemProduct(item);
+        if (product?.currency) {
+            return product.currency;
+        }
+    }
+    return undefined;
+};
 
 export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
     const router = useRouter();
+    const orderCurrency = getOrderCurrency(order);
     const counterpartyLabel =
         perspective === 'seller'
             ? `Client: ${getOrderPartyName(order.userId, 'Client inconnu')}`
@@ -85,7 +96,9 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
             <View style={styles.footer}>
                 <View style={styles.totalContainer}>
                     <Text style={styles.totalLabel}>Total</Text>
-                    <Text style={styles.totalAmount}>{formatAmount(order.totalAmount)}</Text>
+                    <Text style={styles.totalAmount}>
+                        {formatCurrencyAmount(order.totalAmount, orderCurrency)}
+                    </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={Colors.gray400} />
             </View>

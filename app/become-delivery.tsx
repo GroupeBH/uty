@@ -530,8 +530,18 @@ export default function BecomeDeliveryScreen() {
                                     <Text style={styles.secondaryButtonText}>Voir les commandes</Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
+                                    style={styles.secondaryButton}
+                                    onPress={() => router.push('/delivery/deliver-persons')}
+                                >
+                                    <Text style={styles.secondaryButtonText}>Livraisons dispo</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.alreadyButtonsRow}>
+                                <TouchableOpacity
                                     style={[styles.secondaryButton, !deliveryLookupId.trim() && { opacity: 0.6 }]}
-                                    onPress={() => router.push(`/delivery/${deliveryLookupId.trim()}` as any)}
+                                    onPress={() =>
+                                        router.push(`/delivery/deliver-persons/${deliveryLookupId.trim()}` as any)
+                                    }
                                     disabled={!deliveryLookupId.trim()}
                                 >
                                     <Text style={styles.secondaryButtonText}>Ouvrir livraison</Text>

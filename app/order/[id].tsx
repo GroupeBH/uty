@@ -4,6 +4,7 @@ import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetOrderQuery, useRequestDeliveryMutation, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
+import { formatCurrencyAmount } from '@/utils/currency';
 import {
     OrderStatusValue,
     getNextSellerStatuses,
@@ -36,7 +37,8 @@ const STATUS_ACTION_LABELS: Record<OrderStatusValue, string> = {
     cancelled: 'Annuler la commande',
 };
 
-const formatAmount = (value?: number) => `${Number(value || 0).toFixed(2)} EUR`;
+const formatAmount = (value: number | undefined, currency?: unknown) =>
+    formatCurrencyAmount(value, currency);
 
 const formatDateTime = (value?: string) => {
     if (!value) return 'Date inconnue';
@@ -88,6 +90,24 @@ export default function OrderDetailScreen() {
     const sellerId = getOrderPartyId(order?.sellerId);
     const isSeller = Boolean(currentUserId && sellerId === currentUserId);
     const isBuyer = Boolean(currentUserId && buyerId === currentUserId);
+    const canActAsDriver = Boolean(
+        user?.roles?.some((role) =>
+            ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(
+                (role || '').toLowerCase(),
+            ),
+        ),
+    );
+    const resolveDeliveryRoute = React.useCallback(
+        (targetDeliveryId: string) => {
+            const normalizedId = targetDeliveryId.trim();
+            if (!normalizedId) return '/orders';
+            if (isSeller) return `/delivery/seller/${normalizedId}`;
+            if (isBuyer) return `/delivery/buyer/${normalizedId}`;
+            if (canActAsDriver) return `/delivery/deliver-persons/${normalizedId}`;
+            return `/delivery/${normalizedId}`;
+        },
+        [canActAsDriver, isBuyer, isSeller],
+    );
 
     const nextStatuses = React.useMemo(
         () => (order && isSeller ? getNextSellerStatuses(order.status) : []),
@@ -217,7 +237,7 @@ export default function OrderDetailScreen() {
                 cancelText: 'Fermer',
                 onConfirm: () => {
                     if (createdDeliveryId) {
-                        router.push(`/delivery/${createdDeliveryId}` as any);
+                        router.push(resolveDeliveryRoute(String(createdDeliveryId)) as any);
                     }
                 },
             });
@@ -248,7 +268,7 @@ export default function OrderDetailScreen() {
         }
         setDeliveryId(candidate);
         await deliveryStorage.setDeliveryIdForOrder(order._id, candidate);
-        router.push(`/delivery/${candidate}` as any);
+        router.push(resolveDeliveryRoute(candidate) as any);
     };
 
     if (isLoading) {
@@ -268,6 +288,9 @@ export default function OrderDetailScreen() {
     }
 
     const itemCount = order.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+    const orderCurrency = order.items
+        .map((item) => getOrderItemProduct(item)?.currency)
+        .find(Boolean);
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -291,7 +314,7 @@ export default function OrderDetailScreen() {
                     </View>
                     <View style={styles.rowBetween}>
                         <Text style={styles.mutedText}>Total</Text>
-                        <Text style={styles.totalText}>{formatAmount(order.totalAmount)}</Text>
+                        <Text style={styles.totalText}>{formatAmount(order.totalAmount, orderCurrency)}</Text>
                     </View>
                 </View>
 
@@ -348,13 +371,15 @@ export default function OrderDetailScreen() {
                                         {getOrderItemName(item)}
                                     </Text>
                                     <Text style={styles.itemMeta}>
-                                        {Number(item.quantity) || 0} x {formatAmount(item.price)}
+                                        {Number(item.quantity) || 0} x {formatAmount(item.price, product?.currency || orderCurrency)}
                                     </Text>
                                     {typeof stock === 'number' ? (
                                         <Text style={styles.itemStock}>Stock actuel: {stock}</Text>
                                     ) : null}
                                 </View>
-                                <Text style={styles.itemLineTotal}>{formatAmount(lineTotal)}</Text>
+                                <Text style={styles.itemLineTotal}>
+                                    {formatAmount(lineTotal, product?.currency || orderCurrency)}
+                                </Text>
                             </View>
                         );
                     })}
@@ -369,7 +394,7 @@ export default function OrderDetailScreen() {
                             </Text>
                             <TouchableOpacity
                                 style={styles.deliveryTrackButton}
-                                onPress={() => router.push(`/delivery/${deliveryId}` as any)}
+                                onPress={() => router.push(resolveDeliveryRoute(deliveryId) as any)}
                             >
                                 <Ionicons name="navigate-outline" size={16} color={Colors.white} />
                                 <Text style={styles.deliveryTrackButtonText}>Suivre la livraison</Text>

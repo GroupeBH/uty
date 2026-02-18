@@ -10,6 +10,8 @@ import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery, useUpdateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
+import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
+import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -59,6 +61,7 @@ export default function EditAnnouncementScreen() {
         name: '',
         description: '',
         price: '',
+        currency: DEFAULT_CURRENCY_CODE,
         quantity: '1',
         isDeliverable: false,
         weightClass: [] as string[],
@@ -120,9 +123,27 @@ export default function EditAnnouncementScreen() {
     };
 
     // Queries
+    const { data: currencies = [] } = useGetCurrenciesQuery();
     const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
         announcement?.category?._id || announcement?.category || '',
         { skip: !announcement?.category }
+    );
+    const activeCurrencies = React.useMemo(
+        () => currencies.filter((currency) => currency.isActive !== false),
+        [currencies],
+    );
+    const currencyOptions = React.useMemo(
+        () =>
+            activeCurrencies.length > 0
+                ? activeCurrencies
+                : [
+                      {
+                          _id: DEFAULT_CURRENCY_CODE,
+                          code: DEFAULT_CURRENCY_CODE,
+                          symbol: DEFAULT_CURRENCY_SYMBOL,
+                      },
+                  ],
+        [activeCurrencies],
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
@@ -188,6 +209,11 @@ export default function EditAnnouncementScreen() {
                 name: announcement.name || '',
                 description: announcement.description || '',
                 price: announcement.price?.toString() || '',
+                currency:
+                    (typeof announcement.currency === 'object'
+                        ? (announcement.currency as any)?._id ||
+                          (announcement.currency as any)?.code
+                        : announcement.currency) || DEFAULT_CURRENCY_CODE,
                 quantity: announcement.quantity?.toString() || '1',
                 isDeliverable: !!announcement.isDeliverable,
                 weightClass: normalizedWeightClass,
@@ -211,6 +237,24 @@ export default function EditAnnouncementScreen() {
             }
         }
     }, [announcement]);
+
+    useEffect(() => {
+        if (activeCurrencies.length === 0) {
+            return;
+        }
+
+        setFormData((prev: any) => {
+            const normalizedCurrency = resolveCurrencySelectionValue(prev.currency, activeCurrencies);
+            if (prev.currency === normalizedCurrency) {
+                return prev;
+            }
+
+            return {
+                ...prev,
+                currency: normalizedCurrency,
+            };
+        });
+    }, [activeCurrencies]);
 
     // Animation du progress
     const updateProgress = React.useCallback((step: number) => {
@@ -357,6 +401,9 @@ export default function EditAnnouncementScreen() {
             if (!formData.price || parseFloat(formData.price) <= 0) {
                 newErrors.price = 'Le prix doit être supérieur à 0';
             }
+            if (!formData.currency) {
+                newErrors.currency = 'La devise est obligatoire';
+            }
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
@@ -446,6 +493,10 @@ export default function EditAnnouncementScreen() {
                 formDataToSend.append('description', formData.description.trim());
             }
             formDataToSend.append('price', parseFloat(formData.price).toString());
+            formDataToSend.append(
+                'currency',
+                resolveCurrencySelectionValue(formData.currency, activeCurrencies),
+            );
             formDataToSend.append('quantity', (formData.quantity ? parseInt(formData.quantity) : 1).toString());
 
             formDataToSend.append('isDeliverable', String(!!formData.isDeliverable));
@@ -716,6 +767,47 @@ export default function EditAnnouncementScreen() {
                                         placeholderTextColor={Colors.gray400}
                                     />
                                 </View>
+                            </View>
+
+                            <View style={styles.inputContainer}>
+                                <Text style={styles.inputLabel}>
+                                    Devise <Text style={styles.required}>*</Text>
+                                </Text>
+                                <View style={styles.weightChips}>
+                                    {currencyOptions.map((currency) => {
+                                        const optionValue = currency._id || currency.code;
+                                        const isActive =
+                                            formData.currency === optionValue ||
+                                            formData.currency === currency.code;
+
+                                        return (
+                                            <TouchableOpacity
+                                                key={optionValue}
+                                                style={[
+                                                    styles.weightChip,
+                                                    isActive && styles.weightChipActive,
+                                                ]}
+                                                onPress={() =>
+                                                    setFormData({ ...formData, currency: optionValue })
+                                                }
+                                                activeOpacity={0.8}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.weightChipText,
+                                                        isActive && styles.weightChipTextActive,
+                                                    ]}
+                                                >
+                                                    {currency.code}
+                                                    {currency.symbol ? ` (${currency.symbol})` : ''}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                                {errors.currency && (
+                                    <Text style={styles.errorText}>{errors.currency}</Text>
+                                )}
                             </View>
 
                         </View>

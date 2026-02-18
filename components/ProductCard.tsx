@@ -4,6 +4,7 @@
 
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { Announcement } from '@/types/announcement';
+import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -118,7 +119,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
                 {/* Prix */}
                 <View style={styles.priceContainer}>
-                    <Text style={styles.price}>{product.price ? product.price.toFixed(2) : 'N/A'} €</Text>
+                    <Text style={styles.price}>{formatCurrencyAmount(product.price, product.currency)}</Text>
                 </View>
 
                 {/* Bouton ajout au panier */}

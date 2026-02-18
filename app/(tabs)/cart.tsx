@@ -13,6 +13,7 @@ import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Announcement } from '@/types/announcement';
 import { Cart as CartType, CartProduct as CartItemType } from '@/types/cart';
+import { formatCurrencyAmount, resolveCurrencyDisplay } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -461,25 +462,9 @@ export default function CartScreen() {
         setCheckoutModalVisible(true);
     };
 
-    const currencyById = React.useMemo(() => {
-        const map = new Map<string, any>();
-        currencies.forEach((currency) => {
-            map.set(currency._id, currency);
-        });
-        return map;
-    }, [currencies]);
-
     const resolveCurrency = React.useCallback((currency: any) => {
-        if (!currency) return 'EUR';
-        if (typeof currency === 'string') {
-            const found = currencyById.get(currency);
-            return found?.symbol || found?.code || currency;
-        }
-        if (typeof currency === 'object') {
-            return currency.symbol || currency.code || 'EUR';
-        }
-        return 'EUR';
-    }, [currencyById]);
+        return resolveCurrencyDisplay(currency, { currencies });
+    }, [currencies]);
 
     const currencySymbols = React.useMemo(() => {
         const symbols = new Set<string>();
@@ -492,10 +477,18 @@ export default function CartScreen() {
 
     const currencySymbol = currencySymbols.size === 1
         ? Array.from(currencySymbols)[0]
-        : 'EUR';
+        : resolveCurrency(undefined);
     const currencyNote = currencySymbols.size > 1
         ? 'Plusieurs devises detectees. Total affiche en devise par defaut.'
         : '';
+    const formatAmount = React.useCallback(
+        (value: number) =>
+            formatCurrencyAmount(value, currencySymbol, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+            }),
+        [currencySymbol],
+    );
 
     const groupedSections = React.useMemo(() => {
         const groups = new Map<string, {
@@ -709,15 +702,19 @@ export default function CartScreen() {
         <SafeAreaView style={styles.container} edges={['bottom']}>
             <SectionList
                 sections={groupedSections}
-                renderItem={({ item }) => (
-                    <CartItem
-                        item={item}
-                        onIncrement={handleIncrement}
-                        onDecrement={handleDecrement}
-                        onRemove={handleRemove}
-                        currencySymbol={currencySymbol}
-                    />
-                )}
+                renderItem={({ item }) => {
+                    const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
+                    const itemCurrency = resolveCurrency(product?.currency);
+                    return (
+                        <CartItem
+                            item={item}
+                            onIncrement={handleIncrement}
+                            onDecrement={handleDecrement}
+                            onRemove={handleRemove}
+                            currencySymbol={itemCurrency}
+                        />
+                    );
+                }}
                 renderSectionHeader={({ section }) => (
                     <View style={styles.sellerHeader}>
                         <View>
@@ -725,7 +722,7 @@ export default function CartScreen() {
                             <Text style={styles.sellerMeta}>{section.totalQuantity} article(s)</Text>
                         </View>
                         <Text style={styles.sellerSubtotal}>
-                            {section.subtotal.toFixed(2)} {currencySymbol}
+                            {formatAmount(section.subtotal)}
                         </Text>
                     </View>
                 )}
@@ -766,7 +763,7 @@ export default function CartScreen() {
                             <View style={styles.heroBottomRow}>
                                 <View>
                                     <Text style={styles.heroLabel}>Total provisoire</Text>
-                                    <Text style={styles.heroTotal}>{total.toFixed(2)} {currencySymbol}</Text>
+                                    <Text style={styles.heroTotal}>{formatAmount(total)}</Text>
                                 </View>
                                 <TouchableOpacity
                                     style={styles.heroAction}
@@ -817,17 +814,17 @@ export default function CartScreen() {
 
                         <View style={styles.summaryRow}>
                             <Text style={styles.summaryLabel}>Sous-total</Text>
-                            <Text style={styles.summaryValue}>{subtotal.toFixed(2)} {currencySymbol}</Text>
+                            <Text style={styles.summaryValue}>{formatAmount(subtotal)}</Text>
                         </View>
 
                         <View style={styles.summaryRow}>
                             <Text style={styles.summaryLabel}>TVA (20%)</Text>
-                            <Text style={styles.summaryValue}>{tax.toFixed(2)} {currencySymbol}</Text>
+                            <Text style={styles.summaryValue}>{formatAmount(tax)}</Text>
                         </View>
 
                         <View style={styles.summaryRow}>
                             <Text style={styles.summaryLabel}>Livraison</Text>
-                            <Text style={styles.summaryValue}>{deliveryCost.toFixed(2)} {currencySymbol}</Text>
+                            <Text style={styles.summaryValue}>{formatAmount(deliveryCost)}</Text>
                         </View>
 
                         <Text style={styles.deliveryNote}>{deliveryExplanation}</Text>
@@ -842,7 +839,7 @@ export default function CartScreen() {
 
                         <View style={styles.summaryRow}>
                             <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>{total.toFixed(2)} {currencySymbol}</Text>
+                            <Text style={styles.totalValue}>{formatAmount(total)}</Text>
                         </View>
                     </Card>
                 }
@@ -882,7 +879,7 @@ export default function CartScreen() {
                             <View style={styles.checkoutModalRow}>
                                 <Text style={styles.checkoutModalTotalLabel}>Total a payer</Text>
                                 <Text style={styles.checkoutModalTotalValue}>
-                                    {total.toFixed(2)} {currencySymbol}
+                                    {formatAmount(total)}
                                 </Text>
                             </View>
                         </View>
@@ -918,7 +915,7 @@ export default function CartScreen() {
                             adjustsFontSizeToFit
                             minimumFontScale={0.75}
                         >
-                            {total.toFixed(2)} {currencySymbol}
+                            {formatAmount(total)}
                         </Text>
                     </View>
                     <Button

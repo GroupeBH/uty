@@ -89,7 +89,15 @@ export default function TabLayout() {
           tabPress: (event) => {
             if (!isAuthenticated) {
               event.preventDefault();
-              router.push('/modal');
+              router.push({
+                pathname: '/modal',
+                params: {
+                  mode: 'login',
+                  title: 'Connexion requise',
+                  reason: 'Connectez-vous pour acceder a votre profil.',
+                  source: 'tab_profile',
+                },
+              });
             }
           },
         }}

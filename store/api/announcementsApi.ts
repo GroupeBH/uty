@@ -5,6 +5,7 @@ export interface CreateAnnouncementDto {
     name: string;
     description?: string;
     price?: number;
+    currency?: string;
     quantity?: number;
     category: string;
     attributes?: Record<string, any>;
@@ -17,6 +18,7 @@ export interface UpdateAnnouncementDto {
     name?: string;
     description?: string;
     price?: number;
+    currency?: string;
     quantity?: number;
     attributes?: Record<string, any>;
     existingImages?: string[];

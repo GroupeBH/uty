@@ -6,6 +6,7 @@
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeleteAnnouncementMutation, useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -294,7 +295,7 @@ export default function MyAnnouncementsScreen() {
                     </Text>
                     <View style={styles.cardFooter}>
                         <Text style={styles.cardPrice}>
-                            {item.price?.toLocaleString('fr-FR')} {item.currency?.symbol || '€'}
+                            {formatCurrencyAmount(item.price, item.currency)}
                         </Text>
                         <View style={styles.cardStats}>
                             <View style={styles.stat}>

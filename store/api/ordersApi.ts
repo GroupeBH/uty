@@ -65,6 +65,7 @@ export const ordersApi = baseApi.injectEndpoints({
                 { type: 'Order', id },
                 { type: 'Order', id: 'LIST' },
                 { type: 'Delivery', id: result?._id || 'LIST' },
+                { type: 'Delivery', id: 'DELIVERY_POOL_LIST' },
             ],
         }),
         rateOrderParticipants: builder.mutation<Order, { id: string; data: RateOrderDto }>({

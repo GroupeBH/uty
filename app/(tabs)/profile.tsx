@@ -127,6 +127,17 @@ export default function ProfileScreen() {
                     gradient: Gradients.success,
                     onPress: () => router.push('/become-delivery'),
                 },
+                ...(hasDeliveryRole
+                    ? [
+                          {
+                              icon: 'navigate-outline',
+                              label: 'Livraisons disponibles',
+                              subtitle: 'Voir et accepter les courses',
+                              gradient: Gradients.cool,
+                              onPress: () => router.push('/delivery/deliver-persons'),
+                          },
+                      ]
+                    : []),
                 {
                     icon: 'location-outline',
                     label: 'Adresses',
@@ -151,7 +162,7 @@ export default function ProfileScreen() {
                     label: 'Notifications',
                     subtitle: 'Gérer les notifications',
                     gradient: Gradients.warm,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: () => router.push('/notifications'),
                 },
                 {
                     icon: 'settings-outline',
@@ -563,3 +574,4 @@ const styles = StyleSheet.create({
         marginTop: Spacing.md,
     },
 });
+

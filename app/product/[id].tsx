@@ -9,6 +9,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
 import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
+import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -390,7 +391,7 @@ export default function ProductDetailScreen() {
                             <Text style={styles.productName}>{product.name}</Text>
                         </View>
                         <View style={styles.priceRow}>
-                            <Text style={styles.price}>{product.price?.toFixed(2) || 'N/A'} €</Text>
+                            <Text style={styles.price}>{formatCurrencyAmount(product.price, product.currency)}</Text>
                             <View style={styles.ratingContainer}>
                                 <Ionicons name="star" size={18} color={Colors.accent} />
                                 <Text style={styles.ratingText}>4.5 (12)</Text>

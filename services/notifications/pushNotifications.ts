@@ -14,6 +14,10 @@ type MessagingInstance = {
     requestPermission?: () => Promise<number>;
     getToken?: () => Promise<string>;
     deleteToken?: () => Promise<void>;
+    getInitialNotification?: () => Promise<FirebaseRemoteMessage | null>;
+    onNotificationOpenedApp?: (
+        listener: (message: FirebaseRemoteMessage) => void,
+    ) => () => void;
     onTokenRefresh?: (listener: (token: string) => void) => () => void;
     onMessage?: (listener: (message: FirebaseRemoteMessage) => void) => () => void;
     setBackgroundMessageHandler?: (
@@ -59,6 +63,9 @@ type NotifeeModule = {
     }) => Promise<string>;
     onForegroundEvent?: (listener: (_event: unknown) => void) => () => void;
     onBackgroundEvent?: (listener: (_event: unknown) => Promise<void>) => void;
+    getInitialNotification?: () => Promise<{
+        notification?: { id?: string; title?: string; body?: string; data?: Record<string, string> };
+    } | null>;
 };
 
 const DEFAULT_CHANNEL_ID = 'uty-default';
@@ -70,6 +77,9 @@ let hasInitializedBackgroundHandlers = false;
 let hasCreatedAndroidChannel = false;
 let hasWarnedMissingMessaging = false;
 let hasWarnedMissingNotifee = false;
+const notificationOpenListeners = new Set<
+    (message: FirebaseRemoteMessage) => void
+>();
 
 let cachedMessagingFactory: MessagingFactory | null | undefined;
 let cachedNotifeeModule: NotifeeModule | null | undefined;
@@ -210,6 +220,19 @@ export const displayRemoteMessage = async (
     });
 };
 
+const emitNotificationOpened = (message: FirebaseRemoteMessage) => {
+    notificationOpenListeners.forEach((listener) => listener(message));
+};
+
+export const subscribeToNotificationOpen = (
+    listener: (message: FirebaseRemoteMessage) => void,
+): (() => void) => {
+    notificationOpenListeners.add(listener);
+    return () => {
+        notificationOpenListeners.delete(listener);
+    };
+};
+
 export const requestPushPermissions = async (): Promise<boolean> => {
     const messagingFactory = getMessagingFactory();
     const notifee = getNotifeeModule();
@@ -306,7 +329,22 @@ export const initializeForegroundPushHandlers = async (): Promise<void> => {
     }
 
     if (notifee.onForegroundEvent) {
-        notifee.onForegroundEvent(() => undefined);
+        notifee.onForegroundEvent((event: any) => {
+            const eventType = event?.type;
+            const isPressEvent =
+                eventType === 1 || eventType === 'PRESS' || eventType === 'ACTION_PRESS';
+            if (!isPressEvent) return;
+
+            const notification = event?.detail?.notification;
+            emitNotificationOpened({
+                messageId: notification?.id,
+                notification: {
+                    title: notification?.title,
+                    body: notification?.body,
+                },
+                data: notification?.data,
+            });
+        });
     }
 
     hasInitializedForegroundHandlers = true;
@@ -331,8 +369,51 @@ export const initializeBackgroundPushHandlers = (): void => {
         });
     }
 
+    if (messaging.onNotificationOpenedApp) {
+        messaging.onNotificationOpenedApp((remoteMessage: FirebaseRemoteMessage) => {
+            emitNotificationOpened(remoteMessage);
+        });
+    }
+
+    if (messaging.getInitialNotification) {
+        messaging.getInitialNotification().then((remoteMessage) => {
+            if (remoteMessage) {
+                emitNotificationOpened(remoteMessage);
+            }
+        });
+    }
+
     if (notifee.onBackgroundEvent) {
-        notifee.onBackgroundEvent(async () => undefined);
+        notifee.onBackgroundEvent(async (event: any) => {
+            const eventType = event?.type;
+            const isPressEvent =
+                eventType === 1 || eventType === 'PRESS' || eventType === 'ACTION_PRESS';
+            if (!isPressEvent) return;
+
+            const notification = event?.detail?.notification;
+            emitNotificationOpened({
+                messageId: notification?.id,
+                notification: {
+                    title: notification?.title,
+                    body: notification?.body,
+                },
+                data: notification?.data,
+            });
+        });
+    }
+
+    if (notifee.getInitialNotification) {
+        notifee.getInitialNotification().then((initial) => {
+            if (!initial?.notification) return;
+            emitNotificationOpened({
+                messageId: initial.notification.id,
+                notification: {
+                    title: initial.notification.title,
+                    body: initial.notification.body,
+                },
+                data: initial.notification.data,
+            });
+        });
     }
 
     hasInitializedBackgroundHandlers = true;

@@ -5,6 +5,7 @@
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { Announcement } from '@/types/announcement';
 import { CartProduct as CartItemType } from '@/types/cart';
+import { formatCurrencyAmount, resolveCurrencyDisplay } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -31,15 +32,7 @@ export const CartItem: React.FC<CartItemProps> = ({
     const productStock = typeof product.quantity === 'number' ? product.quantity : undefined;
     const disableIncrement = productStock !== undefined && item.quantity >= productStock;
     const lineTotal = productPrice * item.quantity;
-
-    const resolveCurrency = (currency: any) => {
-        if (!currency) return 'EUR';
-        if (typeof currency === 'string') return currency;
-        if (typeof currency === 'object') return currency.symbol || currency.code || 'EUR';
-        return 'EUR';
-    };
-
-    const resolvedCurrencySymbol = currencySymbol || resolveCurrency(product.currency);
+    const resolvedCurrencySymbol = currencySymbol || resolveCurrencyDisplay(product.currency);
 
     return (
         <View style={styles.container}>
@@ -56,8 +49,12 @@ export const CartItem: React.FC<CartItemProps> = ({
                 </View>
 
                 <View style={styles.priceRow}>
-                    <Text style={styles.price}>{productPrice.toFixed(2)} {resolvedCurrencySymbol}</Text>
-                    <Text style={styles.lineTotal}>{lineTotal.toFixed(2)} {resolvedCurrencySymbol}</Text>
+                    <Text style={styles.price}>
+                        {formatCurrencyAmount(productPrice, resolvedCurrencySymbol)}
+                    </Text>
+                    <Text style={styles.lineTotal}>
+                        {formatCurrencyAmount(lineTotal, resolvedCurrencySymbol)}
+                    </Text>
                 </View>
 
                 <View style={styles.actionsRow}>

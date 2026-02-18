@@ -1,5 +1,4 @@
 import { useCallback } from 'react';
-import { Alert } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import {
@@ -41,14 +40,17 @@ export const useAuth = () => {
     }, [dispatch, logoutMutation]);
 
     const requireAuth = useCallback(
-        (message = 'Vous devez être connecté pour effectuer cette action') => {
+        (message = 'Vous devez etre connecte pour effectuer cette action') => {
             if (!isAuthenticated) {
-                // Afficher le message si fourni
-                if (message) {
-                    Alert.alert('Connexion requise', message);
-                }
-                // Ouvrir le modal d'authentification
-                router.push('/modal');
+                router.push({
+                    pathname: '/modal',
+                    params: {
+                        mode: 'login',
+                        title: 'Connexion requise',
+                        reason: message || 'Connectez-vous pour continuer.',
+                        source: 'auth_guard',
+                    },
+                });
                 return false;
             }
             return true;
