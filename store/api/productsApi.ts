@@ -6,6 +6,7 @@ import { ApiResponse, PaginatedResponse, Product, ProductFilters } from '@/types
 import { baseApi } from './baseApi';
 
 export const productsApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         /**
          * Liste des produits avec filtres et pagination

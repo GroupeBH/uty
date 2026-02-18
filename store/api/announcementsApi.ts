@@ -1,7 +1,36 @@
 import { Announcement } from '@/types/announcement';
 import { baseApi } from './baseApi';
 
+export interface CreateAnnouncementDto {
+    name: string;
+    description?: string;
+    price?: number;
+    currency?: string;
+    quantity?: number;
+    category: string;
+    attributes?: Record<string, any>;
+    isDeliverable?: boolean;
+    pickupLocation?: any;
+    weightClass?: string[];
+}
+
+export interface UpdateAnnouncementDto {
+    name?: string;
+    description?: string;
+    price?: number;
+    currency?: string;
+    quantity?: number;
+    attributes?: Record<string, any>;
+    existingImages?: string[];
+    imagesToDelete?: string[];
+    newImages?: string[]; // Base64 images
+    isDeliverable?: boolean;
+    pickupLocation?: any;
+    weightClass?: string[];
+}
+
 export const announcementsApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getAnnouncements: builder.query<Announcement[], void>({
             query: () => '/announcements',
@@ -12,18 +41,14 @@ export const announcementsApi = baseApi.injectEndpoints({
             providesTags: (result, error, id) => [{ type: 'Announcement', id }],
         }),
         createAnnouncement: builder.mutation<Announcement, FormData>({
-            query: (formData) => ({
+            query: (data) => ({
                 url: '/announcements',
                 method: 'POST',
-                body: formData,
-                headers: {
-                    // Important: Let browser set boundary for FormData
-                    // 'Content-Type': undefined, // handled by prepareHeaders logic update
-                },
+                body: data,
             }),
             invalidatesTags: ['Announcement'],
         }),
-        updateAnnouncement: builder.mutation<Announcement, { id: string; data: FormData }>({
+        updateAnnouncement: builder.mutation<Announcement, { id: string; data: FormData | UpdateAnnouncementDto }>({
             query: ({ id, data }) => ({
                 url: `/announcements/${id}`,
                 method: 'PATCH',

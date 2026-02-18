@@ -2,6 +2,7 @@ import { Category, Subcategory } from '@/types/category';
 import { baseApi } from './baseApi';
 
 export const categoriesApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         getCategories: builder.query<Category[], void>({
             query: () => '/categories',

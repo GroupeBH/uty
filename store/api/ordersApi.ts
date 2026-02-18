@@ -2,40 +2,40 @@
  * API des commandes
  */
 
-import { ApiResponse, CreateOrderRequest, Order, OrderStatus, PaginatedResponse } from '@/types';
+import { Delivery, RateOrderDto, RequestDeliveryDto } from '@/types/delivery';
+import { CreateOrderRequest, Order, OrderStatusValue } from '@/types/order';
 import { baseApi } from './baseApi';
 
 export const ordersApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
         /**
-         * Liste des commandes de l'utilisateur
+         * Liste des commandes de l'utilisateur.
+         * Retourne les achats (buyer) et, si vendeur, les ventes.
          */
-        getOrders: builder.query<PaginatedResponse<Order>, { page?: number; limit?: number; status?: OrderStatus }>({
-            query: (params) => ({
-                url: '/orders',
-                params,
-            }),
+        getOrders: builder.query<Order[], void>({
+            query: () => '/orders/my-orders',
             providesTags: (result) =>
                 result
                     ? [
-                        ...result.data.map(({ id }) => ({ type: 'Order' as const, id })),
+                        ...result.map(({ _id }) => ({ type: 'Order' as const, id: _id })),
                         { type: 'Order', id: 'LIST' },
                     ]
                     : [{ type: 'Order', id: 'LIST' }],
         }),
 
         /**
-         * Détails d'une commande
+         * Details d'une commande.
          */
-        getOrder: builder.query<ApiResponse<Order>, string>({
+        getOrder: builder.query<Order, string>({
             query: (id) => `/orders/${id}`,
             providesTags: (result, error, id) => [{ type: 'Order', id }],
         }),
 
         /**
-         * Créer une commande
+         * Creer une commande.
          */
-        createOrder: builder.mutation<ApiResponse<Order>, CreateOrderRequest>({
+        createOrder: builder.mutation<Order, CreateOrderRequest>({
             query: (orderData) => ({
                 url: '/orders',
                 method: 'POST',
@@ -45,37 +45,36 @@ export const ordersApi = baseApi.injectEndpoints({
         }),
 
         /**
-         * Mettre à jour le statut d'une commande
+         * Mettre a jour le statut d'une commande.
          */
-        updateOrderStatus: builder.mutation<ApiResponse<Order>, { id: string; status: OrderStatus }>({
+        updateOrderStatus: builder.mutation<Order, { id: string; status: OrderStatusValue }>({
             query: ({ id, status }) => ({
                 url: `/orders/${id}/status`,
                 method: 'PATCH',
                 body: { status },
             }),
-            invalidatesTags: (result, error, { id }) => [{ type: 'Order', id }],
+            invalidatesTags: (result, error, { id }) => [{ type: 'Order', id }, { type: 'Order', id: 'LIST' }],
         }),
-
-        /**
-         * Annuler une commande
-         */
-        cancelOrder: builder.mutation<ApiResponse<Order>, string>({
-            query: (id) => ({
-                url: `/orders/${id}/cancel`,
+        requestDelivery: builder.mutation<Delivery, { id: string; data?: RequestDeliveryDto }>({
+            query: ({ id, data }) => ({
+                url: `/orders/${id}/request-delivery`,
                 method: 'POST',
+                body: data || {},
             }),
-            invalidatesTags: (result, error, id) => [{ type: 'Order', id }],
+            invalidatesTags: (result, error, { id }) => [
+                { type: 'Order', id },
+                { type: 'Order', id: 'LIST' },
+                { type: 'Delivery', id: result?._id || 'LIST' },
+                { type: 'Delivery', id: 'DELIVERY_POOL_LIST' },
+            ],
         }),
-
-        /**
-         * Commandes du vendeur (pour le dashboard vendeur)
-         */
-        getSellerOrders: builder.query<PaginatedResponse<Order>, { page?: number; limit?: number; status?: OrderStatus }>({
-            query: (params) => ({
-                url: '/seller/orders',
-                params,
+        rateOrderParticipants: builder.mutation<Order, { id: string; data: RateOrderDto }>({
+            query: ({ id, data }) => ({
+                url: `/orders/${id}/rate`,
+                method: 'POST',
+                body: data,
             }),
-            providesTags: [{ type: 'Order', id: 'SELLER_LIST' }],
+            invalidatesTags: (result, error, { id }) => [{ type: 'Order', id }, { type: 'Order', id: 'LIST' }],
         }),
     }),
 });
@@ -85,6 +84,6 @@ export const {
     useGetOrderQuery,
     useCreateOrderMutation,
     useUpdateOrderStatusMutation,
-    useCancelOrderMutation,
-    useGetSellerOrdersQuery,
+    useRequestDeliveryMutation,
+    useRateOrderParticipantsMutation,
 } = ordersApi;

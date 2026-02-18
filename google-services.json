@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "814670285728",
+    "project_id": "uty-app-167bc",
+    "storage_bucket": "uty-app-167bc.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:814670285728:android:4d895f856d7a2f924ff2c5",
+        "android_client_info": {
+          "package_name": "com.uty"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBTTg78toZbTirmSm4-qM5LF6zgQblrYTw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

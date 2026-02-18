@@ -4,7 +4,10 @@ import { FAB } from '@/components/FAB';
 import { ProductCard } from '@/components/ProductCard';
 import { ProductCardSkeleton, QuickActionSkeleton } from '@/components/SkeletonLoader';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
+import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -20,24 +23,28 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Function to simulate getting popular announcements based on views, comments, or cart additions
-const getPopularAnnouncements = (allAnnouncements: any[]) => {
-    // In a real app, this would come from the API with proper sorting
-    // For now, we'll sort by a combination of viewCount, commentCount, and cartAdditions
-    return [...allAnnouncements]
-        .sort((a, b) => {
-            const scoreA = (a.viewCount || 0) + (a.commentCount || 0) + (a.cartAdditions || 0);
-            const scoreB = (b.viewCount || 0) + (b.commentCount || 0) + (b.cartAdditions || 0);
-            return scoreB - scoreA;
-        })
-        .slice(0, 10); // Take top 10 popular announcements
-};
-
 // Function to get recent announcements
 const getRecentAnnouncements = (allAnnouncements: any[]) => {
     return [...allAnnouncements]
         .sort((a, b) => new Date(b.createdAt || b._id).getTime() - new Date(a.createdAt || a._id).getTime())
         .slice(0, 10); // Take 10 most recent
+};
+
+const getRecommendedAnnouncements = (allAnnouncements: any[]) => {
+    return [...allAnnouncements]
+        .sort((a, b) => {
+            const engagementA = (a.viewCount || 0) + (a.commentCount || 0) + (a.cartAdditions || 0);
+            const engagementB = (b.viewCount || 0) + (b.commentCount || 0) + (b.cartAdditions || 0);
+
+            if (engagementA !== engagementB) {
+                return engagementB - engagementA;
+            }
+
+            const dateA = new Date(a.createdAt || a._id).getTime();
+            const dateB = new Date(b.createdAt || b._id).getTime();
+            return dateB - dateA;
+        })
+        .slice(0, 8);
 };
 
 // Component to render announcement pairs horizontally
@@ -62,64 +69,272 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
     </View>
 );
 
-const QUICK_ACTIONS = [
-    { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
-    { id: '2', title: 'Rechercher', icon: 'search-outline', gradient: Gradients.cool, route: '/search' },
-    { id: '3', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
-    { id: '4', title: 'Commandes', icon: 'receipt-outline', gradient: Gradients.success, route: '/orders' },
+const CATEGORY_GRADIENTS = [
+    Gradients.cool,
+    Gradients.warm,
+    Gradients.success,
+    Gradients.accent,
+    Gradients.primary,
+    Gradients.sunset,
+    Gradients.ocean,
 ];
 
-const CATEGORIES = [
-    { id: '1', name: 'Électronique', icon: 'hardware-chip-outline', gradient: Gradients.cool },
-    { id: '2', name: 'Mode', icon: 'shirt-outline', gradient: Gradients.warm },
-    { id: '3', name: 'Maison', icon: 'home-outline', gradient: Gradients.success },
-    { id: '4', name: 'Sports', icon: 'football-outline', gradient: Gradients.accent },
-    { id: '5', name: 'Livres', icon: 'book-outline', gradient: Gradients.primary },
-    { id: '6', name: 'Beauté', icon: 'sparkles-outline', gradient: Gradients.sunset },
+const resolveCategoryIcon = (name?: string, backendIcon?: string): keyof typeof Ionicons.glyphMap => {
+    const value = `${name || ''} ${backendIcon || ''}`.toLowerCase();
+
+    if (value.includes('elect') || value.includes('tech') || value.includes('digit')) return 'hardware-chip-outline';
+    if (value.includes('mode') || value.includes('fashion') || value.includes('vet')) return 'shirt-outline';
+    if (value.includes('maison') || value.includes('home') || value.includes('meuble')) return 'home-outline';
+    if (value.includes('sport')) return 'football-outline';
+    if (value.includes('livre') || value.includes('book')) return 'book-outline';
+    if (value.includes('beaute') || value.includes('beauty') || value.includes('cosmet')) return 'sparkles-outline';
+    if (value.includes('auto') || value.includes('vehic')) return 'car-sport-outline';
+    if (value.includes('service')) return 'briefcase-outline';
+    return 'grid-outline';
+};
+
+const toIdString = (value: any): string | null => {
+    if (!value) return null;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    }
+    if (typeof value === 'object') {
+        if (value?._id) return toIdString(value._id);
+        if (value?.id) return toIdString(value.id);
+    }
+    return null;
+};
+
+const getAnnouncementCategoryId = (announcement: any): string | null => {
+    return toIdString(announcement?.category);
+};
+
+const getAnnouncementCategoryCandidates = (announcement: any): string[] => {
+    const ids = new Set<string>();
+    const mainCategoryId = getAnnouncementCategoryId(announcement);
+    if (mainCategoryId) {
+        ids.add(mainCategoryId);
+    }
+
+    const ancestors = Array.isArray(announcement?.categoryAncestors)
+        ? announcement.categoryAncestors
+        : [];
+    ancestors.forEach((ancestor) => {
+        const ancestorId = toIdString(ancestor);
+        if (ancestorId) {
+            ids.add(ancestorId);
+        }
+    });
+
+    return Array.from(ids);
+};
+
+const getUserPreferredCategoryIds = (user: any): string[] => {
+    const values = Array.isArray(user?.preferredCategories) ? user.preferredCategories : [];
+    return Array.from(
+        new Set(
+            values
+                .map((value) => toIdString(value))
+                .filter((value): value is string => Boolean(value)),
+        ),
+    );
+};
+
+const mergeAnnouncementLists = (primary: any[], secondary: any[], limit: number): any[] => {
+    const result: any[] = [];
+    const seenIds = new Set<string>();
+
+    const pushUnique = (items: any[]) => {
+        for (const item of items) {
+            if (!item || result.length >= limit) break;
+            const id =
+                toIdString(item._id) ||
+                `${toIdString(item?.category) || 'no-category'}-${item?.createdAt || ''}-${item?.name || ''}-${result.length}`;
+            if (seenIds.has(id)) continue;
+            seenIds.add(id);
+            result.push(item);
+        }
+    };
+
+    pushUnique(primary || []);
+    if (result.length < limit) {
+        pushUnique(secondary || []);
+    }
+
+    return result.slice(0, limit);
+};
+
+const toAnnouncementPairs = (items: any[]): any[][] => {
+    const pairs: any[][] = [];
+    for (let i = 0; i < items.length; i += 2) {
+        pairs.push([items[i], items[i + 1]]);
+    }
+    return pairs;
+};
+
+const QUICK_ACTIONS = [
+    { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
+    { id: '2', title: 'Mes annonces', icon: 'list-outline', gradient: Gradients.primary, route: '/my-announcements' },
+    { id: '3', title: 'Ma boutique', icon: 'storefront-outline', gradient: Gradients.cool, route: '/my-shop' },
+    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
 ];
 
 export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const router = useRouter();
-    const [notifications] = useState(3);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [searchFocused, setSearchFocused] = useState(false);
+    const { user, isAuthenticated, requireAuth } = useAuth();
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
 
     const { data: announcements, isLoading, error, refetch } = useGetAnnouncementsQuery();
+    const {
+        data: categoriesData = [],
+        isLoading: isCategoriesLoading,
+        refetch: refetchCategories,
+    } = useGetCategoriesQuery();
+    const { data: myNotifications = [] } = useGetMyNotificationsQuery(
+        { limit: 50 },
+        { skip: !isAuthenticated },
+    );
 
-    // Calculer les statistiques
-    const stats = useMemo(() => {
-        if (!announcements) return { total: 0, recent: 0, popular: 0 };
-        
-        const now = new Date().getTime();
-        const oneDayAgo = now - 24 * 60 * 60 * 1000;
-        
-        const recentCount = announcements.filter((a: any) => {
-            const createdAt = new Date(a.createdAt || a._id).getTime();
-            return createdAt > oneDayAgo;
-        }).length;
+    const greetingName = isAuthenticated
+        ? user?.firstName?.trim() || 'Utilisateur'
+        : 'Visiteur';
+    const greetingLine = `Bonjour ${greetingName}`;
+    const unreadNotificationsCount = myNotifications.filter((item) => !item.isReaded).length;
+    const preferredCategoryIds = useMemo(
+        () => (isAuthenticated ? getUserPreferredCategoryIds(user) : []),
+        [isAuthenticated, user],
+    );
+    const preferredCategorySet = useMemo(
+        () => new Set(preferredCategoryIds),
+        [preferredCategoryIds],
+    );
+    const shouldPersonalizeAnnouncements =
+        isAuthenticated && preferredCategorySet.size > 0;
 
-        return {
-            total: announcements.length,
-            recent: recentCount,
-            popular: Math.min(10, announcements.length),
-        };
+    const openProfile = React.useCallback(() => {
+        if (isAuthenticated) {
+            router.push('/profile');
+            return;
+        }
+        requireAuth('Vous devez etre connecte pour acceder au profil.');
+    }, [isAuthenticated, requireAuth, router]);
+
+    const openNotifications = React.useCallback(() => {
+        if (isAuthenticated) {
+            router.push('/notifications');
+            return;
+        }
+        requireAuth('Connectez-vous pour acceder aux notifications.');
+    }, [isAuthenticated, requireAuth, router]);
+
+    const personalizedAnnouncementBuckets = useMemo(() => {
+        const allAnnouncements = announcements || [];
+        if (!shouldPersonalizeAnnouncements) {
+            return {
+                preferred: allAnnouncements,
+                others: [] as any[],
+            };
+        }
+
+        const preferred: any[] = [];
+        const others: any[] = [];
+
+        allAnnouncements.forEach((announcement) => {
+            const categoryCandidates = getAnnouncementCategoryCandidates(announcement);
+            const matchesPreference = categoryCandidates.some((categoryId) =>
+                preferredCategorySet.has(categoryId),
+            );
+
+            if (matchesPreference) {
+                preferred.push(announcement);
+            } else {
+                others.push(announcement);
+            }
+        });
+
+        return { preferred, others };
+    }, [announcements, preferredCategorySet, shouldPersonalizeAnnouncements]);
+
+    const recommendedAnnouncements = useMemo(() => {
+        if (!shouldPersonalizeAnnouncements) {
+            return [] as any[];
+        }
+        return getRecommendedAnnouncements(personalizedAnnouncementBuckets.preferred);
+    }, [personalizedAnnouncementBuckets.preferred, shouldPersonalizeAnnouncements]);
+
+    const recommendedAnnouncementPairs = useMemo(
+        () => toAnnouncementPairs(recommendedAnnouncements),
+        [recommendedAnnouncements],
+    );
+
+    const recommendedAnnouncementIdSet = useMemo(
+        () =>
+            new Set(
+                recommendedAnnouncements
+                    .map((item) => toIdString(item?._id))
+                    .filter((value): value is string => Boolean(value)),
+            ),
+        [recommendedAnnouncements],
+    );
+
+    const recentAnnouncements = useMemo(() => {
+        const allAnnouncements = announcements || [];
+        if (!shouldPersonalizeAnnouncements) {
+            return getRecentAnnouncements(allAnnouncements);
+        }
+
+        const preferredPool = personalizedAnnouncementBuckets.preferred.filter((announcement) => {
+            const announcementId = toIdString(announcement?._id);
+            return announcementId ? !recommendedAnnouncementIdSet.has(announcementId) : true;
+        });
+
+        const preferred = getRecentAnnouncements(preferredPool);
+        const fallback = getRecentAnnouncements(personalizedAnnouncementBuckets.others);
+        return mergeAnnouncementLists(preferred, fallback, 10);
+    }, [
+        announcements,
+        personalizedAnnouncementBuckets,
+        recommendedAnnouncementIdSet,
+        shouldPersonalizeAnnouncements,
+    ]);
+
+    const recentAnnouncementPairs = useMemo(
+        () => toAnnouncementPairs(recentAnnouncements),
+        [recentAnnouncements],
+    );
+
+    const categoryCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        for (const announcement of announcements || []) {
+            const categoryId = getAnnouncementCategoryId(announcement);
+            if (!categoryId) continue;
+            counts.set(categoryId, (counts.get(categoryId) || 0) + 1);
+        }
+        return counts;
     }, [announcements]);
+
+    const homeCategories = useMemo(() => {
+        const activeCategories = categoriesData.filter((category: any) => category?.isActive !== false);
+        const topLevel = activeCategories.filter((category: any) => !category?.parentId);
+        const source = topLevel.length > 0 ? topLevel : activeCategories;
+
+        return source.slice(0, 10).map((category: any, index: number) => ({
+            id: String(category._id),
+            name: category.name || 'Categorie',
+            icon: resolveCategoryIcon(category.name, category.icon),
+            gradient: CATEGORY_GRADIENTS[index % CATEGORY_GRADIENTS.length],
+            count: categoryCounts.get(String(category._id)) || 0,
+        }));
+    }, [categoriesData, categoryCounts]);
 
     const onRefresh = async () => {
         setRefreshing(true);
-        await refetch();
+        await Promise.allSettled([refetch(), refetchCategories()]);
         setRefreshing(false);
     };
-
-    // Animations du header au scroll
-    const headerHeight = scrollY.interpolate({
-        inputRange: [0, 80],
-        outputRange: [200, 140],
-        extrapolate: 'clamp',
-    });
 
     const greetingOpacity = scrollY.interpolate({
         inputRange: [0, 40],
@@ -127,15 +342,15 @@ export default function HomeScreen() {
         extrapolate: 'clamp',
     });
 
-    const greetingTranslateY = scrollY.interpolate({
+    const greetingScale = scrollY.interpolate({
         inputRange: [0, 40],
-        outputRange: [0, -10],
+        outputRange: [1, 0.8],
         extrapolate: 'clamp',
     });
 
     const searchBarScale = scrollY.interpolate({
         inputRange: [0, 80],
-        outputRange: [1, 0.95],
+        outputRange: [1, 0.96],
         extrapolate: 'clamp',
     });
 
@@ -156,14 +371,7 @@ export default function HomeScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header moderne avec animations */}
-            <Animated.View 
-                style={[
-                    styles.headerWrapper,
-                    {
-                        height: headerHeight,
-                    }
-                ]}
-            >
+            <View style={styles.headerWrapper}>
                 <LinearGradient
                     colors={[Colors.primary, Colors.primaryDark, '#001a33']}
                     start={{ x: 0, y: 0 }}
@@ -183,7 +391,7 @@ export default function HomeScreen() {
                         <View style={styles.userSection}>
                             <TouchableOpacity 
                                 style={styles.avatarButton}
-                                onPress={() => router.push('/profile')}
+                                onPress={openProfile}
                                 activeOpacity={0.8}
                             >
                                 <LinearGradient
@@ -201,12 +409,16 @@ export default function HomeScreen() {
                                     styles.greetingContainer,
                                     {
                                         opacity: greetingOpacity,
-                                        transform: [{ translateY: greetingTranslateY }],
+                                        transform: [{ scale: greetingScale }],
                                     }
                                 ]}
                             >
-                                <Text style={styles.greeting}>Bonjour 👋</Text>
-                                <Text style={styles.userName}>Utilisateur</Text>
+                                <Text style={styles.greeting}>{greetingLine}</Text>
+                                <Text style={styles.userName}>
+                                    {isAuthenticated
+                                        ? 'Heureux de vous revoir'
+                                        : 'Explorez les annonces du moment'}
+                                </Text>
                             </Animated.View>
                         </View>
 
@@ -225,15 +437,15 @@ export default function HomeScreen() {
                             
                             <TouchableOpacity
                                 style={styles.modernHeaderButton}
-                                onPress={() => router.push('/profile')}
+                                onPress={openNotifications}
                                 accessibilityLabel="Notifications"
                                 activeOpacity={0.7}
                             >
                                 <View style={styles.headerButtonInner}>
                                     <Ionicons name="notifications-outline" size={22} color={Colors.white} />
-                                    {notifications > 0 && (
+                                    {unreadNotificationsCount > 0 && (
                                         <View style={styles.modernBadge}>
-                                            <Text style={styles.modernBadgeText}>{notifications}</Text>
+                                            <Text style={styles.modernBadgeText}>{unreadNotificationsCount}</Text>
                                         </View>
                                     )}
                                 </View>
@@ -292,7 +504,7 @@ export default function HomeScreen() {
                         </TouchableOpacity>
                     </Animated.View>
                 </LinearGradient>
-            </Animated.View>
+            </View>
 
             <Animated.ScrollView
                 style={styles.scrollView}
@@ -357,15 +569,30 @@ export default function HomeScreen() {
                         showsHorizontalScrollIndicator={false}
                         contentContainerStyle={styles.categoriesContainer}
                     >
-                        {CATEGORIES.map((category) => (
-                            <CategoryCard
-                                key={category.id}
-                                name={category.name}
-                                icon={category.icon as any}
-                                gradient={category.gradient}
-                                onPress={() => router.push('/search')}
-                            />
-                        ))}
+                        {isCategoriesLoading && homeCategories.length === 0
+                            ? [1, 2, 3, 4, 5].map((item) => (
+                                  <View key={item} style={styles.categoryLoadingPill} />
+                              ))
+                            : homeCategories.map((category) => (
+                                  <CategoryCard
+                                      key={category.id}
+                                      name={category.name}
+                                      icon={category.icon}
+                                      gradient={category.gradient}
+                                      count={category.count}
+                                      onPress={() =>
+                                          router.push({
+                                              pathname: '/search',
+                                              params: { categoryId: category.id },
+                                          })
+                                      }
+                                  />
+                              ))}
+                        {!isCategoriesLoading && homeCategories.length === 0 ? (
+                            <Text style={styles.emptyCategoriesText}>
+                                Aucune categorie disponible pour le moment.
+                            </Text>
+                        ) : null}
                     </ScrollView>
                 </View>
 
@@ -375,13 +602,21 @@ export default function HomeScreen() {
                         <Text style={styles.sectionTitle}>⚡ Actions rapides</Text>
                     </View>
                     {isLoading ? (
-                        <View style={styles.quickActionsContainer}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.quickActionsScroll}
+                        >
                             {[1, 2, 3, 4].map((i) => (
                                 <QuickActionSkeleton key={i} />
                             ))}
-                        </View>
+                        </ScrollView>
                     ) : (
-                        <View style={styles.quickActionsContainer}>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.quickActionsScroll}
+                        >
                             {QUICK_ACTIONS.map((action) => (
                                 <TouchableOpacity
                                     key={action.id}
@@ -401,89 +636,55 @@ export default function HomeScreen() {
                                     <Text style={styles.actionTitle}>{action.title}</Text>
                                 </TouchableOpacity>
                             ))}
-                        </View>
+                        </ScrollView>
                     )}
                 </View>
 
-                {/* Popular Announcements - Horizontal Scroll */}
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>🔥 Annonces populaires</Text>
-                        <TouchableOpacity onPress={() => router.push('/search')}>
-                            <Text style={styles.seeAll}>Voir tout</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {isLoading ? (
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.horizontalScrollContainer}
-                        >
-                            <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
-                            </View>
-                            <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
-                            </View>
-                        </ScrollView>
-                    ) : error ? (
-                        <View style={styles.errorContainer}>
-                            <Ionicons name="alert-circle-outline" size={48} color={Colors.error} />
-                            <Text style={styles.errorText}>Impossible de charger les annonces</Text>
-                            <TouchableOpacity
-                                style={styles.retryButton}
-                                onPress={() => refetch()}
-                            >
-                                <Text style={styles.retryButtonText}>Réessayer</Text>
-                                <Ionicons name="refresh" size={16} color={Colors.white} />
+                {shouldPersonalizeAnnouncements && (
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionTitle}>✨ Pour vous</Text>
+                            <TouchableOpacity onPress={() => router.push('/search')}>
+                                <Text style={styles.seeAll}>Voir tout</Text>
                             </TouchableOpacity>
                         </View>
-                    ) : !announcements || announcements.length === 0 ? (
-                        <View style={styles.emptyContainer}>
-                            <Ionicons name="cube" size={48} color={Colors.gray300} />
-                            <Text style={styles.emptyText}>Aucune annonce disponible</Text>
-                            <Text style={styles.emptySubtext}>Revenez plus tard pour voir de nouvelles annonces</Text>
-                        </View>
-                    ) : (
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={styles.horizontalScrollContainer}
-                        >
-                            {(() => {
-                                // Create pairs of popular announcements
-                                const popular = getPopularAnnouncements(announcements);
-                                const pairs = [];
-                                for (let i = 0; i < popular.length; i += 2) {
-                                    pairs.push([popular[i], popular[i + 1]]);
-                                }
-                                return pairs.map((pair, index) => (
-                                    <View key={`popular-pair-${index}`} style={styles.pairContainer}>
-                                        <View style={styles.pairItem}>
-                                            <ProductCard
-                                                product={pair[0]}
-                                                onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                                onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                            />
-                                        </View>
-                                        {pair[1] && (
-                                            <View style={styles.pairItem}>
-                                                <ProductCard
-                                                    product={pair[1]}
-                                                    onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                                />
-                                            </View>
-                                        )}
+                        <Text style={styles.preferenceHint}>
+                            Selection basee sur vos preferences.
+                        </Text>
+
+                        {isLoading ? (
+                            <>
+                                <View style={styles.pairContainer}>
+                                    <View style={styles.pairItem}>
+                                        <ProductCardSkeleton />
                                     </View>
-                                ));
-                            })()}
-                        </ScrollView>
-                    )}
-                </View>
+                                    <View style={styles.pairItem}>
+                                        <ProductCardSkeleton />
+                                    </View>
+                                </View>
+                            </>
+                        ) : recommendedAnnouncements.length === 0 ? (
+                            <View style={styles.emptyContainer}>
+                                <Ionicons name="sparkles-outline" size={44} color={Colors.gray300} />
+                                <Text style={styles.emptyText}>Pas encore de recommandations</Text>
+                                <Text style={styles.emptySubtext}>
+                                    Vos categories preferees n ont pas encore d annonces.
+                                </Text>
+                            </View>
+                        ) : (
+                            <>
+                                {recommendedAnnouncementPairs.map((pair, index) => (
+                                    <AnnouncementPairRow
+                                        key={`recommended-pair-${index}`}
+                                        pair={pair}
+                                        onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
+                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                    />
+                                ))}
+                            </>
+                        )}
+                    </View>
+                )}
 
                 {/* Recent Announcements - Grid Layout */}
                 <View style={styles.section}>
@@ -493,16 +694,29 @@ export default function HomeScreen() {
                             <Text style={styles.seeAll}>Voir tout</Text>
                         </TouchableOpacity>
                     </View>
+                    {shouldPersonalizeAnnouncements && (
+                        <Text style={styles.preferenceHint}>
+                            Vos préférences passent en premier.
+                        </Text>
+                    )}
 
                     {isLoading ? (
                         <>
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                             <View style={styles.pairContainer}>
-                                <ProductCardSkeleton />
-                                <ProductCardSkeleton />
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
+                                <View style={styles.pairItem}>
+                                    <ProductCardSkeleton />
+                                </View>
                             </View>
                         </>
                     ) : error ? (
@@ -525,22 +739,14 @@ export default function HomeScreen() {
                         </View>
                     ) : (
                         <>
-                            {(() => {
-                                // Create pairs of recent announcements
-                                const recent = getRecentAnnouncements(announcements);
-                                const pairs = [];
-                                for (let i = 0; i < recent.length; i += 2) {
-                                    pairs.push([recent[i], recent[i + 1]]);
-                                }
-                                return pairs.map((pair, index) => (
-                                    <AnnouncementPairRow
-                                        key={`recent-pair-${index}`}
-                                        pair={pair}
-                                        onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
-                                    />
-                                ));
-                            })()}
+                            {recentAnnouncementPairs.map((pair, index) => (
+                                <AnnouncementPairRow
+                                    key={`recent-pair-${index}`}
+                                    pair={pair}
+                                    onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
+                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                />
+                            ))}
                         </>
                     )}
                 </View>
@@ -570,6 +776,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 12,
         elevation: 12,
+        minHeight: 200,
     },
     headerGradient: {
         flex: 1,
@@ -758,6 +965,21 @@ const styles = StyleSheet.create({
     },
     categoriesContainer: {
         paddingVertical: Spacing.sm,
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    categoryLoadingPill: {
+        width: 82,
+        height: 100,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray100,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    emptyCategoriesText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.medium,
     },
     section: {
         paddingHorizontal: Spacing.xl,
@@ -780,21 +1002,27 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         color: Colors.accent,
     },
-    quickActionsContainer: {
+    preferenceHint: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        marginTop: -Spacing.sm,
+        marginBottom: Spacing.md,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    quickActionsScroll: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
+        alignItems: 'center',
+        paddingVertical: Spacing.sm,
+        paddingRight: Spacing.xl,
         gap: Spacing.md,
     },
     actionCard: {
         alignItems: 'center',
-        flex: 1,
-        marginHorizontal: Spacing.xs / 2,
-        minWidth: 72,
+        width: 92,
     },
     actionGradient: {
-        width: 68,
-        height: 68,
+        width: 72,
+        height: 72,
         borderRadius: BorderRadius.xl,
         alignItems: 'center',
         justifyContent: 'center',

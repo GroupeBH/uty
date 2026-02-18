@@ -1,94 +1,200 @@
-/**
- * API des livraisons
- */
-
-import { ApiResponse, Delivery, DeliveryStatus, Location, PaginatedResponse, ValidateDeliveryRequest } from '@/types';
+import { Delivery, DeliveryMessage, DeliveryQrPayload, DeliveryTracking } from '@/types/delivery';
 import { baseApi } from './baseApi';
 
+const parseDeliveryList = (payload: unknown): Delivery[] | null => {
+    if (Array.isArray(payload)) {
+        return payload as Delivery[];
+    }
+
+    if (payload && typeof payload === 'object') {
+        const objectPayload = payload as Record<string, unknown>;
+        if (Array.isArray(objectPayload.data)) {
+            return objectPayload.data as Delivery[];
+        }
+        if (Array.isArray(objectPayload.items)) {
+            return objectPayload.items as Delivery[];
+        }
+        if (Array.isArray(objectPayload.results)) {
+            return objectPayload.results as Delivery[];
+        }
+        if (Array.isArray(objectPayload.deliveries)) {
+            return objectPayload.deliveries as Delivery[];
+        }
+    }
+
+    return null;
+};
+
 export const deliveriesApi = baseApi.injectEndpoints({
+    overrideExisting: true,
     endpoints: (builder) => ({
-        /**
-         * Liste des livraisons du livreur
-         */
-        getDeliveries: builder.query<PaginatedResponse<Delivery>, { page?: number; limit?: number; status?: DeliveryStatus }>({
-            query: (params) => ({
-                url: '/deliveries',
-                params,
-            }),
+        getOngoingDeliveries: builder.query<Delivery[], void>({
+            async queryFn(_arg, _api, _extraOptions, fetchWithBQ) {
+                // Driver flow: pending deliveries dedicated endpoint.
+                const primaryResponse = await fetchWithBQ('/deliveries/pending');
+                const parsedPrimary = parseDeliveryList(primaryResponse.data);
+                if (!primaryResponse.error && parsedPrimary) {
+                    return { data: parsedPrimary };
+                }
+
+                // Admin fallback: ongoing deliveries endpoint.
+                const fallbackResponse = await fetchWithBQ('/deliveries/ongoing');
+                const parsedFallback = parseDeliveryList(fallbackResponse.data);
+                if (!fallbackResponse.error && parsedFallback) {
+                    return { data: parsedFallback };
+                }
+
+                if (fallbackResponse.error) {
+                    return { error: fallbackResponse.error };
+                }
+
+                if (primaryResponse.error) {
+                    return { error: primaryResponse.error };
+                }
+
+                return { data: [] };
+            },
             providesTags: (result) =>
                 result
                     ? [
-                        ...result.data.map(({ id }) => ({ type: 'Delivery' as const, id })),
-                        { type: 'Delivery', id: 'LIST' },
-                    ]
-                    : [{ type: 'Delivery', id: 'LIST' }],
+                          ...result.map(({ _id }) => ({ type: 'Delivery' as const, id: _id })),
+                          { type: 'Delivery', id: 'DELIVERY_POOL_LIST' },
+                      ]
+                    : [{ type: 'Delivery', id: 'DELIVERY_POOL_LIST' }],
         }),
-
-        /**
-         * Détails d'une livraison
-         */
-        getDelivery: builder.query<ApiResponse<Delivery>, string>({
+        getDelivery: builder.query<Delivery, string>({
             query: (id) => `/deliveries/${id}`,
             providesTags: (result, error, id) => [{ type: 'Delivery', id }],
         }),
-
-        /**
-         * Mettre à jour le statut d'une livraison
-         */
-        updateDeliveryStatus: builder.mutation<ApiResponse<Delivery>, { id: string; status: DeliveryStatus }>({
-            query: ({ id, status }) => ({
-                url: `/deliveries/${id}/status`,
-                method: 'PATCH',
-                body: { status },
-            }),
-            invalidatesTags: (result, error, { id }) => [
-                { type: 'Delivery', id },
-                { type: 'Order' },
-            ],
+        getDeliveryTracking: builder.query<DeliveryTracking, string>({
+            query: (id) => `/deliveries/${id}/tracking`,
+            providesTags: (result, error, id) => [{ type: 'Delivery', id }],
         }),
-
-        /**
-         * Mettre à jour la position du livreur
-         */
-        updateDriverLocation: builder.mutation<ApiResponse<void>, { deliveryId: string; location: Location }>({
-            query: ({ deliveryId, location }) => ({
-                url: `/deliveries/${deliveryId}/location`,
-                method: 'PATCH',
-                body: { location },
-            }),
-            // Pas d'invalidation pour éviter trop de refetch
-            // La position est mise à jour en temps réel via WebSocket ou polling
+        getDeliveryMessages: builder.query<DeliveryMessage[], string>({
+            query: (id) => `/deliveries/${id}/messages`,
+            providesTags: (result, error, id) => [{ type: 'Delivery', id }],
         }),
-
-        /**
-         * Valider une livraison avec le code
-         */
-        validateDelivery: builder.mutation<ApiResponse<Delivery>, ValidateDeliveryRequest>({
-            query: ({ deliveryId, code }) => ({
-                url: `/deliveries/${deliveryId}/validate`,
+        sendDeliveryMessage: builder.mutation<Delivery, { id: string; message: string }>({
+            query: ({ id, message }) => ({
+                url: `/deliveries/${id}/messages`,
                 method: 'POST',
-                body: { code },
+                body: { message },
             }),
-            invalidatesTags: (result, error, { deliveryId }) => [
-                { type: 'Delivery', id: deliveryId },
-                { type: 'Order' },
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }],
+        }),
+        acceptDelivery: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/accept`,
+                method: 'POST',
+            }),
+            invalidatesTags: (result, error, id) => [
+                { type: 'Delivery', id },
+                { type: 'Delivery', id: 'DELIVERY_POOL_LIST' },
+                { type: 'Order', id: 'LIST' },
             ],
         }),
-
-        /**
-         * Récupérer l'itinéraire pour une livraison
-         */
-        getDeliveryRoute: builder.query<ApiResponse<{ route: Array<[number, number]>; distance: number; duration: number }>, string>({
-            query: (id) => `/deliveries/${id}/route`,
+        generatePickupQr: builder.mutation<DeliveryQrPayload, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/pickup-qr`,
+                method: 'POST',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }],
+        }),
+        scanPickupQr: builder.mutation<Delivery, { id: string; qrData: string }>({
+            query: ({ id, qrData }) => ({
+                url: `/deliveries/${id}/scan-pickup-qr`,
+                method: 'POST',
+                body: { qrData },
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        driverArrivePickup: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/arrive-pickup`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        sellerConfirmPickup: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/seller-confirm-pickup`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        driverConfirmPickup: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/driver-confirm-pickup`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        driverArriveDropoff: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/arrive-dropoff`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        generateDropoffQr: builder.mutation<DeliveryQrPayload, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/dropoff-qr`,
+                method: 'POST',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }],
+        }),
+        scanDropoffQr: builder.mutation<Delivery, { id: string; qrData: string }>({
+            query: ({ id, qrData }) => ({
+                url: `/deliveries/${id}/scan-dropoff-qr`,
+                method: 'POST',
+                body: { qrData },
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        buyerConfirmDropoff: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/buyer-confirm-dropoff`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        driverConfirmDropoff: builder.mutation<Delivery, string>({
+            query: (id) => ({
+                url: `/deliveries/${id}/driver-confirm-dropoff`,
+                method: 'PATCH',
+            }),
+            invalidatesTags: (result, error, id) => [{ type: 'Delivery', id }, { type: 'Order', id: 'LIST' }],
+        }),
+        updateDeliveryLocation: builder.mutation<
+            Delivery,
+            { id: string; latitude: number; longitude: number }
+        >({
+            query: ({ id, latitude, longitude }) => ({
+                url: `/deliveries/${id}/location`,
+                method: 'PATCH',
+                body: { latitude, longitude },
+            }),
+            invalidatesTags: (result, error, { id }) => [{ type: 'Delivery', id }],
         }),
     }),
 });
 
 export const {
-    useGetDeliveriesQuery,
+    useGetOngoingDeliveriesQuery,
     useGetDeliveryQuery,
-    useUpdateDeliveryStatusMutation,
-    useUpdateDriverLocationMutation,
-    useValidateDeliveryMutation,
-    useGetDeliveryRouteQuery,
+    useGetDeliveryTrackingQuery,
+    useGetDeliveryMessagesQuery,
+    useSendDeliveryMessageMutation,
+    useAcceptDeliveryMutation,
+    useGeneratePickupQrMutation,
+    useScanPickupQrMutation,
+    useDriverArrivePickupMutation,
+    useSellerConfirmPickupMutation,
+    useDriverConfirmPickupMutation,
+    useDriverArriveDropoffMutation,
+    useGenerateDropoffQrMutation,
+    useScanDropoffQrMutation,
+    useBuyerConfirmDropoffMutation,
+    useDriverConfirmDropoffMutation,
+    useUpdateDeliveryLocationMutation,
 } = deliveriesApi;

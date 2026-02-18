@@ -1,12 +1,12 @@
-/**
- * Écran de connexion
- */
-
-import { Button } from '@/components/ui/Button';
-import { Input } from '@/components/ui/Input';
-import { Colors, Spacing, Typography } from '@/constants/theme';
-import { useAuth } from '@/hooks/useAuth';
-import { useRouter } from 'expo-router';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAppDispatch } from '@/store/hooks';
+import { useLoginMutation } from '@/store/api/authApi';
+import { setCredentials } from '@/store/slices/authSlice';
+import { tokenService } from '@/services/tokenService';
+import { storage } from '@/utils/storage';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     Alert,
@@ -15,131 +15,193 @@ import {
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
+    TouchableOpacity,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
     const router = useRouter();
-    const { login, isLoggingIn } = useAuth();
+    const dispatch = useAppDispatch();
+    const params = useLocalSearchParams<{ returnUrl?: string; message?: string }>();
 
     const [phone, setPhone] = useState('');
-    const [password, setPassword] = useState('');
-    const [errors, setErrors] = useState<{ phone?: string; password?: string }>({});
+    const [pin, setPin] = useState('');
+    const [showPin, setShowPin] = useState(false);
 
-    const validate = () => {
-        const newErrors: { phone?: string; password?: string } = {};
-
-        if (!phone.trim()) {
-            newErrors.phone = 'Le numéro de téléphone est requis';
-        } else if (phone.length < 10) {
-            newErrors.phone = 'Numéro de téléphone invalide';
-        }
-
-        if (!password.trim()) {
-            newErrors.password = 'Le mot de passe est requis';
-        } else if (password.length < 6) {
-            newErrors.password = 'Le mot de passe doit contenir au moins 6 caractères';
-        }
-
-        setErrors(newErrors);
-        return Object.keys(newErrors).length === 0;
-    };
+    const [login, { isLoading }] = useLoginMutation();
 
     const handleLogin = async () => {
-        if (!validate()) return;
+        if (!phone.trim()) {
+            Alert.alert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+            return;
+        }
+        if (!pin.trim() || pin.length !== 4) {
+            Alert.alert('Erreur', 'Le code PIN doit contenir 4 chiffres');
+            return;
+        }
 
         try {
-            const result = await login({ phone, password });
+            const response = await login({ phone, pin }).unwrap();
 
-            // Redirection selon le rôle
-            if (result.user.role === 'client') {
-                router.replace('/(client)');
-            } else if (result.user.role === 'seller') {
-                router.replace('/(seller)');
-            } else if (result.user.role === 'driver') {
-                router.replace('/(driver)');
-            }
+            // Sauvegarder les tokens
+            await tokenService.saveTokens(response.access_token, response.refresh_token);
+
+            // Récupérer le profil utilisateur
+            const profileResponse = await fetch(
+                `${process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200'}/users/profile`,
+                {
+                    headers: {
+                        Authorization: `Bearer ${response.access_token}`,
+                    },
+                }
+            );
+            const user = await profileResponse.json();
+
+            // Sauvegarder dans storage et Redux
+            await storage.setUser(user);
+            dispatch(
+                setCredentials({
+                    user,
+                    accessToken: response.access_token,
+                    refreshToken: response.refresh_token,
+                })
+            );
+
+            Alert.alert('Succès', 'Connexion réussie !', [
+                {
+                    text: 'OK',
+                    onPress: () => {
+                        if (params.returnUrl) {
+                            router.replace(params.returnUrl as any);
+                        } else {
+                            router.replace('/(tabs)');
+                        }
+                    },
+                },
+            ]);
         } catch (error: any) {
+            console.error('Login error:', error);
             Alert.alert(
-                'Erreur de connexion',
-                error?.data?.message || 'Une erreur est survenue lors de la connexion'
+                'Erreur',
+                error?.data?.message || 'Numéro de téléphone ou code PIN incorrect'
             );
         }
     };
 
     return (
-        <SafeAreaView style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardView}
+                style={styles.container}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             >
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
-                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
                 >
                     {/* Header */}
                     <View style={styles.header}>
-                        <Text style={styles.title}>Bienvenue</Text>
-                        <Text style={styles.subtitle}>Connectez-vous pour continuer</Text>
+                        <TouchableOpacity
+                            style={styles.backButton}
+                            onPress={() => router.back()}
+                        >
+                            <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+                        </TouchableOpacity>
                     </View>
 
-                    {/* Logo ou illustration */}
-                    <View style={styles.logoContainer}>
-                        <View style={styles.logo}>
-                            <Text style={styles.logoText}>UTY</Text>
-                        </View>
+                    {/* Illustration */}
+                    <View style={styles.illustrationContainer}>
+                        <LinearGradient colors={Gradients.primary} style={styles.iconCircle}>
+                            <Ionicons name="log-in-outline" size={64} color={Colors.white} />
+                        </LinearGradient>
                     </View>
 
-                    {/* Formulaire */}
+                    {/* Title */}
+                    <View style={styles.titleContainer}>
+                        <Text style={styles.title}>Bon retour !</Text>
+                        <Text style={styles.subtitle}>
+                            Connectez-vous pour continuer
+                        </Text>
+                        {params.message && (
+                            <View style={styles.messageContainer}>
+                                <Ionicons name="information-circle" size={20} color={Colors.accent} />
+                                <Text style={styles.messageText}>{params.message}</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Form */}
                     <View style={styles.form}>
-                        <Input
-                            label="Numéro de téléphone"
-                            type="phone"
-                            icon="call"
-                            placeholder="Ex: 0612345678"
-                            value={phone}
-                            onChangeText={(text) => {
-                                setPhone(text);
-                                setErrors({ ...errors, phone: undefined });
-                            }}
-                            error={errors.phone}
-                            required
-                        />
+                        {/* Phone */}
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Numéro de téléphone</Text>
+                            <View style={styles.inputContainer}>
+                                <Ionicons name="call-outline" size={20} color={Colors.gray400} />
+                                <TextInput
+                                    style={styles.input}
+                                    value={phone}
+                                    onChangeText={setPhone}
+                                    placeholder="Ex: 0812345678"
+                                    placeholderTextColor={Colors.gray400}
+                                    keyboardType="phone-pad"
+                                    autoCapitalize="none"
+                                />
+                            </View>
+                        </View>
 
-                        <Input
-                            label="Mot de passe"
-                            type="password"
-                            icon="lock-closed"
-                            placeholder="Votre mot de passe"
-                            value={password}
-                            onChangeText={(text) => {
-                                setPassword(text);
-                                setErrors({ ...errors, password: undefined });
-                            }}
-                            error={errors.password}
-                            required
-                        />
+                        {/* PIN */}
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.label}>Code PIN</Text>
+                            <View style={styles.inputContainer}>
+                                <Ionicons name="lock-closed-outline" size={20} color={Colors.gray400} />
+                                <TextInput
+                                    style={styles.input}
+                                    value={pin}
+                                    onChangeText={setPin}
+                                    placeholder="4 chiffres"
+                                    placeholderTextColor={Colors.gray400}
+                                    secureTextEntry={!showPin}
+                                    keyboardType="number-pad"
+                                    maxLength={4}
+                                />
+                                <TouchableOpacity onPress={() => setShowPin(!showPin)}>
+                                    <Ionicons
+                                        name={showPin ? 'eye-off-outline' : 'eye-outline'}
+                                        size={20}
+                                        color={Colors.gray400}
+                                    />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
 
-                        <Button
-                            title="Se connecter"
-                            variant="primary"
-                            size="lg"
-                            fullWidth
-                            loading={isLoggingIn}
+                        {/* Login Button */}
+                        <TouchableOpacity
+                            style={[styles.loginButton, isLoading && styles.disabledButton]}
                             onPress={handleLogin}
-                        />
-                    </View>
+                            disabled={isLoading}
+                        >
+                            <LinearGradient colors={Gradients.primary} style={styles.loginGradient}>
+                                {isLoading ? (
+                                    <Text style={styles.loginButtonText}>Connexion...</Text>
+                                ) : (
+                                    <>
+                                        <Text style={styles.loginButtonText}>Se connecter</Text>
+                                        <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+                                    </>
+                                )}
+                            </LinearGradient>
+                        </TouchableOpacity>
 
-                    {/* Footer */}
-                    <View style={styles.footer}>
-                        <Text style={styles.footerText}>Pas encore de compte ?</Text>
-                        <Button
-                            title="S'inscrire"
-                            variant="outline"
-                            size="md"
-                            onPress={() => router.push('/(auth)/register')}
-                        />
+                        {/* Register Link */}
+                        <View style={styles.footer}>
+                            <Text style={styles.footerText}>Vous n'avez pas de compte ?</Text>
+                            <Link href="/(auth)/register" asChild>
+                                <TouchableOpacity>
+                                    <Text style={styles.footerLink}>Créer un compte</Text>
+                                </TouchableOpacity>
+                            </Link>
+                        </View>
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
@@ -150,54 +212,125 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.background,
-    },
-    keyboardView: {
-        flex: 1,
+        backgroundColor: Colors.white,
     },
     scrollContent: {
         flexGrow: 1,
-        padding: Spacing.xxl,
+        paddingHorizontal: Spacing.xl,
     },
     header: {
-        marginBottom: Spacing.xxxl,
+        paddingVertical: Spacing.md,
     },
-    title: {
-        fontSize: Typography.fontSize.huge,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
-        marginBottom: Spacing.xs,
-    },
-    subtitle: {
-        fontSize: Typography.fontSize.md,
-        color: Colors.textSecondary,
-    },
-    logoContainer: {
-        alignItems: 'center',
-        marginBottom: Spacing.xxxl,
-    },
-    logo: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        backgroundColor: Colors.primary,
+    backButton: {
+        width: 40,
+        height: 40,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    logoText: {
+    illustrationContainer: {
+        alignItems: 'center',
+        marginVertical: Spacing.xxxl,
+    },
+    iconCircle: {
+        width: 140,
+        height: 140,
+        borderRadius: 70,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.lg,
+    },
+    titleContainer: {
+        marginBottom: Spacing.xxxl,
+    },
+    title: {
         fontSize: Typography.fontSize.xxxl,
-        fontWeight: Typography.fontWeight.bold,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+        marginBottom: Spacing.sm,
+    },
+    subtitle: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.textSecondary,
+        lineHeight: 24,
+    },
+    messageContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        marginTop: Spacing.md,
+        padding: Spacing.md,
+        backgroundColor: Colors.accent + '20',
+        borderRadius: BorderRadius.md,
+    },
+    messageText: {
+        flex: 1,
+        fontSize: Typography.fontSize.sm,
         color: Colors.accent,
     },
     form: {
-        marginBottom: Spacing.xxxl,
+        gap: Spacing.lg,
+    },
+    inputGroup: {
+        gap: Spacing.sm,
+    },
+    label: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textPrimary,
+    },
+    inputContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.lg,
+        gap: Spacing.md,
+        borderWidth: 2,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
+    },
+    input: {
+        flex: 1,
+        height: 50,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    loginButton: {
+        marginTop: Spacing.lg,
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+        ...Shadows.md,
+    },
+    loginGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.lg,
+        gap: Spacing.sm,
+    },
+    loginButtonText: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
+    disabledButton: {
+        opacity: 0.5,
     },
     footer: {
+        flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.md,
+        justifyContent: 'center',
+        gap: Spacing.xs,
+        marginTop: Spacing.lg,
     },
     footerText: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
+    },
+    footerLink: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
     },
 });

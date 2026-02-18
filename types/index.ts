@@ -13,6 +13,7 @@ export enum UserRole {
 export enum OrderStatus {
     PENDING = 'pending',
     CONFIRMED = 'confirmed',
+    SHIPPED = 'shipped',
     PREPARING = 'preparing',
     READY = 'ready',
     IN_TRANSIT = 'in_transit',

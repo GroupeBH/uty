@@ -1,8 +1,11 @@
 export interface CategoryAttribute {
+    _id?: string;
     name: string;
+    label: string;
     type: string;
     options?: string[];
     required: boolean;
+    filterable?: boolean;
 }
 
 export interface Subcategory {
