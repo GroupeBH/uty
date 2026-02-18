@@ -4,6 +4,8 @@ const STORAGE_KEYS = {
     ACCESS_TOKEN: 'accessToken',
     REFRESH_TOKEN: 'refreshToken',
     USER: 'user',
+    ONBOARDING_COMPLETED: 'onboardingCompleted',
+    ONBOARDING_SPACE: 'onboardingSpace',
 } as const;
 
 export const storage = {
@@ -99,6 +101,46 @@ export const storage = {
         } catch (error) {
             console.error('Error getting auth data:', error);
             return { accessToken: null, refreshToken: null, user: null };
+        }
+    },
+
+    // Onboarding
+    async setOnboardingCompleted(value: boolean) {
+        try {
+            await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_COMPLETED, value ? '1' : '0');
+        } catch (error) {
+            console.error('Error saving onboarding flag:', error);
+        }
+    },
+
+    async hasCompletedOnboarding(): Promise<boolean> {
+        try {
+            const raw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_COMPLETED);
+            return raw === '1';
+        } catch (error) {
+            console.error('Error reading onboarding flag:', error);
+            return false;
+        }
+    },
+
+    async setOnboardingPreferredSpace(space: 'client' | 'seller' | 'delivery-persons') {
+        try {
+            await AsyncStorage.setItem(STORAGE_KEYS.ONBOARDING_SPACE, space);
+        } catch (error) {
+            console.error('Error saving onboarding preferred space:', error);
+        }
+    },
+
+    async getOnboardingPreferredSpace(): Promise<'client' | 'seller' | 'delivery-persons' | null> {
+        try {
+            const raw = await AsyncStorage.getItem(STORAGE_KEYS.ONBOARDING_SPACE);
+            if (raw === 'client' || raw === 'seller' || raw === 'delivery-persons') {
+                return raw;
+            }
+            return null;
+        } catch (error) {
+            console.error('Error reading onboarding preferred space:', error);
+            return null;
         }
     },
 };
