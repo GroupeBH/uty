@@ -27,8 +27,10 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     Alert,
+    Animated,
     Linking,
     Modal,
+    PanResponder,
     Platform,
     ScrollView,
     StyleSheet,
@@ -61,6 +63,8 @@ const UI = {
 
 const DRIVER_ROLE_KEYS = ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'];
 const DEFAULT_MAP_CENTER: LatLng = { latitude: -4.325, longitude: 15.3222 };
+const MAP_EXPANDED_HEIGHT = 260;
+const MAP_COLLAPSED_HEIGHT = 178;
 const STEPS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { key: 'assigned', label: 'Assigne', icon: 'person-add-outline' },
     { key: 'at_pickup', label: 'Retrait', icon: 'storefront-outline' },
@@ -413,6 +417,32 @@ export default function DriverDeliveryDetailScreen() {
     const [resolvedDropoffAddress, setResolvedDropoffAddress] = React.useState('');
     const [pickupAddressLookupDone, setPickupAddressLookupDone] = React.useState(false);
     const [dropoffAddressLookupDone, setDropoffAddressLookupDone] = React.useState(false);
+    const mapHeightAnim = React.useRef(new Animated.Value(MAP_EXPANDED_HEIGHT)).current;
+    const mapHeightRef = React.useRef(MAP_EXPANDED_HEIGHT);
+    const panStartHeightRef = React.useRef(MAP_EXPANDED_HEIGHT);
+
+    React.useEffect(() => {
+        const listener = mapHeightAnim.addListener(({ value }) => {
+            mapHeightRef.current = value;
+        });
+        return () => {
+            mapHeightAnim.removeListener(listener);
+        };
+    }, [mapHeightAnim]);
+
+    const animateMapExpanded = React.useCallback(
+        (expanded: boolean) => {
+            setIsMapExpanded(expanded);
+            Animated.spring(mapHeightAnim, {
+                toValue: expanded ? MAP_EXPANDED_HEIGHT : MAP_COLLAPSED_HEIGHT,
+                damping: 20,
+                stiffness: 190,
+                mass: 0.8,
+                useNativeDriver: false,
+            }).start();
+        },
+        [mapHeightAnim],
+    );
 
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
     const driverPickupConfirmed = Boolean(
@@ -519,6 +549,56 @@ export default function DriverDeliveryDetailScreen() {
         }, 700);
         return () => clearTimeout(timeout);
     }, []);
+
+    const contentTopOffsetAnim = React.useMemo(
+        () =>
+            mapHeightAnim.interpolate({
+                inputRange: [MAP_COLLAPSED_HEIGHT, MAP_EXPANDED_HEIGHT],
+                outputRange: [-8, -20],
+                extrapolate: 'clamp',
+            }),
+        [mapHeightAnim],
+    );
+
+    const detailsSheetPanResponder = React.useMemo(
+        () =>
+            PanResponder.create({
+                onMoveShouldSetPanResponder: (_, gestureState) =>
+                    Math.abs(gestureState.dy) > 8 &&
+                    Math.abs(gestureState.dy) > Math.abs(gestureState.dx),
+                onPanResponderGrant: () => {
+                    mapHeightAnim.stopAnimation((value: number) => {
+                        mapHeightRef.current = value;
+                        panStartHeightRef.current = value;
+                    });
+                },
+                onPanResponderMove: (_, gestureState) => {
+                    const nextHeight = Math.max(
+                        MAP_COLLAPSED_HEIGHT,
+                        Math.min(
+                            MAP_EXPANDED_HEIGHT,
+                            panStartHeightRef.current + gestureState.dy,
+                        ),
+                    );
+                    mapHeightAnim.setValue(nextHeight);
+                },
+                onPanResponderRelease: (_, gestureState) => {
+                    const midpoint = (MAP_EXPANDED_HEIGHT + MAP_COLLAPSED_HEIGHT) / 2;
+                    const shouldCollapse =
+                        gestureState.dy < -22 ||
+                        gestureState.vy < -0.25 ||
+                        (Math.abs(gestureState.dy) <= 22 &&
+                            Math.abs(gestureState.vy) <= 0.25 &&
+                            mapHeightRef.current <= midpoint);
+                    animateMapExpanded(!shouldCollapse);
+                },
+                onPanResponderTerminate: () => {
+                    const midpoint = (MAP_EXPANDED_HEIGHT + MAP_COLLAPSED_HEIGHT) / 2;
+                    animateMapExpanded(mapHeightRef.current > midpoint);
+                },
+            }),
+        [animateMapExpanded, mapHeightAnim],
+    );
 
     React.useEffect(() => {
         setResolvedPickupAddress(shouldResolvePickupAddress ? '' : basePickupLabel);
@@ -821,7 +901,7 @@ export default function DriverDeliveryDetailScreen() {
             </LinearGradient>
 
             {/* Map */}
-            <View style={[styles.mapWrap, !isMapExpanded && styles.mapWrapCollapsed]}>
+            <Animated.View style={[styles.mapWrap, { height: mapHeightAnim }]}>
                 <MapView style={styles.map} {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
                     initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }}>
                     {pickupPoint ? (
@@ -872,20 +952,6 @@ export default function DriverDeliveryDetailScreen() {
                         </>
                     ) : null}
                 </MapView>
-                <TouchableOpacity
-                    style={styles.mapToggleButton}
-                    onPress={() => setIsMapExpanded((value) => !value)}
-                    activeOpacity={0.85}
-                >
-                    <Ionicons
-                        name={isMapExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={15}
-                        color={Colors.primary}
-                    />
-                    <Text style={styles.mapToggleButtonText}>
-                        {isMapExpanded ? 'Replier la carte' : 'Deplier la carte'}
-                    </Text>
-                </TouchableOpacity>
                 {!isMapExpanded ? (
                     <View style={styles.mapCollapsedHint}>
                         <Ionicons name="navigate-outline" size={13} color={Colors.primary} />
@@ -900,15 +966,21 @@ export default function DriverDeliveryDetailScreen() {
                         <Text style={styles.mapLoadingText}>{"Calcul d'itineraire..."}</Text>
                     </View>
                 ) : null}
-            </View>
+            </Animated.View>
 
-            <ScrollView
-                contentContainerStyle={[
-                    styles.content,
-                    !isMapExpanded && styles.contentCollapsedMap,
-                ]}
-                showsVerticalScrollIndicator={false}
-            >
+            <Animated.View style={[styles.detailsSheet, { marginTop: contentTopOffsetAnim }]}>
+                <View style={styles.detailsDragZone} {...detailsSheetPanResponder.panHandlers}>
+                    <View style={styles.detailsDragHandle} />
+                    <Text style={styles.detailsDragHint}>Glissez vers le haut ou le bas</Text>
+                </View>
+                <ScrollView
+                    style={styles.detailsScroll}
+                    contentContainerStyle={styles.content}
+                    showsVerticalScrollIndicator={false}
+                    bounces={false}
+                    alwaysBounceVertical={false}
+                    overScrollMode="never"
+                >
                 {/* Stepper */}
                 <View style={styles.stepperCard}>
                     <View style={styles.stepperHeaderRow}>
@@ -1041,7 +1113,8 @@ export default function DriverDeliveryDetailScreen() {
                         <Ionicons name={!canScanPickupQr ? 'lock-closed-outline' : 'arrow-forward'} size={16} color={!canScanPickupQr ? UI.muted : Colors.primaryDark} />
                     </View>
                 </TouchableOpacity>
-            </ScrollView>
+                </ScrollView>
+            </Animated.View>
 
             {/* Bottom CTA */}
             <View style={[styles.bottom, { paddingBottom: Spacing.lg + insets.bottom }]}>
@@ -1191,34 +1264,11 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
     },
     mapWrap: {
-        height: 260,
+        height: MAP_EXPANDED_HEIGHT,
         borderBottomWidth: 1,
         borderBottomColor: UI.border + '40',
     },
-    mapWrapCollapsed: {
-        height: 178,
-    },
     map: { width: '100%', height: '100%' },
-    mapToggleButton: {
-        position: 'absolute',
-        top: Spacing.sm,
-        left: Spacing.sm,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.primary + '30',
-        backgroundColor: Colors.white + 'F0',
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 5,
-        ...Shadows.sm,
-    },
-    mapToggleButtonText: {
-        color: Colors.primary,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-    },
     mapCollapsedHint: {
         position: 'absolute',
         left: Spacing.sm,
@@ -1268,8 +1318,37 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         ...Shadows.md,
     },
-    content: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: 130, marginTop: -20 },
-    contentCollapsedMap: { marginTop: -8 },
+    detailsSheet: {
+        flex: 1,
+        backgroundColor: UI.bg,
+        borderTopLeftRadius: BorderRadius.xl + 2,
+        borderTopRightRadius: BorderRadius.xl + 2,
+        borderTopWidth: 1,
+        borderTopColor: UI.border + '40',
+        overflow: 'hidden',
+    },
+    detailsScroll: {
+        flex: 1,
+    },
+    detailsDragZone: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: Spacing.xs,
+        paddingBottom: Spacing.sm,
+    },
+    detailsDragHandle: {
+        width: 54,
+        height: 5,
+        borderRadius: BorderRadius.full,
+        backgroundColor: UI.border + 'B8',
+    },
+    detailsDragHint: {
+        marginTop: 4,
+        color: UI.muted,
+        fontSize: 10,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    content: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: 130 },
     small: { color: UI.muted, fontSize: Typography.fontSize.xs },
 
     // Stepper
