@@ -71,6 +71,41 @@ const STEPS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap 
     { key: 'in_transit', label: 'En route', icon: 'bicycle-outline' },
     { key: 'delivered', label: 'Livre', icon: 'checkmark-circle-outline' },
 ];
+const JOURNEY_GUIDE_STEPS: {
+    key: string;
+    title: string;
+    description: string;
+    icon: keyof typeof Ionicons.glyphMap;
+}[] = [
+    {
+        key: 'pickup',
+        title: '1. Prise en charge de la course',
+        description:
+            'Le livreur accepte la course, le vendeur est notifie, puis le livreur arrive au point de retrait.',
+        icon: 'storefront-outline',
+    },
+    {
+        key: 'transit',
+        title: '2. Demarrage et trajet',
+        description:
+            'Le livreur scanne le QR genere par le vendeur pour recuperer la commande, puis son trajet est suivi en temps reel.',
+        icon: 'navigate-outline',
+    },
+    {
+        key: 'dropoff',
+        title: '3. Validation de la livraison',
+        description:
+            'A l arrivee chez l acheteur, le livreur montre son QR de livraison et l acheteur le scanne pour valider.',
+        icon: 'qr-code-outline',
+    },
+];
+
+const getJourneyGuideIndex = (status: DeliveryStatusValue): number => {
+    if (status === 'pending' || status === 'assigned') return 0;
+    if (status === 'at_pickup' || status === 'picked_up' || status === 'in_transit') return 1;
+    if (status === 'at_dropoff' || status === 'delivered') return 2;
+    return 0;
+};
 
 const parseError = (error: any, fallback: string): string =>
     (Array.isArray(error?.data?.message) && String(error.data.message[0])) ||
@@ -405,6 +440,8 @@ export default function DriverDeliveryDetailScreen() {
     const [qrInputPlaceholder, setQrInputPlaceholder] = React.useState('Code QR');
     const [qrDisplayToken, setQrDisplayToken] = React.useState('');
     const [qrAction, setQrAction] = React.useState<null | ((qrData: string) => Promise<any>)>(null);
+    const [journeyModalVisible, setJourneyModalVisible] = React.useState(false);
+    const [journeyModalStepIndex, setJourneyModalStepIndex] = React.useState(0);
     const [isCameraVisible, setIsCameraVisible] = React.useState(false);
     const [isRequestingCamera, setIsRequestingCamera] = React.useState(false);
     const [isScanLocked, setIsScanLocked] = React.useState(false);
@@ -445,6 +482,11 @@ export default function DriverDeliveryDetailScreen() {
     );
 
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
+    const journeyCurrentStepIndex = getJourneyGuideIndex(status);
+    const openJourneyModal = React.useCallback(() => {
+        setJourneyModalStepIndex(journeyCurrentStepIndex);
+        setJourneyModalVisible(true);
+    }, [journeyCurrentStepIndex]);
     const driverPickupConfirmed = Boolean(
         (tracking?.driverPickupConfirmed ?? delivery?.driverPickupConfirmed) === true,
     );
@@ -845,6 +887,10 @@ export default function DriverDeliveryDetailScreen() {
                     : canShowDropoffQr
                         ? { label: 'Afficher le QR de livraison', loading: isGeneratingDropoffQr, onPress: () => void onShowDropoffQr() }
                         : null;
+    const journeyModalStep =
+        JOURNEY_GUIDE_STEPS[journeyModalStepIndex] || JOURNEY_GUIDE_STEPS[0];
+    const canJourneyPrev = journeyModalStepIndex > 0;
+    const canJourneyNext = journeyModalStepIndex < JOURNEY_GUIDE_STEPS.length - 1;
 
     if (!deliveryId || isLoading) return <LoadingSpinner fullScreen />;
 
@@ -888,16 +934,17 @@ export default function DriverDeliveryDetailScreen() {
                         <Text style={styles.headerLiveText}>{liveLabel}</Text>
                     </View>
                 </View>
-                {earningAmount > 0 ? (
-                    <View style={styles.earningBadge}>
-                        <Ionicons name="wallet-outline" size={12} color={Colors.primaryDark} />
-                        <Text style={styles.earningBadgeText}>{earningLabel}</Text>
-                    </View>
-                ) : (
-                    <TouchableOpacity style={styles.iconBtn} onPress={() => Alert.alert('Parcours', "Arrivez au retrait, scannez le QR vendeur, puis livrez la commande.")}>
+                <View style={styles.headerRight}>
+                    {earningAmount > 0 ? (
+                        <View style={styles.earningBadge}>
+                            <Ionicons name="wallet-outline" size={12} color={Colors.primaryDark} />
+                            <Text style={styles.earningBadgeText}>{earningLabel}</Text>
+                        </View>
+                    ) : null}
+                    <TouchableOpacity style={styles.iconBtn} onPress={openJourneyModal}>
                         <Ionicons name="help-outline" size={20} color={UI.text} />
                     </TouchableOpacity>
-                )}
+                </View>
             </LinearGradient>
 
             {/* Map */}
@@ -952,6 +999,14 @@ export default function DriverDeliveryDetailScreen() {
                         </>
                     ) : null}
                 </MapView>
+                <TouchableOpacity
+                    style={styles.mapGoButton}
+                    onPress={() => router.push(`/delivery/deliver-persons/navigation/${deliveryId}` as any)}
+                    activeOpacity={0.85}
+                >
+                    <Ionicons name="navigate" size={14} color={Colors.primary} />
+                    <Text style={styles.mapGoButtonText}>Navigation Go</Text>
+                </TouchableOpacity>
                 {!isMapExpanded ? (
                     <View style={styles.mapCollapsedHint}>
                         <Ionicons name="navigate-outline" size={13} color={Colors.primary} />
@@ -1138,6 +1193,104 @@ export default function DriverDeliveryDetailScreen() {
                 </TouchableOpacity>
             </View>
 
+            <Modal visible={journeyModalVisible} transparent animationType="fade" onRequestClose={() => setJourneyModalVisible(false)}>
+                <View style={styles.journeyOverlay}>
+                    <View style={styles.journeyCard}>
+                        <LinearGradient colors={[Colors.primaryDark, Colors.primary]} style={styles.journeyHeader}>
+                            <View style={styles.journeyHeaderRow}>
+                                <View style={styles.journeyHeaderIcon}>
+                                    <Ionicons name="map-outline" size={20} color={UI.accent} />
+                                </View>
+                                <View style={styles.journeyHeaderTextWrap}>
+                                    <Text style={styles.journeyHeaderTitle}>Parcours de livraison</Text>
+                                    <Text style={styles.journeyHeaderSubtitle}>Guide etape par etape</Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.journeyCloseBtn}
+                                    onPress={() => setJourneyModalVisible(false)}
+                                >
+                                    <Ionicons name="close" size={18} color={Colors.white} />
+                                </TouchableOpacity>
+                            </View>
+                        </LinearGradient>
+
+                        <View style={styles.journeyBody}>
+                            <View style={styles.journeyProgressRow}>
+                                {JOURNEY_GUIDE_STEPS.map((stepItem, index) => (
+                                    <View
+                                        key={stepItem.key}
+                                        style={[
+                                            styles.journeyProgressDot,
+                                            index <= journeyModalStepIndex && styles.journeyProgressDotActive,
+                                            index === journeyModalStepIndex && styles.journeyProgressDotCurrent,
+                                        ]}
+                                    />
+                                ))}
+                            </View>
+                            <Text style={styles.journeyStepCounter}>
+                                Etape {journeyModalStepIndex + 1}/{JOURNEY_GUIDE_STEPS.length}
+                            </Text>
+
+                            <View style={styles.journeySingleCard}>
+                                <View style={styles.journeySingleIcon}>
+                                    <Ionicons name={journeyModalStep.icon} size={21} color={Colors.primaryDark} />
+                                </View>
+                                <Text style={styles.journeySingleTitle}>{journeyModalStep.title}</Text>
+                                <Text style={styles.journeySingleDescription}>
+                                    {journeyModalStep.description}
+                                </Text>
+                            </View>
+
+                            <View style={styles.journeyHintBox}>
+                                <Ionicons name="information-circle-outline" size={15} color={Colors.primary} />
+                                <Text style={styles.journeyHintText}>
+                                    Utilisez Suivant/Precedent pour parcourir le process.
+                                </Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.journeyFooter}>
+                            <TouchableOpacity
+                                style={styles.journeyNavBtn}
+                                onPress={() => {
+                                    setJourneyModalVisible(false);
+                                    router.push(`/delivery/deliver-persons/navigation/${deliveryId}` as any);
+                                }}
+                            >
+                                <Ionicons name="navigate-outline" size={16} color={Colors.primary} />
+                                <Text style={styles.journeyNavBtnText}>Acceder a la navigation</Text>
+                            </TouchableOpacity>
+                            <View style={styles.journeyFooterRow}>
+                                <TouchableOpacity
+                                    style={[
+                                        styles.journeyGhostBtn,
+                                        !canJourneyPrev && styles.journeyGhostBtnDisabled,
+                                    ]}
+                                    onPress={() => setJourneyModalStepIndex((prev) => Math.max(prev - 1, 0))}
+                                    disabled={!canJourneyPrev}
+                                >
+                                    <Text style={styles.journeyGhostBtnText}>Precedent</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.journeyPrimaryBtn}
+                                    onPress={() => {
+                                        if (canJourneyNext) {
+                                            setJourneyModalStepIndex((prev) => Math.min(prev + 1, JOURNEY_GUIDE_STEPS.length - 1));
+                                            return;
+                                        }
+                                        setJourneyModalVisible(false);
+                                    }}
+                                >
+                                    <Text style={styles.journeyPrimaryBtnText}>
+                                        {canJourneyNext ? 'Suivant' : 'J ai compris'}
+                                    </Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             {/* QR Modal */}
             <Modal visible={qrModalVisible} transparent animationType="fade" onRequestClose={closeQrModal}>
                 <View style={styles.modalOverlay}>
@@ -1217,6 +1370,11 @@ const styles = StyleSheet.create({
     headerCenter: {
         flex: 1,
         alignItems: 'center',
+    },
+    headerRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
     },
     headerTitle: {
         color: UI.text,
@@ -1317,6 +1475,26 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         ...Shadows.md,
+    },
+    mapGoButton: {
+        position: 'absolute',
+        top: Spacing.sm,
+        left: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '35',
+        backgroundColor: Colors.white + 'F2',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
+    },
+    mapGoButtonText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     detailsSheet: {
         flex: 1,
@@ -1626,6 +1804,206 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
     },
     disabled: { opacity: 0.5 },
+
+    // Journey Guide Modal
+    journeyOverlay: {
+        flex: 1,
+        backgroundColor: '#000000B3',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: Spacing.lg,
+    },
+    journeyCard: {
+        width: '100%',
+        maxWidth: 430,
+        maxHeight: '78%',
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.white,
+        overflow: 'hidden',
+        ...Shadows.xl,
+    },
+    journeyHeader: {
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+    },
+    journeyHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    journeyHeaderIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white + '18',
+        borderWidth: 1,
+        borderColor: Colors.white + '30',
+    },
+    journeyHeaderTextWrap: {
+        flex: 1,
+    },
+    journeyHeaderTitle: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    journeyHeaderSubtitle: {
+        marginTop: 2,
+        color: Colors.white + 'D0',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    journeyCloseBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '30',
+        backgroundColor: Colors.white + '10',
+    },
+    journeyBody: {
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+    },
+    journeyProgressRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+    },
+    journeyProgressDot: {
+        width: 22,
+        height: 6,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray200,
+    },
+    journeyProgressDotActive: {
+        backgroundColor: UI.accent + 'A0',
+    },
+    journeyProgressDotCurrent: {
+        backgroundColor: UI.accent,
+    },
+    journeyStepCounter: {
+        marginTop: Spacing.xs,
+        textAlign: 'center',
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    journeySingleCard: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '32',
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.lg,
+        alignItems: 'center',
+        gap: Spacing.xs,
+    },
+    journeySingleIcon: {
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        borderWidth: 1,
+        borderColor: Colors.primary + '36',
+        backgroundColor: Colors.white + 'C8',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    journeySingleTitle: {
+        marginTop: 2,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.extrabold,
+        textAlign: 'center',
+    },
+    journeySingleDescription: {
+        marginTop: 2,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
+        textAlign: 'center',
+    },
+    journeyHintBox: {
+        marginTop: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    journeyHintText: {
+        flex: 1,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    journeyFooter: {
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+        padding: Spacing.md,
+    },
+    journeyNavBtn: {
+        minHeight: 44,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '32',
+        backgroundColor: Colors.primary + '10',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: 6,
+        marginBottom: Spacing.sm,
+    },
+    journeyNavBtnText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    journeyFooterRow: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    journeyGhostBtn: {
+        flex: 1,
+        minHeight: 46,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray300,
+        backgroundColor: Colors.gray50,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    journeyGhostBtnDisabled: {
+        opacity: 0.45,
+    },
+    journeyGhostBtnText: {
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    journeyPrimaryBtn: {
+        flex: 1.1,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 46,
+    },
+    journeyPrimaryBtnText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
 
     // Modal
     modalOverlay: {
