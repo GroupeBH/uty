@@ -1,9 +1,3 @@
-/**
- * Ecran des commandes
- * - Achats de l'utilisateur
- * - Ventes de la boutique (si role vendeur)
- */
-
 import { OrderCard } from '@/components/OrderCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
@@ -77,6 +71,7 @@ export default function OrdersScreen() {
     }, [activeView, hasSellerRole, requestedView]);
 
     const { data: orders = [], isLoading, refetch } = useGetOrdersQuery();
+    // console.log("this orders:", orders[0].items[0])
     const currentUserId = user?._id || '';
 
     const viewOrders = React.useMemo(() => {

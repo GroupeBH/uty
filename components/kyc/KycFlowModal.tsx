@@ -10,11 +10,12 @@ import React from 'react';
 import {
     ActivityIndicator,
     Image,
+    KeyboardAvoidingView,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -41,18 +42,10 @@ type CapturedPhoto = {
 };
 
 const KYC_STEPS = [
-    { id: 1, title: 'Identite' },
-    { id: 2, title: 'Selfie' },
-    { id: 3, title: 'Document' },
-    { id: 4, title: 'Confirmation' },
+    { id: 1, title: 'Selfie' },
+    { id: 2, title: 'Document' },
+    { id: 3, title: 'Confirmation' },
 ] as const;
-
-const KYC_ID_OPTIONS: { label: string; value: KycIdType }[] = [
-    { label: 'Carte nationale', value: 'national_id' },
-    { label: 'Passeport', value: 'passport' },
-    { label: 'Permis de conduire', value: 'driver_license' },
-    { label: 'Carte electeur', value: 'voter_card' },
-];
 
 const AUTO_CAPTURE_DELAY_MS = 750;
 const SELFIE_STREAK_TARGET = 3;
@@ -65,9 +58,15 @@ export type KycFlowResult = {
     kycStatus?: string;
 };
 
+type KycIdentityInput = {
+    fullName: string;
+    idType: KycIdType;
+    idNumber: string;
+};
+
 interface KycFlowModalProps {
     visible: boolean;
-    initialFullName?: string;
+    identity: KycIdentityInput;
     onClose: () => void;
     onSuccess?: (result: KycFlowResult) => void;
 }
@@ -162,14 +161,11 @@ const detectStructuredObjectWorklet = (
     }
 };
 
-export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess }: KycFlowModalProps) {
+export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowModalProps) {
     const [submitKyc, { isLoading: isSubmitting }] = useSubmitKycMutation();
     const { hasPermission, requestPermission } = useCameraPermission();
 
     const [step, setStep] = React.useState(1);
-    const [fullName, setFullName] = React.useState(initialFullName);
-    const [idType, setIdType] = React.useState<KycIdType>('national_id');
-    const [idNumber, setIdNumber] = React.useState('');
     const [selfie, setSelfie] = React.useState<CapturedPhoto | null>(null);
     const [documentFront, setDocumentFront] = React.useState<CapturedPhoto | null>(null);
     const [documentBack, setDocumentBack] = React.useState<CapturedPhoto | null>(null);
@@ -216,13 +212,13 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
     );
     const { detectFaces, stopListeners } = useFaceDetector(faceDetectionOptions);
 
-    const showAlert = (title: string, message: string, type: AlertType = 'info') => {
+    const showAlert = React.useCallback((title: string, message: string, type: AlertType = 'info') => {
         setAlertState({ visible: true, title, message, type });
-    };
+    }, []);
 
-    const hideAlert = () => {
+    const hideAlert = React.useCallback(() => {
         setAlertState((prev) => ({ ...prev, visible: false }));
-    };
+    }, []);
 
     const setCameraHintSafe = React.useCallback((next: string) => {
         if (cameraHintRef.current === next) return;
@@ -254,9 +250,6 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
 
     const resetState = React.useCallback(() => {
         setStep(1);
-        setFullName(initialFullName);
-        setIdType('national_id');
-        setIdNumber('');
         setSelfie(null);
         setDocumentFront(null);
         setDocumentBack(null);
@@ -264,7 +257,7 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
         setCaptureInProgress(null);
         setErrorMessage('');
         closeCaptureCamera();
-    }, [closeCaptureCamera, initialFullName]);
+    }, [closeCaptureCamera]);
 
     React.useEffect(() => {
         if (visible) {
@@ -319,13 +312,13 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
     const applyCapturedPhoto = React.useCallback((target: KycCaptureTarget, photo: CapturedPhoto) => {
         if (target === 'selfie') {
             setSelfie(photo);
-            setStep((prev) => Math.max(prev, 3));
+            setStep((prev) => Math.max(prev, 2));
             return;
         }
 
         if (target === 'front') {
             setDocumentFront(photo);
-            setStep((prev) => Math.max(prev, 4));
+            setStep((prev) => Math.max(prev, 3));
             return;
         }
 
@@ -363,7 +356,14 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
                 setCameraHintSafe('Repositionnez la camera puis reessayez.');
             }
         },
-        [applyCapturedPhoto, buildCapturedPhoto, closeCaptureCamera, resetAutoDetectionState, setCameraHintSafe],
+        [
+            applyCapturedPhoto,
+            buildCapturedPhoto,
+            closeCaptureCamera,
+            resetAutoDetectionState,
+            setCameraHintSafe,
+            showAlert,
+        ],
     );
 
     const openCaptureCamera = React.useCallback(
@@ -396,7 +396,7 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
             setCameraModalVisible(true);
 
             if (target === 'selfie') {
-                setCameraHintSafe('Cadrez votre visage dans le cercle. Capture automatique des detection stable.');
+                setCameraHintSafe('Cadrez votre visage puis utilisez le bouton de capture.');
                 return;
             }
 
@@ -409,7 +409,13 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
 
             setCameraHintSafe('Cadrez le verso dans le guide. Capture automatique des detection objet.');
         },
-        [hasPermission, requestPermission, resetAutoDetectionState, setCameraHintSafe],
+        [
+            hasPermission,
+            requestPermission,
+            resetAutoDetectionState,
+            setCameraHintSafe,
+            showAlert,
+        ],
     );
 
     const scheduleAutoCapture = React.useCallback(
@@ -508,13 +514,14 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
         (frame) => {
             'worklet';
 
+            if (cameraTarget === 'selfie') {
+                return;
+            }
+
             runAtTargetFps(4, () => {
                 'worklet';
                 const faces = detectFaces(frame);
-                const structuredObjectDetected =
-                    cameraTarget !== 'selfie'
-                        ? detectStructuredObjectWorklet(frame)
-                        : false;
+                const structuredObjectDetected = detectStructuredObjectWorklet(frame);
 
                 runDetectionOnJS(
                     faces,
@@ -528,28 +535,17 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
     );
 
     const validateStep = () => {
-        if (step === 1) {
-            if (!fullName.trim()) {
-                setErrorMessage('Le nom complet est requis.');
-                return false;
-            }
-            if (!idNumber.trim()) {
-                setErrorMessage('Le numero du document est requis.');
-                return false;
-            }
-        }
-
-        if (step === 2 && !selfie) {
+        if (step === 1 && !selfie) {
             setErrorMessage('Prenez un selfie pour continuer.');
             return false;
         }
 
-        if (step === 3 && !documentFront) {
+        if (step === 2 && !documentFront) {
             setErrorMessage('Capturez le recto de votre document.');
             return false;
         }
 
-        if (step === 4) {
+        if (step === 3) {
             if (!selfie || !documentFront) {
                 setErrorMessage('Selfie et document recto obligatoires.');
                 return false;
@@ -579,11 +575,22 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
             return;
         }
 
+        const fullName = identity.fullName.trim();
+        const idNumber = identity.idNumber.trim();
+        if (!fullName || !idNumber) {
+            showAlert(
+                'Identite manquante',
+                'Renseignez le nom complet et le numero du document avant le KYC.',
+                'warning',
+            );
+            return;
+        }
+
         try {
             const response = await submitKyc({
-                fullName: fullName.trim(),
-                idType,
-                idNumber: idNumber.trim(),
+                fullName,
+                idType: identity.idType,
+                idNumber,
                 selfieUrl: selfie.dataUrl,
                 documentFrontUrl: documentFront.dataUrl,
                 documentBackUrl: documentBack?.dataUrl,
@@ -660,58 +667,13 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
         if (step === 1) {
             return (
                 <View style={styles.block}>
-                    <Text style={styles.blockTitle}>Identite</Text>
-                    <Text style={styles.blockHint}>Renseignez les informations comme sur votre piece.</Text>
-                    <Text style={styles.label}>Nom complet *</Text>
-                    <TextInput
-                        value={fullName}
-                        onChangeText={setFullName}
-                        placeholder="Ex: Jean Koffi"
-                        placeholderTextColor={Colors.gray400}
-                        style={styles.input}
-                    />
-
-                    <Text style={styles.label}>Type de document *</Text>
-                    <View style={styles.chipsRow}>
-                        {KYC_ID_OPTIONS.map((option) => {
-                            const selected = option.value === idType;
-                            return (
-                                <TouchableOpacity
-                                    key={option.value}
-                                    style={[styles.chip, selected && styles.chipSelected]}
-                                    onPress={() => setIdType(option.value)}
-                                >
-                                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                                        {option.label}
-                                    </Text>
-                                </TouchableOpacity>
-                            );
-                        })}
-                    </View>
-
-                    <Text style={styles.label}>Numero du document *</Text>
-                    <TextInput
-                        value={idNumber}
-                        onChangeText={setIdNumber}
-                        placeholder="Ex: CI-1234-5678"
-                        placeholderTextColor={Colors.gray400}
-                        style={styles.input}
-                        autoCapitalize="characters"
-                    />
-                </View>
-            );
-        }
-
-        if (step === 2) {
-            return (
-                <View style={styles.block}>
                     <View style={styles.captureStepHeader}>
                         <View style={[styles.captureStepIcon, styles.captureStepIconInfo]}>
                             <Ionicons name="person-outline" size={24} color={Colors.info} />
                         </View>
-                        <Text style={styles.captureStepTitle}>Selfie automatique</Text>
+                        <Text style={styles.captureStepTitle}>Selfie KYC</Text>
                         <Text style={styles.blockHint}>
-                            La photo se prend automatiquement quand votre visage est detecte et stable.
+                            Lancez l appareil photo pour capturer un selfie net du titulaire.
                         </Text>
                     </View>
 
@@ -728,8 +690,8 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
                             </View>
                         ) : (
                             <View style={styles.capturePlaceholder}>
-                                <Ionicons name="scan-circle-outline" size={28} color={Colors.primary} />
-                                <Text style={styles.capturePlaceholderText}>Lancer la capture automatique</Text>
+                                <Ionicons name="camera-outline" size={28} color={Colors.primary} />
+                                <Text style={styles.capturePlaceholderText}>Lancer la capture selfie</Text>
                             </View>
                         )}
                     </TouchableOpacity>
@@ -744,7 +706,7 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
             );
         }
 
-        if (step === 3) {
+        if (step === 2) {
             return (
                 <View style={styles.block}>
                     <View style={styles.captureStepHeader}>
@@ -851,15 +813,16 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
         }
 
         const isSelfie = cameraTarget === 'selfie';
+        const autoCaptureEnabled = cameraTarget !== 'selfie';
         const title =
             cameraTarget === 'selfie'
-                ? 'Selfie automatique'
+                ? 'Selfie'
                 : cameraTarget === 'front'
                 ? 'Recto du document'
                 : 'Verso du document';
         const subtitle =
             cameraTarget === 'selfie'
-                ? 'Detection de visage en temps reel'
+                ? 'Capture manuelle VisionCamera'
                 : 'Detection d objet en temps reel';
         const busy = captureInProgress === cameraTarget;
         const manualDisabled = busy || !cameraDevice || !cameraReady;
@@ -879,13 +842,13 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
                             device={cameraDevice}
                             isActive={cameraModalVisible}
                             photo
-                            frameProcessor={frameProcessor}
-                            pixelFormat="yuv"
+                            frameProcessor={autoCaptureEnabled ? frameProcessor : undefined}
+                            pixelFormat={autoCaptureEnabled ? 'yuv' : undefined}
                             onInitialized={() => {
                                 setCameraReady(true);
                                 setCameraHintSafe(
                                     cameraTarget === 'selfie'
-                                        ? 'Camera prete. Alignez votre visage.'
+                                        ? 'Camera prete. Cadrez votre visage puis capturez.'
                                         : 'Camera prete. Alignez votre document.',
                                 );
                             }}
@@ -923,8 +886,14 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
 
                         <View style={styles.cameraBottomPanel}>
                             <View style={styles.cameraStatusPill}>
-                                <Ionicons name="scan-outline" size={15} color={Colors.white} />
-                                <Text style={styles.cameraStatusText}>Auto capture active</Text>
+                                <Ionicons
+                                    name={autoCaptureEnabled ? 'scan-outline' : 'camera-outline'}
+                                    size={15}
+                                    color={Colors.white}
+                                />
+                                <Text style={styles.cameraStatusText}>
+                                    {autoCaptureEnabled ? 'Auto capture active' : 'Mode manuel'}
+                                </Text>
                             </View>
                             <Text style={styles.cameraHint}>{cameraHint}</Text>
 
@@ -951,7 +920,7 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
                                                 manualDisabled && styles.cameraManualButtonTextDisabled,
                                             ]}
                                         >
-                                            Capturer maintenant
+                                            {isSelfie ? 'Prendre le selfie' : 'Capturer maintenant'}
                                         </Text>
                                     </>
                                 )}
@@ -966,66 +935,73 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
     return (
         <>
             <Modal visible={visible} transparent animationType="slide" onRequestClose={closeModal} statusBarTranslucent>
-                <View style={styles.overlay}>
-                    <View style={styles.card}>
-                        <View style={styles.header}>
-                            <View>
-                                <Text style={styles.headerTitle}>Verification KYC</Text>
-                                <Text style={styles.headerSubtitle}>Etape {step}/{KYC_STEPS.length}</Text>
+                <KeyboardAvoidingView
+                    style={styles.overlayKeyboard}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <View style={styles.overlay}>
+                        <View style={styles.card}>
+                            <View style={styles.header}>
+                                <View>
+                                    <Text style={styles.headerTitle}>Verification KYC</Text>
+                                    <Text style={styles.headerSubtitle}>Etape {step}/{KYC_STEPS.length}</Text>
+                                </View>
+                                <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
+                                    <Ionicons name="close" size={20} color={Colors.gray500} />
+                                </TouchableOpacity>
                             </View>
-                            <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
-                                <Ionicons name="close" size={20} color={Colors.gray500} />
-                            </TouchableOpacity>
-                        </View>
 
-                        {renderProgress()}
+                            {renderProgress()}
 
-                        <ScrollView
-                            style={styles.body}
-                            contentContainerStyle={styles.bodyContent}
-                            showsVerticalScrollIndicator={false}
-                        >
-                            {renderStepContent()}
-                            {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
-                        </ScrollView>
-
-                        <View style={styles.footer}>
-                            <TouchableOpacity
-                                style={[styles.footerGhost, step === 1 && styles.footerGhostDisabled]}
-                                onPress={handlePrevious}
-                                disabled={step === 1 || isSubmitting}
+                            <ScrollView
+                                style={styles.body}
+                                contentContainerStyle={styles.bodyContent}
+                                showsVerticalScrollIndicator={false}
+                                keyboardShouldPersistTaps="handled"
+                                keyboardDismissMode="on-drag"
                             >
-                                <Text style={styles.footerGhostText}>Precedent</Text>
-                            </TouchableOpacity>
+                                {renderStepContent()}
+                                {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
+                            </ScrollView>
 
-                            {step < KYC_STEPS.length ? (
-                                <TouchableOpacity style={styles.footerCta} onPress={handleNext}>
-                                    <LinearGradient colors={Gradients.primary} style={styles.footerGradient}>
-                                        <Text style={styles.footerCtaText}>Continuer</Text>
-                                        <Ionicons name="arrow-forward" size={16} color={Colors.white} />
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                            ) : (
+                            <View style={styles.footer}>
                                 <TouchableOpacity
-                                    style={[styles.footerCta, isSubmitting && styles.footerCtaDisabled]}
-                                    onPress={handleSubmit}
-                                    disabled={isSubmitting}
+                                    style={[styles.footerGhost, step === 1 && styles.footerGhostDisabled]}
+                                    onPress={handlePrevious}
+                                    disabled={step === 1 || isSubmitting}
                                 >
-                                    <LinearGradient colors={Gradients.accent} style={styles.footerGradient}>
-                                        {isSubmitting ? (
-                                            <ActivityIndicator color={Colors.primary} />
-                                        ) : (
-                                            <>
-                                                <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
-                                                <Text style={styles.footerCtaTextAccent}>Confirmer et envoyer</Text>
-                                            </>
-                                        )}
-                                    </LinearGradient>
+                                    <Text style={styles.footerGhostText}>Precedent</Text>
                                 </TouchableOpacity>
-                            )}
+
+                                {step < KYC_STEPS.length ? (
+                                    <TouchableOpacity style={styles.footerCta} onPress={handleNext}>
+                                        <LinearGradient colors={Gradients.primary} style={styles.footerGradient}>
+                                            <Text style={styles.footerCtaText}>Continuer</Text>
+                                            <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                ) : (
+                                    <TouchableOpacity
+                                        style={[styles.footerCta, isSubmitting && styles.footerCtaDisabled]}
+                                        onPress={handleSubmit}
+                                        disabled={isSubmitting}
+                                    >
+                                        <LinearGradient colors={Gradients.accent} style={styles.footerGradient}>
+                                            {isSubmitting ? (
+                                                <ActivityIndicator color={Colors.primary} />
+                                            ) : (
+                                                <>
+                                                    <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
+                                                    <Text style={styles.footerCtaTextAccent}>Confirmer et envoyer</Text>
+                                                </>
+                                            )}
+                                        </LinearGradient>
+                                    </TouchableOpacity>
+                                )}
+                            </View>
                         </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             {renderCameraModal()}
@@ -1049,6 +1025,9 @@ export function KycFlowModal({ visible, initialFullName = '', onClose, onSuccess
 }
 
 const styles = StyleSheet.create({
+    overlayKeyboard: {
+        flex: 1,
+    },
     overlay: {
         flex: 1,
         backgroundColor: 'rgba(1, 9, 23, 0.58)',

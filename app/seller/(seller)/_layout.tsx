@@ -1,12 +1,23 @@
 import { Colors } from '@/constants/theme';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { useAuth } from '@/hooks/useAuth';
+import { useGetMyShopQuery } from '@/store/api/shopsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, useRouter } from 'expo-router';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SellerTabsLayout() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
+    const { data: myShop, isLoading: isShopLoading, isFetching: isShopFetching } = useGetMyShopQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const insets = useSafeAreaInsets();
+    const tabBarBottomPadding = Math.max(insets.bottom, 10);
+    const tabBarHeight = 58 + tabBarBottomPadding;
+    const hasShop = Boolean(myShop?._id);
+
     const openAuthModal = React.useCallback(() => {
         router.push({
             pathname: '/modal',
@@ -18,9 +29,39 @@ export default function SellerTabsLayout() {
             },
         });
     }, [router]);
+    const openCreateShop = React.useCallback(() => {
+        router.replace('/create-shop' as any);
+    }, [router]);
     const goToDefaultSpace = React.useCallback(() => {
         router.replace('/(tabs)' as any);
     }, [router]);
+    const requireSellerSpaceReady = React.useCallback(
+        (event: { preventDefault: () => void }) => {
+            if (!isAuthenticated) {
+                event.preventDefault();
+                openAuthModal();
+                return;
+            }
+
+            if (!hasShop) {
+                event.preventDefault();
+                openCreateShop();
+            }
+        },
+        [hasShop, isAuthenticated, openAuthModal, openCreateShop],
+    );
+
+    React.useEffect(() => {
+        if (!isAuthenticated) return;
+        if (isShopLoading || isShopFetching) return;
+        if (!hasShop) {
+            openCreateShop();
+        }
+    }, [hasShop, isAuthenticated, isShopFetching, isShopLoading, openCreateShop]);
+
+    if (isAuthenticated && (isShopLoading || isShopFetching || !hasShop)) {
+        return <LoadingSpinner fullScreen />;
+    }
 
     return (
         <Tabs
@@ -28,10 +69,11 @@ export default function SellerTabsLayout() {
                 headerShown: false,
                 tabBarActiveTintColor: Colors.primary,
                 tabBarInactiveTintColor: Colors.gray500,
+                tabBarHideOnKeyboard: true,
                 tabBarStyle: {
-                    height: 70,
+                    height: tabBarHeight,
                     paddingTop: 8,
-                    paddingBottom: 10,
+                    paddingBottom: tabBarBottomPadding,
                     borderTopColor: Colors.gray200,
                     backgroundColor: Colors.white,
                 },
@@ -47,14 +89,7 @@ export default function SellerTabsLayout() {
                     title: 'Dashboard',
                     tabBarIcon: ({ color }) => <Ionicons name="grid-outline" size={20} color={color} />,
                 }}
-                listeners={{
-                    tabPress: (event) => {
-                        if (!isAuthenticated) {
-                            event.preventDefault();
-                            openAuthModal();
-                        }
-                    },
-                }}
+                listeners={{ tabPress: requireSellerSpaceReady }}
             />
             <Tabs.Screen
                 name="orders"
@@ -64,14 +99,7 @@ export default function SellerTabsLayout() {
                         <Ionicons name="receipt-outline" size={20} color={color} />
                     ),
                 }}
-                listeners={{
-                    tabPress: (event) => {
-                        if (!isAuthenticated) {
-                            event.preventDefault();
-                            openAuthModal();
-                        }
-                    },
-                }}
+                listeners={{ tabPress: requireSellerSpaceReady }}
             />
             <Tabs.Screen
                 name="shop"
@@ -81,14 +109,7 @@ export default function SellerTabsLayout() {
                         <Ionicons name="storefront-outline" size={20} color={color} />
                     ),
                 }}
-                listeners={{
-                    tabPress: (event) => {
-                        if (!isAuthenticated) {
-                            event.preventDefault();
-                            openAuthModal();
-                        }
-                    },
-                }}
+                listeners={{ tabPress: requireSellerSpaceReady }}
             />
             <Tabs.Screen
                 name="announcements"
@@ -98,14 +119,7 @@ export default function SellerTabsLayout() {
                         <Ionicons name="megaphone-outline" size={20} color={color} />
                     ),
                 }}
-                listeners={{
-                    tabPress: (event) => {
-                        if (!isAuthenticated) {
-                            event.preventDefault();
-                            openAuthModal();
-                        }
-                    },
-                }}
+                listeners={{ tabPress: requireSellerSpaceReady }}
             />
             <Tabs.Screen
                 name="client"

@@ -120,7 +120,7 @@ const getAnnouncementCategoryCandidates = (announcement: any): string[] => {
     const ancestors = Array.isArray(announcement?.categoryAncestors)
         ? announcement.categoryAncestors
         : [];
-    ancestors.forEach((ancestor) => {
+    ancestors.forEach((ancestor: any) => {
         const ancestorId = toIdString(ancestor);
         if (ancestorId) {
             ids.add(ancestorId);
@@ -135,8 +135,8 @@ const getUserPreferredCategoryIds = (user: any): string[] => {
     return Array.from(
         new Set(
             values
-                .map((value) => toIdString(value))
-                .filter((value): value is string => Boolean(value)),
+                .map((value: any) => toIdString(value))
+                .filter((value: any): value is string => Boolean(value)),
         ),
     );
 };
@@ -389,7 +389,7 @@ export default function HomeScreen() {
                     <View style={styles.headerContent}>
                         {/* Section utilisateur avec avatar */}
                         <View style={styles.userSection}>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={styles.avatarButton}
                                 onPress={openProfile}
                                 activeOpacity={0.8}
@@ -403,8 +403,8 @@ export default function HomeScreen() {
                                     <Ionicons name="person" size={24} color={Colors.primary} />
                                 </LinearGradient>
                             </TouchableOpacity>
-                            
-                            <Animated.View 
+
+                            <Animated.View
                                 style={[
                                     styles.greetingContainer,
                                     {
@@ -434,7 +434,7 @@ export default function HomeScreen() {
                                     <Ionicons name="cart-outline" size={22} color={Colors.white} />
                                 </View>
                             </TouchableOpacity>
-                            
+
                             <TouchableOpacity
                                 style={styles.modernHeaderButton}
                                 onPress={openNotifications}
@@ -454,7 +454,7 @@ export default function HomeScreen() {
                     </View>
 
                     {/* Barre de recherche moderne */}
-                    <Animated.View 
+                    <Animated.View
                         style={[
                             styles.searchContainer,
                             {
@@ -462,7 +462,7 @@ export default function HomeScreen() {
                             }
                         ]}
                     >
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.modernSearchBar}
                             onPress={handleSearchPress}
                             activeOpacity={1}
@@ -482,7 +482,7 @@ export default function HomeScreen() {
                                         <Ionicons name="search" size={20} color={Colors.primary} />
                                     </LinearGradient>
                                 </View>
-                                
+
                                 {/* Texte de recherche */}
                                 <View style={styles.searchTextContainer}>
                                     <Text style={styles.modernSearchPlaceholder}>
@@ -492,9 +492,9 @@ export default function HomeScreen() {
                                         Electronics, Mode, etc.
                                     </Text>
                                 </View>
-                                
+
                                 {/* Bouton filtres */}
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     style={styles.filterButton}
                                     onPress={() => router.push('/search')}
                                 >
@@ -571,23 +571,23 @@ export default function HomeScreen() {
                     >
                         {isCategoriesLoading && homeCategories.length === 0
                             ? [1, 2, 3, 4, 5].map((item) => (
-                                  <View key={item} style={styles.categoryLoadingPill} />
-                              ))
+                                <View key={item} style={styles.categoryLoadingPill} />
+                            ))
                             : homeCategories.map((category) => (
-                                  <CategoryCard
-                                      key={category.id}
-                                      name={category.name}
-                                      icon={category.icon}
-                                      gradient={category.gradient}
-                                      count={category.count}
-                                      onPress={() =>
-                                          router.push({
-                                              pathname: '/search',
-                                              params: { categoryId: category.id },
-                                          })
-                                      }
-                                  />
-                              ))}
+                                <CategoryCard
+                                    key={category.id}
+                                    name={category.name}
+                                    icon={category.icon}
+                                    gradient={category.gradient}
+                                    count={category.count}
+                                    onPress={() =>
+                                        router.push({
+                                            pathname: '/search',
+                                            params: { categoryId: category.id },
+                                        })
+                                    }
+                                />
+                            ))}
                         {!isCategoriesLoading && homeCategories.length === 0 ? (
                             <Text style={styles.emptyCategoriesText}>
                                 Aucune categorie disponible pour le moment.

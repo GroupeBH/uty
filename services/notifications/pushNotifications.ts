@@ -9,24 +9,42 @@ export type FirebaseRemoteMessage = {
     data?: Record<string, string>;
 };
 
-type MessagingInstance = {
-    registerDeviceForRemoteMessages?: () => Promise<void>;
-    requestPermission?: () => Promise<number>;
-    getToken?: () => Promise<string>;
-    deleteToken?: () => Promise<void>;
-    getInitialNotification?: () => Promise<FirebaseRemoteMessage | null>;
+type MessagingInstance = unknown;
+
+type MessagingModule = {
+    getMessaging?: () => MessagingInstance;
+    registerDeviceForRemoteMessages?: (messaging: MessagingInstance) => Promise<void>;
+    requestPermission?: (
+        messaging: MessagingInstance,
+        iosPermissions?: Record<string, unknown>,
+    ) => Promise<number>;
+    getToken?: (
+        messaging: MessagingInstance,
+        options?: Record<string, unknown>,
+    ) => Promise<string>;
+    deleteToken?: (
+        messaging: MessagingInstance,
+        options?: Record<string, unknown>,
+    ) => Promise<void>;
+    getInitialNotification?: (
+        messaging: MessagingInstance,
+    ) => Promise<FirebaseRemoteMessage | null>;
     onNotificationOpenedApp?: (
+        messaging: MessagingInstance,
         listener: (message: FirebaseRemoteMessage) => void,
     ) => () => void;
-    onTokenRefresh?: (listener: (token: string) => void) => () => void;
-    onMessage?: (listener: (message: FirebaseRemoteMessage) => void) => () => void;
+    onTokenRefresh?: (
+        messaging: MessagingInstance,
+        listener: (token: string) => void,
+    ) => () => void;
+    onMessage?: (
+        messaging: MessagingInstance,
+        listener: (message: FirebaseRemoteMessage) => void,
+    ) => () => void;
     setBackgroundMessageHandler?: (
+        messaging: MessagingInstance,
         handler: (message: FirebaseRemoteMessage) => Promise<void>,
     ) => void;
-};
-
-type MessagingFactory = {
-    (): MessagingInstance;
     AuthorizationStatus?: {
         AUTHORIZED?: number;
         PROVISIONAL?: number;
@@ -76,30 +94,29 @@ let hasInitializedForegroundHandlers = false;
 let hasInitializedBackgroundHandlers = false;
 let hasCreatedAndroidChannel = false;
 let hasWarnedMissingMessaging = false;
+let hasWarnedMessagingInit = false;
 let hasWarnedMissingNotifee = false;
 const notificationOpenListeners = new Set<
     (message: FirebaseRemoteMessage) => void
 >();
 
-let cachedMessagingFactory: MessagingFactory | null | undefined;
+let cachedMessagingModule: MessagingModule | null | undefined;
+let cachedMessagingInstance: MessagingInstance | null | undefined;
 let cachedNotifeeModule: NotifeeModule | null | undefined;
 
-const getMessagingFactory = (): MessagingFactory | null => {
-    if (cachedMessagingFactory !== undefined) {
-        return cachedMessagingFactory;
+const getMessagingModule = (): MessagingModule | null => {
+    if (cachedMessagingModule !== undefined) {
+        return cachedMessagingModule;
     }
 
     if (Platform.OS === 'web') {
-        cachedMessagingFactory = null;
+        cachedMessagingModule = null;
         return null;
     }
 
     try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const messagingModule = require('@react-native-firebase/messaging') as {
-            default?: MessagingFactory;
-        };
-        cachedMessagingFactory = messagingModule.default || null;
+        cachedMessagingModule = require('@react-native-firebase/messaging') as MessagingModule;
     } catch {
         if (!hasWarnedMissingMessaging) {
             console.warn(
@@ -107,10 +124,47 @@ const getMessagingFactory = (): MessagingFactory | null => {
             );
             hasWarnedMissingMessaging = true;
         }
-        cachedMessagingFactory = null;
+        cachedMessagingModule = null;
     }
 
-    return cachedMessagingFactory;
+    return cachedMessagingModule;
+};
+
+const getMessagingInstance = (): MessagingInstance | null => {
+    if (cachedMessagingInstance !== undefined) {
+        return cachedMessagingInstance;
+    }
+
+    const messagingModule = getMessagingModule();
+    if (!messagingModule?.getMessaging) {
+        cachedMessagingInstance = null;
+        return null;
+    }
+
+    try {
+        cachedMessagingInstance = messagingModule.getMessaging();
+    } catch {
+        if (!hasWarnedMessagingInit) {
+            console.warn(
+                '[push] Failed to initialize Firebase Messaging. Check Firebase setup for this build.',
+            );
+            hasWarnedMessagingInit = true;
+        }
+        cachedMessagingInstance = null;
+    }
+
+    return cachedMessagingInstance;
+};
+
+const getMessagingApi = (): { module: MessagingModule; instance: MessagingInstance } | null => {
+    const module = getMessagingModule();
+    const instance = getMessagingInstance();
+
+    if (!module || !instance) {
+        return null;
+    }
+
+    return { module, instance };
 };
 
 const getNotifeeModule = (): NotifeeModule | null => {
@@ -234,10 +288,10 @@ export const subscribeToNotificationOpen = (
 };
 
 export const requestPushPermissions = async (): Promise<boolean> => {
-    const messagingFactory = getMessagingFactory();
+    const messagingApi = getMessagingApi();
     const notifee = getNotifeeModule();
 
-    if (!messagingFactory || !notifee) {
+    if (!messagingApi || !notifee) {
         return false;
     }
 
@@ -247,15 +301,15 @@ export const requestPushPermissions = async (): Promise<boolean> => {
         notifeeAuthorized = isAuthorizationGranted(notifeeSettings.authorizationStatus);
     }
 
-    const messaging = messagingFactory();
+    const { module, instance } = messagingApi;
 
     let messagingAuthorized = true;
-    if (messaging.requestPermission) {
-        const messagingStatus = await messaging.requestPermission();
+    if (module.requestPermission) {
+        const messagingStatus = await module.requestPermission(instance);
         messagingAuthorized = isAuthorizationGranted(
             messagingStatus,
-            messagingFactory.AuthorizationStatus?.AUTHORIZED,
-            messagingFactory.AuthorizationStatus?.PROVISIONAL,
+            module.AuthorizationStatus?.AUTHORIZED,
+            module.AuthorizationStatus?.PROVISIONAL,
         );
     }
 
@@ -263,8 +317,8 @@ export const requestPushPermissions = async (): Promise<boolean> => {
 };
 
 export const registerForPushNotifications = async (): Promise<string | null> => {
-    const messagingFactory = getMessagingFactory();
-    if (!messagingFactory) {
+    const messagingApi = getMessagingApi();
+    if (!messagingApi) {
         return null;
     }
 
@@ -273,34 +327,34 @@ export const registerForPushNotifications = async (): Promise<string | null> => 
         return null;
     }
 
-    const messaging = messagingFactory();
+    const { module, instance } = messagingApi;
 
-    if (messaging.registerDeviceForRemoteMessages) {
-        await messaging.registerDeviceForRemoteMessages();
+    if (module.registerDeviceForRemoteMessages) {
+        await module.registerDeviceForRemoteMessages(instance);
     }
 
-    if (!messaging.getToken) {
+    if (!module.getToken) {
         return null;
     }
 
-    const token = await messaging.getToken();
+    const token = await module.getToken(instance);
     return token || null;
 };
 
 export const subscribeToFcmTokenRefresh = (
     listener: (token: string) => void,
 ): (() => void) => {
-    const messagingFactory = getMessagingFactory();
-    if (!messagingFactory) {
+    const messagingApi = getMessagingApi();
+    if (!messagingApi) {
         return () => undefined;
     }
 
-    const messaging = messagingFactory();
-    if (!messaging.onTokenRefresh) {
+    const { module, instance } = messagingApi;
+    if (!module.onTokenRefresh) {
         return () => undefined;
     }
 
-    return messaging.onTokenRefresh((token: string) => {
+    return module.onTokenRefresh(instance, (token: string) => {
         if (token) {
             listener(token);
         }
@@ -312,18 +366,18 @@ export const initializeForegroundPushHandlers = async (): Promise<void> => {
         return;
     }
 
-    const messagingFactory = getMessagingFactory();
+    const messagingApi = getMessagingApi();
     const notifee = getNotifeeModule();
 
-    if (!messagingFactory || !notifee) {
+    if (!messagingApi || !notifee) {
         return;
     }
 
     await ensureDefaultAndroidChannel();
 
-    const messaging = messagingFactory();
-    if (messaging.onMessage) {
-        messaging.onMessage((remoteMessage: FirebaseRemoteMessage) => {
+    const { module, instance } = messagingApi;
+    if (module.onMessage) {
+        module.onMessage(instance, (remoteMessage: FirebaseRemoteMessage) => {
             void displayRemoteMessage(remoteMessage);
         });
     }
@@ -355,28 +409,28 @@ export const initializeBackgroundPushHandlers = (): void => {
         return;
     }
 
-    const messagingFactory = getMessagingFactory();
+    const messagingApi = getMessagingApi();
     const notifee = getNotifeeModule();
 
-    if (!messagingFactory || !notifee) {
+    if (!messagingApi || !notifee) {
         return;
     }
 
-    const messaging = messagingFactory();
-    if (messaging.setBackgroundMessageHandler) {
-        messaging.setBackgroundMessageHandler(async (remoteMessage: FirebaseRemoteMessage) => {
+    const { module, instance } = messagingApi;
+    if (module.setBackgroundMessageHandler) {
+        module.setBackgroundMessageHandler(instance, async (remoteMessage: FirebaseRemoteMessage) => {
             await displayRemoteMessage(remoteMessage);
         });
     }
 
-    if (messaging.onNotificationOpenedApp) {
-        messaging.onNotificationOpenedApp((remoteMessage: FirebaseRemoteMessage) => {
+    if (module.onNotificationOpenedApp) {
+        module.onNotificationOpenedApp(instance, (remoteMessage: FirebaseRemoteMessage) => {
             emitNotificationOpened(remoteMessage);
         });
     }
 
-    if (messaging.getInitialNotification) {
-        messaging.getInitialNotification().then((remoteMessage) => {
+    if (module.getInitialNotification) {
+        module.getInitialNotification(instance).then((remoteMessage) => {
             if (remoteMessage) {
                 emitNotificationOpened(remoteMessage);
             }
@@ -420,13 +474,13 @@ export const initializeBackgroundPushHandlers = (): void => {
 };
 
 export const deleteFcmDeviceToken = async (): Promise<void> => {
-    const messagingFactory = getMessagingFactory();
-    if (!messagingFactory) {
+    const messagingApi = getMessagingApi();
+    if (!messagingApi) {
         return;
     }
 
-    const messaging = messagingFactory();
-    if (messaging.deleteToken) {
-        await messaging.deleteToken();
+    const { module, instance } = messagingApi;
+    if (module.deleteToken) {
+        await module.deleteToken(instance);
     }
 };

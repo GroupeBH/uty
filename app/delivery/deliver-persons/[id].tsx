@@ -1,8 +1,8 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { QrCodeMatrix } from '@/components/ui/QrCodeMatrix';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeliveryStream } from '@/hooks/useDeliveryStream';
-import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
 import {
     useAcceptDeliveryMutation,
     useDriverArriveDropoffMutation,
@@ -12,6 +12,8 @@ import {
     useGetDeliveryTrackingQuery,
     useScanPickupQrMutation,
 } from '@/store/api/deliveriesApi';
+import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
+import { useGetDirectionsMutation, useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     DeliveryGeoPoint,
     DeliveryStatusValue,
@@ -20,11 +22,11 @@ import {
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     Alert,
-    Image,
     Linking,
     Modal,
     Platform,
@@ -36,7 +38,7 @@ import {
     View,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type LatLng = { latitude: number; longitude: number };
 
@@ -59,7 +61,12 @@ const UI = {
 
 const DRIVER_ROLE_KEYS = ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'];
 const DEFAULT_MAP_CENTER: LatLng = { latitude: -4.325, longitude: 15.3222 };
-const STEP_LABELS = ['ASSIGNED', 'AT PICKUP', 'IN TRANSIT', 'DELIVERED'];
+const STEPS: { key: string; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { key: 'assigned', label: 'Assigne', icon: 'person-add-outline' },
+    { key: 'at_pickup', label: 'Retrait', icon: 'storefront-outline' },
+    { key: 'in_transit', label: 'En route', icon: 'bicycle-outline' },
+    { key: 'delivered', label: 'Livre', icon: 'checkmark-circle-outline' },
+];
 
 const parseError = (error: any, fallback: string): string =>
     (Array.isArray(error?.data?.message) && String(error.data.message[0])) ||
@@ -84,19 +91,228 @@ const parseCoordinateLabel = (value?: string | null): LatLng | null => {
     const lat = Number(match[1]);
     const lng = Number(match[2]);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
     return { latitude: lat, longitude: lng };
 };
 
+const coordinatesToLabel = (value?: DeliveryGeoPoint | null): string => {
+    const point = parseGeoPoint(value);
+    if (!point) return '';
+    return `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
+};
+
+const decodePolyline = (encoded: string): LatLng[] => {
+    if (!encoded) return [];
+
+    let index = 0;
+    const len = encoded.length;
+    let lat = 0;
+    let lng = 0;
+    const coordinates: LatLng[] = [];
+
+    while (index < len) {
+        let shift = 0;
+        let result = 0;
+        let byte = 0;
+        do {
+            byte = encoded.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20 && index < len);
+        const deltaLat = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+        lat += deltaLat;
+
+        shift = 0;
+        result = 0;
+        do {
+            byte = encoded.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20 && index < len);
+        const deltaLng = (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+        lng += deltaLng;
+
+        coordinates.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    }
+
+    return coordinates;
+};
+
+const parseNumeric = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+    if (typeof value === 'string' && value.trim().length > 0) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        return (
+            parseNumeric(record.value) ??
+            parseNumeric(record.amount) ??
+            parseNumeric(record.meters) ??
+            parseNumeric(record.seconds)
+        );
+    }
+
+    return null;
+};
+
+const parseRoutePoint = (value: unknown): LatLng | null => {
+    if (Array.isArray(value) && value.length >= 2) {
+        const first = parseNumeric(value[0]);
+        const second = parseNumeric(value[1]);
+        if (first === null || second === null) return null;
+
+        // Default GeoJSON [lng, lat], fallback to [lat, lng] when obvious.
+        let lng = first;
+        let lat = second;
+        if (Math.abs(first) <= 90 && Math.abs(second) > 90 && Math.abs(second) <= 180) {
+            lat = first;
+            lng = second;
+        }
+        if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+        return { latitude: lat, longitude: lng };
+    }
+
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.coordinates)) {
+        return parseRoutePoint(record.coordinates);
+    }
+
+    const lat = parseNumeric(record.latitude ?? record.lat);
+    const lng = parseNumeric(record.longitude ?? record.lng ?? record.lon ?? record.long);
+    if (lat === null || lng === null) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    return { latitude: lat, longitude: lng };
+};
+
+const parseRouteCoordinates = (value: unknown): LatLng[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => parseRoutePoint(item))
+        .filter((item): item is LatLng => Boolean(item));
+};
+
+const sumLegMetric = (legs: unknown, key: 'distance' | 'duration'): number => {
+    if (!Array.isArray(legs)) return 0;
+    return legs.reduce((sum, leg) => {
+        if (!leg || typeof leg !== 'object') return sum;
+        const record = leg as Record<string, unknown>;
+        const value =
+            key === 'distance'
+                ? parseNumeric(record.distanceMeters ?? record.distance)
+                : parseNumeric(record.durationSeconds ?? record.duration);
+        return sum + Math.max(value ?? 0, 0);
+    }, 0);
+};
+
+const parseDirectionsRoute = (
+    payload: unknown,
+): { coordinates: LatLng[]; distanceMeters: number; durationSeconds: number } | null => {
+    if (!payload || typeof payload !== 'object') return null;
+    const record = payload as Record<string, unknown>;
+
+    const coordinates = parseRouteCoordinates(
+        record.coordinates ??
+        record.routeCoordinates ??
+        record.path ??
+        record.routePath ??
+        record.points ??
+        record.overviewPath ??
+        record.overview_path,
+    );
+    const polylineCandidate =
+        record.overviewPolyline ??
+        (record.overview_polyline as Record<string, unknown> | undefined)?.points ??
+        record.encodedPolyline ??
+        record.routePolyline ??
+        (typeof record.polyline === 'string'
+            ? record.polyline
+            : (record.polyline as Record<string, unknown> | undefined)?.points);
+    const decodedPolyline =
+        typeof polylineCandidate === 'string' ? decodePolyline(polylineCandidate) : [];
+    const normalizedCoordinates =
+        coordinates.length >= 2 ? coordinates : decodedPolyline.length >= 2 ? decodedPolyline : [];
+
+    const distanceMeters =
+        Math.max(
+            parseNumeric(
+                record.totalDistanceMeters ??
+                record.distanceMeters ??
+                record.routeDistanceMeters ??
+                record.distance,
+            ) ?? sumLegMetric(record.legs, 'distance'),
+            0,
+        ) || 0;
+
+    const durationSeconds =
+        Math.max(
+            parseNumeric(
+                record.totalDurationSeconds ??
+                record.durationSeconds ??
+                record.routeDurationSeconds ??
+                record.duration,
+            ) ?? sumLegMetric(record.legs, 'duration'),
+            0,
+        ) || 0;
+
+    return {
+        coordinates: normalizedCoordinates,
+        distanceMeters,
+        durationSeconds,
+    };
+};
+
+const formatLocationLabel = (
+    value: unknown,
+    fallbackCoordinates?: DeliveryGeoPoint | null,
+    fallback = 'Adresse indisponible',
+): string => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+    }
+
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        const addressCandidate =
+            (typeof asRecord.address === 'string' && asRecord.address.trim()) ||
+            (typeof asRecord.formattedAddress === 'string' && asRecord.formattedAddress.trim()) ||
+            (typeof asRecord.label === 'string' && asRecord.label.trim()) ||
+            '';
+        if (addressCandidate) return addressCandidate;
+
+        if (Array.isArray(asRecord.coordinates)) {
+            const [lng, lat] = asRecord.coordinates;
+            const lngNumber = Number(lng);
+            const latNumber = Number(lat);
+            if (
+                Number.isFinite(latNumber) &&
+                Number.isFinite(lngNumber) &&
+                Math.abs(latNumber) <= 90 &&
+                Math.abs(lngNumber) <= 180
+            ) {
+                return `${latNumber.toFixed(5)},${lngNumber.toFixed(5)}`;
+            }
+        }
+    }
+
+    return coordinatesToLabel(fallbackCoordinates) || fallback;
+};
+
 const statusLabel = (status: DeliveryStatusValue): string => {
-    if (status === 'pending') return 'Awaiting driver';
-    if (status === 'assigned') return 'Assigned';
-    if (status === 'at_pickup') return 'At pickup';
-    if (status === 'picked_up' || status === 'in_transit') return 'In transit';
-    if (status === 'at_dropoff') return 'At dropoff';
-    if (status === 'delivered') return 'Delivered';
-    if (status === 'failed') return 'Failed';
-    if (status === 'cancelled') return 'Cancelled';
-    return 'Pending';
+    if (status === 'pending') return 'En attente de livreur';
+    if (status === 'assigned') return 'Assignee';
+    if (status === 'at_pickup') return 'Au point de retrait';
+    if (status === 'picked_up' || status === 'in_transit') return 'En route';
+    if (status === 'at_dropoff') return 'Arrive a destination';
+    if (status === 'delivered') return 'Livree';
+    if (status === 'failed') return 'Echouee';
+    if (status === 'cancelled') return 'Annulee';
+    return 'En attente';
 };
 
 const stepIndex = (status: DeliveryStatusValue): number => {
@@ -121,9 +337,6 @@ const formatDuration = (seconds: number): string => {
     const remain = minutes % 60;
     return remain ? `${hours}h ${remain}m` : `${hours}h`;
 };
-
-const qrImageUrl = (token: string): string =>
-    `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(token)}`;
 
 const normalizePhone = (value: unknown): string | null => {
     if (typeof value !== 'string') return null;
@@ -151,6 +364,7 @@ export default function DriverDeliveryDetailScreen() {
     const deliveryId = (id || '').trim();
     const { user, isAuthenticated, requireAuth } = useAuth();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+    const insets = useSafeAreaInsets();
 
     React.useEffect(() => {
         requireAuth('Vous devez etre connecte pour suivre une livraison.');
@@ -175,6 +389,9 @@ export default function DriverDeliveryDetailScreen() {
     const [scanPickupQr, { isLoading: isScanningPickupQr }] = useScanPickupQrMutation();
     const [driverArriveDropoff, { isLoading: isArrivingDropoff }] = useDriverArriveDropoffMutation();
     const [generateDropoffQr, { isLoading: isGeneratingDropoffQr }] = useGenerateDropoffQrMutation();
+    const [fetchDirections, { isLoading: isRouting }] = useGetDirectionsMutation();
+    const [triggerReverseGeocode, { isFetching: isResolvingAddresses }] = useLazyReverseGeocodeQuery();
+
 
     const [qrModalVisible, setQrModalVisible] = React.useState(false);
     const [qrMode, setQrMode] = React.useState<'scan' | 'display'>('scan');
@@ -187,6 +404,15 @@ export default function DriverDeliveryDetailScreen() {
     const [isCameraVisible, setIsCameraVisible] = React.useState(false);
     const [isRequestingCamera, setIsRequestingCamera] = React.useState(false);
     const [isScanLocked, setIsScanLocked] = React.useState(false);
+    const [routeCoordinates, setRouteCoordinates] = React.useState<LatLng[]>([]);
+    const [routeDistanceMeters, setRouteDistanceMeters] = React.useState(0);
+    const [routeDurationSeconds, setRouteDurationSeconds] = React.useState(0);
+    const [isMapExpanded, setIsMapExpanded] = React.useState(true);
+    const [shouldTrackMarkerViews, setShouldTrackMarkerViews] = React.useState(true);
+    const [resolvedPickupAddress, setResolvedPickupAddress] = React.useState('');
+    const [resolvedDropoffAddress, setResolvedDropoffAddress] = React.useState('');
+    const [pickupAddressLookupDone, setPickupAddressLookupDone] = React.useState(false);
+    const [dropoffAddressLookupDone, setDropoffAddressLookupDone] = React.useState(false);
 
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
     const driverPickupConfirmed = Boolean(
@@ -215,8 +441,46 @@ export default function DriverDeliveryDetailScreen() {
     const driverPoint = parseGeoPoint((tracking?.currentLocation || delivery?.currentLocation) as DeliveryGeoPoint | null | undefined);
     const mapCenter = driverPoint || pickupPoint || dropoffPoint || DEFAULT_MAP_CENTER;
 
-    const pickupLabel = tracking?.pickupLocation || delivery?.pickupLocation || 'Pickup non renseigne';
-    const dropoffLabel = tracking?.deliveryLocation || delivery?.deliveryLocation || 'Dropoff non renseigne';
+    const basePickupLabel = formatLocationLabel(
+        tracking?.pickupLocation ?? delivery?.pickupLocation,
+        (tracking?.pickupCoordinates || delivery?.pickupCoordinates) as DeliveryGeoPoint | null | undefined,
+        'Adresse de retrait indisponible',
+    );
+    const baseDropoffLabel = formatLocationLabel(
+        tracking?.deliveryLocation ?? delivery?.deliveryLocation,
+        (tracking?.deliveryCoordinates || delivery?.deliveryCoordinates) as DeliveryGeoPoint | null | undefined,
+        'Adresse de livraison indisponible',
+    );
+    const pickupLat = pickupPoint?.latitude ?? null;
+    const pickupLng = pickupPoint?.longitude ?? null;
+    const dropoffLat = dropoffPoint?.latitude ?? null;
+    const dropoffLng = dropoffPoint?.longitude ?? null;
+    const pickupBaseIsCoordinates = Boolean(parseCoordinateLabel(basePickupLabel));
+    const dropoffBaseIsCoordinates = Boolean(parseCoordinateLabel(baseDropoffLabel));
+    const shouldResolvePickupAddress = Boolean(
+        pickupLat !== null &&
+        pickupLng !== null &&
+        (!basePickupLabel || pickupBaseIsCoordinates),
+    );
+    const shouldResolveDropoffAddress = Boolean(
+        dropoffLat !== null &&
+        dropoffLng !== null &&
+        (!baseDropoffLabel || dropoffBaseIsCoordinates),
+    );
+    const pickupLabel =
+        resolvedPickupAddress ||
+        (shouldResolvePickupAddress
+            ? pickupAddressLookupDone
+                ? 'Adresse de retrait indisponible'
+                : "Recherche de l'adresse..."
+            : basePickupLabel || 'Adresse de retrait indisponible');
+    const dropoffLabel =
+        resolvedDropoffAddress ||
+        (shouldResolveDropoffAddress
+            ? dropoffAddressLookupDone
+                ? 'Adresse de livraison indisponible'
+                : "Recherche de l'adresse..."
+            : baseDropoffLabel || 'Adresse de livraison indisponible');
 
     const orderPayload = delivery?.orderId && typeof delivery.orderId === 'object' ? (delivery.orderId as Record<string, any>) : null;
     const orderCode = String(orderPayload?._id || deliveryId).slice(-8).toUpperCase();
@@ -225,8 +489,20 @@ export default function DriverDeliveryDetailScreen() {
         : 0;
 
     const route = (tracking?.route || delivery?.route || tracking?.calculatedRoute || delivery?.calculatedRoute || null) as Record<string, any> | null;
-    const distanceMeters = Number(route?.totalDistanceMeters ?? route?.distanceMeters ?? 0);
-    const durationSeconds = Number(route?.totalDurationSeconds ?? route?.durationSeconds ?? 0);
+    const backendDistanceMeters =
+        Math.max(
+            parseNumeric(route?.totalDistanceMeters ?? route?.distanceMeters ?? route?.routeDistanceMeters ?? route?.distance) ??
+            0,
+            0,
+        ) || 0;
+    const backendDurationSeconds =
+        Math.max(
+            parseNumeric(route?.totalDurationSeconds ?? route?.durationSeconds ?? route?.routeDurationSeconds ?? route?.duration) ??
+            0,
+            0,
+        ) || 0;
+    const distanceMeters = routeDistanceMeters > 0 ? routeDistanceMeters : backendDistanceMeters;
+    const durationSeconds = routeDurationSeconds > 0 ? routeDurationSeconds : backendDurationSeconds;
     const earningAmount = Number(orderPayload?.deliveryCost ?? orderPayload?.deliveryFee ?? 0);
     const earningLabel = earningAmount > 0 ? formatCurrencyAmount(earningAmount, orderPayload?.currency || 'CDF') : '--';
 
@@ -236,6 +512,141 @@ export default function DriverDeliveryDetailScreen() {
     const refetchAll = React.useCallback(async () => {
         await Promise.allSettled([refetchDelivery(), refetchTracking()]);
     }, [refetchDelivery, refetchTracking]);
+
+    React.useEffect(() => {
+        const timeout = setTimeout(() => {
+            setShouldTrackMarkerViews(false);
+        }, 700);
+        return () => clearTimeout(timeout);
+    }, []);
+
+    React.useEffect(() => {
+        setResolvedPickupAddress(shouldResolvePickupAddress ? '' : basePickupLabel);
+        setResolvedDropoffAddress(shouldResolveDropoffAddress ? '' : baseDropoffLabel);
+        setPickupAddressLookupDone(!shouldResolvePickupAddress);
+        setDropoffAddressLookupDone(!shouldResolveDropoffAddress);
+
+        if (!shouldResolvePickupAddress && !shouldResolveDropoffAddress) return;
+
+        let cancelled = false;
+        (async () => {
+            const [pickupResponse, dropoffResponse] = await Promise.all([
+                shouldResolvePickupAddress
+                    ? triggerReverseGeocode({
+                        lat: pickupLat as number,
+                        lng: pickupLng as number,
+                        language: 'fr',
+                    })
+                        .unwrap()
+                        .catch(() => null)
+                    : Promise.resolve(null),
+                shouldResolveDropoffAddress
+                    ? triggerReverseGeocode({
+                        lat: dropoffLat as number,
+                        lng: dropoffLng as number,
+                        language: 'fr',
+                    })
+                        .unwrap()
+                        .catch(() => null)
+                    : Promise.resolve(null),
+            ]);
+
+            if (cancelled) return;
+            if (shouldResolvePickupAddress) setPickupAddressLookupDone(true);
+            if (shouldResolveDropoffAddress) setDropoffAddressLookupDone(true);
+
+            const pickupAddress =
+                typeof (pickupResponse as any)?.formattedAddress === 'string'
+                    ? (pickupResponse as any).formattedAddress.trim()
+                    : '';
+            const dropoffAddress =
+                typeof (dropoffResponse as any)?.formattedAddress === 'string'
+                    ? (dropoffResponse as any).formattedAddress.trim()
+                    : '';
+
+            if (pickupAddress) setResolvedPickupAddress(pickupAddress);
+            if (dropoffAddress) setResolvedDropoffAddress(dropoffAddress);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        baseDropoffLabel,
+        basePickupLabel,
+        dropoffLat,
+        dropoffLng,
+        shouldResolveDropoffAddress,
+        shouldResolvePickupAddress,
+        pickupLat,
+        pickupLng,
+        triggerReverseGeocode,
+    ]);
+
+    React.useEffect(() => {
+        if (pickupLat === null || pickupLng === null || dropoffLat === null || dropoffLng === null) {
+            setRouteCoordinates([]);
+            setRouteDistanceMeters(0);
+            setRouteDurationSeconds(0);
+            return;
+        }
+
+        const fallbackRoute = parseDirectionsRoute(route);
+        const fallbackCoordinates = fallbackRoute?.coordinates ?? [];
+        setRouteCoordinates(
+            fallbackCoordinates.length >= 2
+                ? fallbackCoordinates
+                : [
+                    { latitude: pickupLat, longitude: pickupLng },
+                    { latitude: dropoffLat, longitude: dropoffLng },
+                ],
+        );
+        setRouteDistanceMeters(fallbackRoute?.distanceMeters || backendDistanceMeters);
+        setRouteDurationSeconds(fallbackRoute?.durationSeconds || backendDurationSeconds);
+
+        let cancelled = false;
+        const timeout = setTimeout(async () => {
+            try {
+                const response = await fetchDirections({
+                    origin: { lat: pickupLat, lng: pickupLng },
+                    destination: { lat: dropoffLat, lng: dropoffLng },
+                    language: 'fr',
+                }).unwrap();
+                if (cancelled) return;
+
+                const apiRoute = parseDirectionsRoute(
+                    response?.routes?.[0] ?? response?.route ?? response,
+                );
+                const apiCoordinates = apiRoute?.coordinates ?? [];
+                setRouteCoordinates(
+                    apiCoordinates.length >= 2
+                        ? apiCoordinates
+                        : [
+                            { latitude: pickupLat, longitude: pickupLng },
+                            { latitude: dropoffLat, longitude: dropoffLng },
+                        ],
+                );
+                setRouteDistanceMeters(apiRoute?.distanceMeters || backendDistanceMeters);
+                setRouteDurationSeconds(apiRoute?.durationSeconds || backendDurationSeconds);
+            } catch {
+                if (cancelled) return;
+            }
+        }, 320);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timeout);
+        };
+    }, [
+        backendDistanceMeters,
+        backendDurationSeconds,
+        dropoffLat,
+        dropoffLng,
+        fetchDirections,
+        pickupLat,
+        pickupLng,
+        route,
+    ]);
 
     const lastStreamRefreshRef = React.useRef(0);
     const refreshFromStream = React.useCallback(() => {
@@ -321,9 +732,9 @@ export default function DriverDeliveryDetailScreen() {
             await qrAction(payload);
             await refetchAll();
             closeQrModal();
-            Alert.alert('Succes', 'Pickup valide. La livraison a demarre.');
+            Alert.alert('Succes', 'Retrait confirme. La livraison a demarre.');
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible de valider le QR pickup.'));
+            Alert.alert('Erreur', parseError(error, 'Impossible de valider le QR de retrait.'));
         }
     };
 
@@ -344,23 +755,25 @@ export default function DriverDeliveryDetailScreen() {
     };
 
     const primaryAction = canAcceptDelivery
-        ? { label: 'ACCEPT DELIVERY', loading: isAccepting, onPress: () => void runAction(() => acceptDelivery(deliveryId).unwrap(), 'Course acceptee.') }
+        ? { label: 'Accepter la livraison', loading: isAccepting, onPress: () => void runAction(() => acceptDelivery(deliveryId).unwrap(), 'Livraison acceptee.') }
         : canArrivePickup
-          ? { label: 'I ARRIVED AT PICKUP', loading: isArrivingPickup, onPress: () => void runAction(() => driverArrivePickup(deliveryId).unwrap(), 'Arrivee pickup confirmee.') }
-          : canScanPickupQr
-            ? { label: 'SCAN PICKUP QR', loading: isScanningPickupQr, onPress: () => openScanModal({ title: 'Scan QR pickup', caption: 'Scannez le QR vendeur. Ce scan lance la livraison.', inputPlaceholder: 'Code QR pickup', action: (qrData) => scanPickupQr({ id: deliveryId, qrData }).unwrap() }) }
-            : canArriveDropoff
-              ? { label: 'I ARRIVED AT DROPOFF', loading: isArrivingDropoff, onPress: () => void runAction(() => driverArriveDropoff(deliveryId).unwrap(), 'Arrivee dropoff confirmee.') }
-              : canShowDropoffQr
-                ? { label: 'SHOW DELIVERY QR', loading: isGeneratingDropoffQr, onPress: () => void onShowDropoffQr() }
-                : null;
+            ? { label: 'Confirmer arrivee au retrait', loading: isArrivingPickup, onPress: () => void runAction(() => driverArrivePickup(deliveryId).unwrap(), 'Arrivee au retrait confirmee.') }
+            : canScanPickupQr
+                ? { label: 'Scanner le QR de retrait', loading: isScanningPickupQr, onPress: () => openScanModal({ title: 'Scanner le QR de retrait', caption: 'Scannez le QR du vendeur pour demarrer la livraison.', inputPlaceholder: 'Code QR de retrait', action: (qrData) => scanPickupQr({ id: deliveryId, qrData }).unwrap() }) }
+                : canArriveDropoff
+                    ? { label: 'Confirmer arrivee a destination', loading: isArrivingDropoff, onPress: () => void runAction(() => driverArriveDropoff(deliveryId).unwrap(), 'Arrivee a destination confirmee.') }
+                    : canShowDropoffQr
+                        ? { label: 'Afficher le QR de livraison', loading: isGeneratingDropoffQr, onPress: () => void onShowDropoffQr() }
+                        : null;
 
     if (!deliveryId || isLoading) return <LoadingSpinner fullScreen />;
 
     if (!delivery) {
         return (
             <SafeAreaView style={styles.empty} edges={['top', 'bottom']}>
+                <Ionicons name="alert-circle-outline" size={48} color={UI.accent} />
                 <Text style={styles.emptyTitle}>Livraison introuvable</Text>
+                <Text style={styles.emptySubText}>Verifiez l identifiant ou vos permissions.</Text>
                 <TouchableOpacity style={styles.emptyBtn} onPress={() => router.back()}>
                     <Text style={styles.emptyBtnText}>Retour</Text>
                 </TouchableOpacity>
@@ -369,122 +782,339 @@ export default function DriverDeliveryDetailScreen() {
     }
 
     const step = stepIndex(status);
-    const progress = step <= 0 ? 0 : ((step - 1) / (STEP_LABELS.length - 1)) * 100;
     const liveLabel =
         connectionState === 'connected'
-            ? 'LIVE'
+            ? 'En direct'
             : connectionState === 'connecting'
-              ? 'Connecting...'
-              : 'Auto refresh';
+                ? 'Connexion...'
+                : 'Actualisation auto';
 
     return (
         <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-            <View style={styles.header}>
-                <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}><Ionicons name="arrow-back" size={20} color={UI.text} /></TouchableOpacity>
+            {/* Header */}
+            <LinearGradient
+                colors={[Colors.primaryDark, '#1B4C83']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.header}
+            >
+                <TouchableOpacity style={styles.iconBtn} onPress={() => router.back()}>
+                    <Ionicons name="arrow-back" size={20} color={UI.text} />
+                </TouchableOpacity>
                 <View style={styles.headerCenter}>
-                    <Text style={styles.headerTop}>NEW REQUEST</Text>
-                    <Text style={styles.headerTitle}>Order #{orderCode}</Text>
+                    <Text style={styles.headerTitle}>#{orderCode}</Text>
+                    <View style={styles.headerLiveBadge}>
+                        <View style={[styles.headerLiveDot, connectionState === 'connected' && styles.headerLiveDotActive]} />
+                        <Text style={styles.headerLiveText}>{liveLabel}</Text>
+                    </View>
                 </View>
-                <TouchableOpacity style={styles.iconBtn} onPress={() => Alert.alert('Workflow', "Arrive au pickup -> scanner QR vendeur -> la livraison demarre.")}><Ionicons name="help-outline" size={20} color={UI.text} /></TouchableOpacity>
-            </View>
+                {earningAmount > 0 ? (
+                    <View style={styles.earningBadge}>
+                        <Ionicons name="wallet-outline" size={12} color={Colors.primaryDark} />
+                        <Text style={styles.earningBadgeText}>{earningLabel}</Text>
+                    </View>
+                ) : (
+                    <TouchableOpacity style={styles.iconBtn} onPress={() => Alert.alert('Parcours', "Arrivez au retrait, scannez le QR vendeur, puis livrez la commande.")}>
+                        <Ionicons name="help-outline" size={20} color={UI.text} />
+                    </TouchableOpacity>
+                )}
+            </LinearGradient>
 
-            <View style={styles.mapWrap}>
+            {/* Map */}
+            <View style={[styles.mapWrap, !isMapExpanded && styles.mapWrapCollapsed]}>
                 <MapView style={styles.map} {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
                     initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }}>
-                    {pickupPoint ? <Marker coordinate={pickupPoint} pinColor={Colors.accentDark} title="Pickup A" /> : null}
-                    {dropoffPoint ? <Marker coordinate={dropoffPoint} pinColor={Colors.info} title="Dropoff B" /> : null}
-                    {driverPoint ? <Marker coordinate={driverPoint} pinColor={Colors.primaryLight} title="Driver" /> : null}
-                    {pickupPoint && dropoffPoint ? <Polyline coordinates={[pickupPoint, dropoffPoint]} strokeColor={Colors.primaryLight} strokeWidth={3} /> : null}
+                    {pickupPoint ? (
+                        <Marker
+                            coordinate={pickupPoint}
+                            title="Point de retrait"
+                            description={pickupLabel}
+                            anchor={{ x: 0.5, y: 0.5 }}
+                            tracksViewChanges={shouldTrackMarkerViews}
+                            tracksInfoWindowChanges={shouldTrackMarkerViews}
+                        >
+                            <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.accentDark }]}>
+                                <Ionicons name="storefront" size={15} color={Colors.white} />
+                            </View>
+                        </Marker>
+                    ) : null}
+                    {dropoffPoint ? (
+                        <Marker
+                            coordinate={dropoffPoint}
+                            title="Point de livraison"
+                            description={dropoffLabel}
+                            anchor={{ x: 0.5, y: 0.5 }}
+                            tracksViewChanges={shouldTrackMarkerViews}
+                            tracksInfoWindowChanges={shouldTrackMarkerViews}
+                        >
+                            <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.info }]}>
+                                <Ionicons name="location" size={16} color={Colors.white} />
+                            </View>
+                        </Marker>
+                    ) : null}
+                    {driverPoint ? (
+                        <Marker
+                            coordinate={driverPoint}
+                            title="Position livreur"
+                            anchor={{ x: 0.5, y: 0.5 }}
+                            tracksViewChanges={shouldTrackMarkerViews}
+                            tracksInfoWindowChanges={shouldTrackMarkerViews}
+                        >
+                            <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.primaryLight }]}>
+                                <Ionicons name="bicycle" size={15} color={Colors.white} />
+                            </View>
+                        </Marker>
+                    ) : null}
+                    {routeCoordinates.length >= 2 ? (
+                        <>
+                            <Polyline coordinates={routeCoordinates} strokeColor={Colors.white + 'CC'} strokeWidth={7} />
+                            <Polyline coordinates={routeCoordinates} strokeColor={Colors.primaryLight} strokeWidth={4} />
+                        </>
+                    ) : null}
                 </MapView>
+                <TouchableOpacity
+                    style={styles.mapToggleButton}
+                    onPress={() => setIsMapExpanded((value) => !value)}
+                    activeOpacity={0.85}
+                >
+                    <Ionicons
+                        name={isMapExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={15}
+                        color={Colors.primary}
+                    />
+                    <Text style={styles.mapToggleButtonText}>
+                        {isMapExpanded ? 'Replier la carte' : 'Deplier la carte'}
+                    </Text>
+                </TouchableOpacity>
+                {!isMapExpanded ? (
+                    <View style={styles.mapCollapsedHint}>
+                        <Ionicons name="navigate-outline" size={13} color={Colors.primary} />
+                        <Text style={styles.mapCollapsedHintText} numberOfLines={1}>
+                            {statusLabel(status)}
+                        </Text>
+                    </View>
+                ) : null}
+                {isRouting && isMapExpanded ? (
+                    <View style={styles.mapLoadingBadge}>
+                        <Ionicons name="navigate-outline" size={13} color={Colors.primary} />
+                        <Text style={styles.mapLoadingText}>{"Calcul d'itineraire..."}</Text>
+                    </View>
+                ) : null}
             </View>
 
-            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                <View style={styles.card}>
-                    <View style={styles.row}><Text style={styles.cardTitle}>ORDER STATUS: {statusLabel(status).toUpperCase()}</Text><Text style={styles.small}>{liveLabel}</Text></View>
-                    <View style={styles.track}><View style={[styles.fill, { width: `${progress}%` }]} /></View>
-                    <View style={styles.stepsRow}>
-                        {STEP_LABELS.map((label, index) => {
-                            const active = step >= index + 1;
-                            return <Text key={label} style={[styles.stepLabel, active && styles.stepLabelActive]}>{label}</Text>;
+            <ScrollView
+                contentContainerStyle={[
+                    styles.content,
+                    !isMapExpanded && styles.contentCollapsedMap,
+                ]}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Stepper */}
+                <View style={styles.stepperCard}>
+                    <View style={styles.stepperHeaderRow}>
+                        <Text style={styles.stepperTitle}>{statusLabel(status)}</Text>
+                        <View style={styles.stepperStatusBadge}>
+                            <Text style={styles.stepperStatusText}>
+                                Etape {Math.min(step, STEPS.length)}/{STEPS.length}
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.stepperRow}>
+                        {STEPS.map((s, index) => {
+                            const isActive = step >= index + 1;
+                            const isCurrent = step === index + 1;
+                            return (
+                                <React.Fragment key={s.key}>
+                                    {index > 0 && (
+                                        <View style={[styles.stepLine, isActive && styles.stepLineActive]} />
+                                    )}
+                                    <View style={styles.stepItem}>
+                                        <View style={[
+                                            styles.stepCircle,
+                                            isActive && styles.stepCircleActive,
+                                            isCurrent && styles.stepCircleCurrent,
+                                        ]}>
+                                            <Ionicons
+                                                name={s.icon}
+                                                size={14}
+                                                color={isActive ? Colors.primaryDark : UI.muted}
+                                            />
+                                        </View>
+                                        <Text style={[
+                                            styles.stepLabel,
+                                            isActive && styles.stepLabelActive,
+                                        ]}>
+                                            {s.label}
+                                        </Text>
+                                    </View>
+                                </React.Fragment>
+                            );
                         })}
                     </View>
                 </View>
 
+                {/* Metrics */}
                 <View style={styles.metrics}>
-                    <View style={styles.metric}><Text style={styles.metricValue}>{earningLabel}</Text><Text style={styles.metricLabel}>EST. EARNINGS</Text></View>
-                    <View style={styles.metric}><Text style={styles.metricValue}>{formatDistance(distanceMeters)}</Text><Text style={styles.metricLabel}>DISTANCE</Text></View>
-                    <View style={styles.metric}><Text style={styles.metricValue}>{formatDuration(durationSeconds)}</Text><Text style={styles.metricLabel}>DURATION</Text></View>
-                    <View style={styles.metric}><Text style={styles.metricValue}>{itemsCount || '--'}</Text><Text style={styles.metricLabel}>ITEMS</Text></View>
+                    <View style={[styles.metric, styles.metricAccent]}>
+                        <Ionicons name="wallet-outline" size={20} color={UI.accent} />
+                        <Text style={styles.metricValue}>{earningLabel}</Text>
+                        <Text style={styles.metricLabel}>GAIN ESTIME</Text>
+                    </View>
+                    <View style={styles.metric}>
+                        <Ionicons name="navigate-outline" size={20} color={UI.muted} />
+                        <Text style={styles.metricValue}>{formatDistance(distanceMeters)}</Text>
+                        <Text style={styles.metricLabel}>DISTANCE</Text>
+                    </View>
+                    <View style={styles.metric}>
+                        <Ionicons name="timer-outline" size={20} color={UI.muted} />
+                        <Text style={styles.metricValue}>{formatDuration(durationSeconds)}</Text>
+                        <Text style={styles.metricLabel}>DUREE</Text>
+                    </View>
+                    <View style={styles.metric}>
+                        <Ionicons name="cube-outline" size={20} color={UI.muted} />
+                        <Text style={styles.metricValue}>{itemsCount || '--'}</Text>
+                        <Text style={styles.metricLabel}>ARTICLES</Text>
+                    </View>
                 </View>
 
-                <View style={styles.card}>
-                    <Text style={styles.locationTitle}>PICKUP FROM</Text>
-                    <Text style={styles.locationText}>{pickupLabel}</Text>
-                    <TouchableOpacity style={[styles.contactBtn, !sellerPhone && styles.disabled]} disabled={!sellerPhone} onPress={() => void openPhoneCall(sellerPhone, 'vendeur')}>
-                        <Ionicons name="call-outline" size={14} color={UI.accent} /><Text style={styles.contactText}>Contact Seller</Text>
-                    </TouchableOpacity>
-                    <Text style={[styles.locationTitle, { marginTop: Spacing.md }]}>DELIVER TO</Text>
-                    <Text style={styles.locationText}>{dropoffLabel}</Text>
-                    <TouchableOpacity style={[styles.contactBtn, !buyerPhone && styles.disabled]} disabled={!buyerPhone} onPress={() => void openPhoneCall(buyerPhone, 'acheteur')}>
-                        <Ionicons name="chatbubble-ellipses-outline" size={14} color={UI.accent} /><Text style={styles.contactText}>Contact Buyer</Text>
-                    </TouchableOpacity>
+                {/* Addresses Timeline */}
+                <View style={styles.addressCard}>
+                    <View style={styles.addressRow}>
+                        <View style={styles.addressTimeline}>
+                            <View style={styles.addressDotPickup} />
+                            <View style={styles.addressLine} />
+                            <View style={styles.addressDotDropoff} />
+                        </View>
+                        <View style={styles.addressContent}>
+                            <View style={styles.addressBlock}>
+                                <Text style={styles.addressLabel}>RETRAIT</Text>
+                                {isResolvingAddresses ? <Text style={styles.small}>Resolution des adresses...</Text> : null}
+                                <Text style={styles.addressText}>{pickupLabel}</Text>
+                                <TouchableOpacity
+                                    style={[styles.contactBtn, !sellerPhone && styles.disabled]}
+                                    disabled={!sellerPhone}
+                                    onPress={() => void openPhoneCall(sellerPhone, 'vendeur')}
+                                >
+                                    <Ionicons name="call-outline" size={13} color={UI.accent} />
+                                    <Text style={styles.contactText}>Vendeur</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <View style={styles.addressDivider} />
+                            <View style={styles.addressBlock}>
+                                <Text style={styles.addressLabel}>LIVRAISON</Text>
+                                <Text style={styles.addressText}>{dropoffLabel}</Text>
+                                <TouchableOpacity
+                                    style={[styles.contactBtn, !buyerPhone && styles.disabled]}
+                                    disabled={!buyerPhone}
+                                    onPress={() => void openPhoneCall(buyerPhone, 'acheteur')}
+                                >
+                                    <Ionicons name="chatbubble-ellipses-outline" size={13} color={UI.accent} />
+                                    <Text style={styles.contactText}>Acheteur</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
                 </View>
 
+                {/* Scan QR Card */}
                 <TouchableOpacity
-                    style={[styles.scanCard, !canScanPickupQr && styles.disabled]}
+                    style={[styles.scanCard, !canScanPickupQr && styles.scanCardDisabled]}
                     disabled={!canScanPickupQr}
+                    activeOpacity={0.7}
                     onPress={() => openScanModal({
-                        title: 'Scan QR pickup',
-                        caption: 'Scannez le QR vendeur pour confirmer la recuperation et demarrer la livraison.',
-                        inputPlaceholder: 'Code QR pickup vendeur',
+                        title: 'Scanner QR de retrait',
+                        caption: 'Scannez le QR vendeur pour confirmer la recuperation.',
+                        inputPlaceholder: 'Code QR vendeur',
                         action: (qrData) => scanPickupQr({ id: deliveryId, qrData }).unwrap(),
                     })}
                 >
-                    <Ionicons name="scan-outline" size={20} color={!canScanPickupQr ? UI.muted : UI.accent} />
-                    <View style={{ flex: 1 }}>
-                        <Text style={[styles.scanTitle, !canScanPickupQr && { color: UI.muted }]}>Scan QR at Pickup</Text>
-                        <Text style={styles.small}>{canScanPickupQr ? 'Disponible maintenant' : "Disponible apres l'arrivee au pickup"}</Text>
+                    <View style={[styles.scanIconCircle, !canScanPickupQr && styles.scanIconCircleDisabled]}>
+                        <Ionicons name="scan-outline" size={20} color={!canScanPickupQr ? UI.muted : Colors.primaryDark} />
                     </View>
-                    <Ionicons name={!canScanPickupQr ? 'lock-closed-outline' : 'arrow-forward'} size={18} color={!canScanPickupQr ? UI.muted : UI.accent} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.scanTitle, !canScanPickupQr && styles.scanTitleDisabled]}>Scanner le QR de retrait</Text>
+                        <Text style={[styles.scanSubtitle, canScanPickupQr && styles.scanSubtitleActive]}>
+                            {canScanPickupQr ? '● Disponible maintenant' : 'Disponible apres votre arrivee au retrait'}
+                        </Text>
+                    </View>
+                    <View style={[styles.scanArrowCircle, !canScanPickupQr && styles.scanArrowCircleDisabled]}>
+                        <Ionicons name={!canScanPickupQr ? 'lock-closed-outline' : 'arrow-forward'} size={16} color={!canScanPickupQr ? UI.muted : Colors.primaryDark} />
+                    </View>
                 </TouchableOpacity>
             </ScrollView>
 
-            <View style={styles.bottom}>
-                <TouchableOpacity style={[styles.cta, (!primaryAction || primaryAction.loading) && styles.disabled]} disabled={!primaryAction || Boolean(primaryAction.loading)} onPress={() => primaryAction?.onPress()}>
-                    <Text style={styles.ctaText}>{primaryAction?.loading ? 'PROCESSING...' : primaryAction?.label || 'NO ACTION AVAILABLE'}</Text>
-                    <Ionicons name="arrow-forward" size={20} color={Colors.primaryDark} />
+            {/* Bottom CTA */}
+            <View style={[styles.bottom, { paddingBottom: Spacing.lg + insets.bottom }]}>
+                <TouchableOpacity
+                    style={[styles.ctaWrap, (!primaryAction || primaryAction.loading) && styles.disabled]}
+                    disabled={!primaryAction || Boolean(primaryAction.loading)}
+                    onPress={() => primaryAction?.onPress()}
+                    activeOpacity={0.8}
+                >
+                    <LinearGradient
+                        colors={primaryAction ? [UI.accent, UI.accentDark] : [UI.card, UI.card]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.ctaGradient}
+                    >
+                        <Text style={styles.ctaText}>
+                            {primaryAction?.loading ? 'Traitement...' : primaryAction?.label || 'Aucune action disponible'}
+                        </Text>
+                        <Ionicons name="arrow-forward" size={20} color={primaryAction ? Colors.primaryDark : UI.muted} />
+                    </LinearGradient>
                 </TouchableOpacity>
             </View>
 
+            {/* QR Modal */}
             <Modal visible={qrModalVisible} transparent animationType="fade" onRequestClose={closeQrModal}>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalCard}>
-                        <Text style={styles.modalTitle}>{qrTitle}</Text>
-                        <Text style={styles.modalCaption}>{qrCaption}</Text>
-                        {qrMode === 'display' ? (
-                            <>
-                                {qrDisplayToken ? <Image source={{ uri: qrImageUrl(qrDisplayToken) }} style={styles.qrImage} /> : null}
-                                <Text style={styles.qrToken}>{qrDisplayToken}</Text>
-                                <TouchableOpacity style={styles.modalPrimary} onPress={closeQrModal}><Text style={styles.modalPrimaryText}>Close</Text></TouchableOpacity>
-                            </>
-                        ) : (
-                            <>
-                                <TouchableOpacity style={styles.cameraBtn} onPress={() => void openCameraScanner()} disabled={isRequestingCamera}>
-                                    <Ionicons name="camera-outline" size={16} color={Colors.white} />
-                                    <Text style={styles.cameraBtnText}>{isRequestingCamera ? 'Camera permission...' : 'Scan with camera'}</Text>
-                                </TouchableOpacity>
-                                {isCameraVisible ? (
-                                    <View style={styles.cameraWrap}>
-                                        <CameraView style={styles.camera} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={isScanLocked ? undefined : onCameraQrScanned} />
+                        <LinearGradient
+                            colors={[Colors.primaryDark, Colors.primary]}
+                            style={styles.modalHeader}
+                        >
+                            <Ionicons name={qrMode === 'display' ? 'qr-code' : 'scan'} size={22} color={UI.accent} />
+                            <Text style={styles.modalTitle}>{qrTitle}</Text>
+                        </LinearGradient>
+                        <View style={styles.modalBody}>
+                            <Text style={styles.modalCaption}>{qrCaption}</Text>
+                            {qrMode === 'display' ? (
+                                <>
+                                    {qrDisplayToken ? (
+                                        <QrCodeMatrix
+                                            value={qrDisplayToken}
+                                            size={230}
+                                            style={styles.qrImage}
+                                        />
+                                    ) : null}
+                                    <Text style={styles.qrToken}>{qrDisplayToken}</Text>
+                                    <TouchableOpacity style={styles.modalPrimary} onPress={closeQrModal}>
+                                        <Text style={styles.modalPrimaryText}>Fermer</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                <>
+                                    <TouchableOpacity style={styles.cameraBtn} onPress={() => void openCameraScanner()} disabled={isRequestingCamera}>
+                                        <Ionicons name="camera-outline" size={16} color={Colors.white} />
+                                        <Text style={styles.cameraBtnText}>{isRequestingCamera ? 'Demande camera...' : 'Scanner avec la camera'}</Text>
+                                    </TouchableOpacity>
+                                    {isCameraVisible ? (
+                                        <View style={styles.cameraWrap}>
+                                            <CameraView style={styles.camera} facing="back" barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={isScanLocked ? undefined : onCameraQrScanned} />
+                                        </View>
+                                    ) : null}
+                                    <TextInput style={styles.modalInput} value={qrInput} onChangeText={setQrInput} placeholder={qrInputPlaceholder} autoCapitalize="characters" />
+                                    <View style={styles.modalActions}>
+                                        <TouchableOpacity style={styles.modalGhost} onPress={closeQrModal}>
+                                            <Text style={styles.modalGhostText}>Annuler</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity style={styles.modalPrimary} onPress={() => void validateQr()}>
+                                            <Text style={styles.modalPrimaryText}>Valider</Text>
+                                        </TouchableOpacity>
                                     </View>
-                                ) : null}
-                                <TextInput style={styles.modalInput} value={qrInput} onChangeText={setQrInput} placeholder={qrInputPlaceholder} autoCapitalize="characters" />
-                                <View style={styles.modalActions}>
-                                    <TouchableOpacity style={styles.modalGhost} onPress={closeQrModal}><Text style={styles.modalGhostText}>Cancel</Text></TouchableOpacity>
-                                    <TouchableOpacity style={styles.modalPrimary} onPress={() => void validateQr()}><Text style={styles.modalPrimaryText}>Validate</Text></TouchableOpacity>
-                                </View>
-                            </>
-                        )}
+                                </>
+                            )}
+                        </View>
                     </View>
                 </View>
             </Modal>
@@ -494,55 +1124,571 @@ export default function DriverDeliveryDetailScreen() {
 
 const styles = StyleSheet.create({
     screen: { flex: 1, backgroundColor: UI.bg },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
-    iconBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center', backgroundColor: UI.card, borderWidth: 1, borderColor: UI.border },
-    headerCenter: { flex: 1, alignItems: 'center' },
-    headerTop: { color: UI.accent, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.extrabold, letterSpacing: 0.8 },
-    headerTitle: { marginTop: 2, color: UI.text, fontSize: Typography.fontSize.xxl, fontWeight: Typography.fontWeight.extrabold },
-    mapWrap: { height: 260, borderTopWidth: 1, borderTopColor: UI.border, borderBottomWidth: 1, borderBottomColor: UI.border },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: UI.border + '40',
+    },
+    iconBtn: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: UI.card + '80',
+    },
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    headerTitle: {
+        color: UI.text,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.5,
+    },
+    headerLiveBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        marginTop: 3,
+        backgroundColor: UI.card + '60',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 2,
+    },
+    headerLiveDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: UI.muted,
+    },
+    headerLiveDotActive: {
+        backgroundColor: Colors.success,
+    },
+    headerLiveText: {
+        color: UI.muted,
+        fontSize: 10,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    earningBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: UI.accent,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs + 2,
+        ...Shadows.sm,
+    },
+    earningBadgeText: {
+        color: Colors.primaryDark,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    mapWrap: {
+        height: 260,
+        borderBottomWidth: 1,
+        borderBottomColor: UI.border + '40',
+    },
+    mapWrapCollapsed: {
+        height: 178,
+    },
     map: { width: '100%', height: '100%' },
-    content: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: 120, marginTop: -20 },
-    card: { backgroundColor: UI.card, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: UI.border, padding: Spacing.md, ...Shadows.sm },
-    row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: Spacing.sm },
-    cardTitle: { flex: 1, color: UI.accent, fontSize: Typography.fontSize.md, fontWeight: Typography.fontWeight.extrabold },
+    mapToggleButton: {
+        position: 'absolute',
+        top: Spacing.sm,
+        left: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '30',
+        backgroundColor: Colors.white + 'F0',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 5,
+        ...Shadows.sm,
+    },
+    mapToggleButtonText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    mapCollapsedHint: {
+        position: 'absolute',
+        left: Spacing.sm,
+        right: Spacing.sm,
+        bottom: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '30',
+        backgroundColor: Colors.white + 'EC',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    mapCollapsedHintText: {
+        flex: 1,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    mapLoadingBadge: {
+        position: 'absolute',
+        top: Spacing.sm,
+        right: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white + 'F0',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 5,
+        ...Shadows.sm,
+    },
+    mapLoadingText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    mapMarkerBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 2.5,
+        borderColor: Colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.md,
+    },
+    content: { padding: Spacing.lg, gap: Spacing.md, paddingBottom: 130, marginTop: -20 },
+    contentCollapsedMap: { marginTop: -8 },
     small: { color: UI.muted, fontSize: Typography.fontSize.xs },
-    track: { marginTop: Spacing.sm, height: 8, borderRadius: 999, backgroundColor: '#2B649F', overflow: 'hidden' },
-    fill: { height: '100%', backgroundColor: UI.accent },
-    stepsRow: { marginTop: Spacing.sm, flexDirection: 'row', justifyContent: 'space-between' },
-    stepLabel: { color: UI.muted, fontSize: 10, fontWeight: Typography.fontWeight.bold },
-    stepLabelActive: { color: UI.accent },
-    metrics: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.sm },
-    metric: { width: '48%', alignItems: 'center', justifyContent: 'center', backgroundColor: UI.card, borderWidth: 1, borderColor: UI.border, borderRadius: BorderRadius.lg, paddingVertical: Spacing.md },
-    metricValue: { color: UI.text, fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold },
-    metricLabel: { marginTop: 2, color: UI.muted, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold },
-    locationTitle: { color: UI.muted, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.bold },
-    locationText: { marginTop: 2, color: UI.text, fontSize: Typography.fontSize.md, fontWeight: Typography.fontWeight.bold },
-    contactBtn: { marginTop: Spacing.sm, alignSelf: 'flex-start', borderRadius: BorderRadius.full, borderWidth: 1, borderColor: UI.accentDark, backgroundColor: '#2B649F', paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, flexDirection: 'row', alignItems: 'center', gap: 6 },
-    contactText: { color: UI.accent, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.bold },
-    scanCard: { flexDirection: 'row', alignItems: 'center', gap: Spacing.sm, backgroundColor: UI.card, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: UI.border, padding: Spacing.md },
-    scanTitle: { color: UI.accent, fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold },
-    bottom: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: Spacing.lg, backgroundColor: UI.bg + 'F0', borderTopWidth: 1, borderTopColor: UI.border },
-    cta: { minHeight: 56, borderRadius: BorderRadius.lg, backgroundColor: UI.accent, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: Spacing.sm },
-    ctaText: { color: Colors.primaryDark, fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.extrabold },
-    disabled: { opacity: 0.55 },
-    modalOverlay: { flex: 1, backgroundColor: '#00000085', alignItems: 'center', justifyContent: 'center', paddingHorizontal: Spacing.lg },
-    modalCard: { width: '100%', borderRadius: BorderRadius.xl, backgroundColor: Colors.white, padding: Spacing.lg, ...Shadows.lg },
-    modalTitle: { color: Colors.primaryDark, fontSize: Typography.fontSize.xl, fontWeight: Typography.fontWeight.extrabold, textAlign: 'center' },
-    modalCaption: { marginTop: Spacing.xs, color: Colors.gray600, fontSize: Typography.fontSize.sm, textAlign: 'center' },
-    qrImage: { marginTop: Spacing.md, alignSelf: 'center', width: 230, height: 230, borderRadius: BorderRadius.md },
-    qrToken: { marginTop: Spacing.xs, color: Colors.gray700, fontSize: Typography.fontSize.xs, textAlign: 'center' },
-    cameraBtn: { marginTop: Spacing.md, borderRadius: BorderRadius.md, backgroundColor: Colors.primary, paddingVertical: Spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
-    cameraBtnText: { color: Colors.white, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.bold },
-    cameraWrap: { marginTop: Spacing.sm, height: 200, borderRadius: BorderRadius.md, overflow: 'hidden' },
+
+    // Stepper
+    stepperCard: {
+        backgroundColor: UI.card,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: UI.border + '50',
+        padding: Spacing.lg,
+        ...Shadows.md,
+    },
+    stepperHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    stepperTitle: {
+        color: UI.text,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    stepperStatusBadge: {
+        backgroundColor: UI.accent + '28',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+    },
+    stepperStatusText: {
+        color: UI.accent,
+        fontSize: 10,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    stepperRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    stepItem: {
+        alignItems: 'center',
+        gap: 4,
+    },
+    stepCircle: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: '#2B649F',
+        borderWidth: 2,
+        borderColor: UI.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    stepCircleActive: {
+        backgroundColor: UI.accent,
+        borderColor: UI.accentDark,
+    },
+    stepCircleCurrent: {
+        borderColor: Colors.white,
+        borderWidth: 3,
+    },
+    stepLine: {
+        flex: 1,
+        height: 3,
+        backgroundColor: '#2B649F',
+        borderRadius: 2,
+        marginHorizontal: 2,
+    },
+    stepLineActive: {
+        backgroundColor: UI.accent,
+    },
+    stepLabel: {
+        color: UI.muted,
+        fontSize: 9,
+        fontWeight: Typography.fontWeight.bold,
+        textAlign: 'center',
+    },
+    stepLabelActive: {
+        color: UI.accent,
+    },
+
+    // Metrics
+    metrics: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    metric: {
+        width: '47%',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: UI.card,
+        borderWidth: 1,
+        borderColor: UI.border + '50',
+        borderRadius: BorderRadius.xl,
+        paddingVertical: Spacing.md,
+        gap: 4,
+        ...Shadows.sm,
+    },
+    metricAccent: {
+        borderColor: UI.accent + '40',
+        backgroundColor: UI.accent + '10',
+    },
+    metricValue: {
+        color: UI.text,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    metricLabel: {
+        color: UI.muted,
+        fontSize: 9,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.5,
+    },
+
+    // Addresses
+    addressCard: {
+        backgroundColor: UI.card,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: UI.border + '50',
+        padding: Spacing.lg,
+        ...Shadows.md,
+    },
+    addressRow: {
+        flexDirection: 'row',
+    },
+    addressTimeline: {
+        alignItems: 'center',
+        width: 24,
+        marginRight: Spacing.md,
+        paddingTop: 3,
+    },
+    addressDotPickup: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: UI.accent,
+    },
+    addressLine: {
+        width: 2,
+        flex: 1,
+        backgroundColor: UI.border + '80',
+        marginVertical: 4,
+    },
+    addressDotDropoff: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: Colors.success,
+    },
+    addressContent: {
+        flex: 1,
+    },
+    addressBlock: {
+        paddingVertical: Spacing.xs,
+    },
+    addressLabel: {
+        color: UI.muted,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.5,
+        marginBottom: 3,
+    },
+    addressText: {
+        color: UI.text,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        lineHeight: 20,
+    },
+    addressDivider: {
+        height: 1,
+        backgroundColor: UI.border + '40',
+        marginVertical: Spacing.sm,
+    },
+    contactBtn: {
+        marginTop: Spacing.sm,
+        alignSelf: 'flex-start',
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: UI.accent + '40',
+        backgroundColor: UI.accent + '15',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+    },
+    contactText: {
+        color: UI.accent,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+
+    // Scan Card
+    scanCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        backgroundColor: UI.card,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1.5,
+        borderColor: UI.accent + '50',
+        padding: Spacing.lg,
+        ...Shadows.md,
+    },
+    scanCardDisabled: {
+        opacity: 0.55,
+        borderColor: UI.border + '40',
+    },
+    scanIconCircle: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: UI.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    scanIconCircleDisabled: {
+        backgroundColor: '#2B649F',
+    },
+    scanTitle: {
+        color: UI.accent,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    scanTitleDisabled: {
+        color: UI.muted,
+    },
+    scanSubtitle: {
+        color: UI.muted,
+        fontSize: Typography.fontSize.xs,
+        marginTop: 2,
+    },
+    scanSubtitleActive: {
+        color: Colors.success,
+    },
+    scanArrowCircle: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: UI.accent + '25',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    scanArrowCircleDisabled: {
+        backgroundColor: '#2B649F',
+    },
+
+    // Bottom
+    bottom: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        padding: Spacing.lg,
+        backgroundColor: UI.bg + 'F0',
+        borderTopWidth: 1,
+        borderTopColor: UI.border + '40',
+    },
+    ctaWrap: {
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+    },
+    ctaGradient: {
+        minHeight: 58,
+        borderRadius: BorderRadius.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    ctaText: {
+        color: Colors.primaryDark,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    disabled: { opacity: 0.5 },
+
+    // Modal
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: '#000000AA',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: Spacing.lg,
+    },
+    modalCard: {
+        width: '100%',
+        maxWidth: 400,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.white,
+        overflow: 'hidden',
+        ...Shadows.xl,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.lg,
+    },
+    modalTitle: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    modalBody: {
+        padding: Spacing.lg,
+    },
+    modalCaption: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        textAlign: 'center',
+        marginBottom: Spacing.md,
+    },
+    qrImage: {
+        alignSelf: 'center',
+        width: 230,
+        height: 230,
+        borderRadius: BorderRadius.md,
+    },
+    qrToken: {
+        marginTop: Spacing.sm,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        textAlign: 'center',
+    },
+    cameraBtn: {
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary,
+        paddingVertical: Spacing.sm + 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    cameraBtnText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    cameraWrap: {
+        marginTop: Spacing.sm,
+        height: 200,
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+    },
     camera: { width: '100%', height: '100%' },
-    modalInput: { marginTop: Spacing.sm, borderWidth: 1, borderColor: Colors.gray200, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.sm, paddingVertical: Spacing.sm, color: Colors.gray900 },
-    modalActions: { marginTop: Spacing.sm, flexDirection: 'row', gap: Spacing.sm },
-    modalGhost: { flex: 1, borderWidth: 1, borderColor: Colors.gray300, borderRadius: BorderRadius.md, backgroundColor: Colors.gray50, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm },
-    modalGhostText: { color: Colors.gray700, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.bold },
-    modalPrimary: { flex: 1, borderRadius: BorderRadius.md, backgroundColor: Colors.primary, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm },
-    modalPrimaryText: { color: Colors.white, fontSize: Typography.fontSize.sm, fontWeight: Typography.fontWeight.extrabold },
-    empty: { flex: 1, backgroundColor: UI.bg, alignItems: 'center', justifyContent: 'center' },
-    emptyTitle: { color: UI.text, fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold },
-    emptyBtn: { marginTop: Spacing.sm, borderRadius: BorderRadius.md, borderWidth: 1, borderColor: UI.border, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm },
-    emptyBtnText: { color: UI.text, fontWeight: Typography.fontWeight.bold },
+    modalInput: {
+        marginTop: Spacing.sm,
+        borderWidth: 1.5,
+        borderColor: Colors.gray200,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm + 2,
+        color: Colors.gray900,
+        fontSize: Typography.fontSize.sm,
+    },
+    modalActions: {
+        marginTop: Spacing.md,
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    modalGhost: {
+        flex: 1,
+        borderWidth: 1.5,
+        borderColor: Colors.gray300,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 48,
+    },
+    modalGhostText: {
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    modalPrimary: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: 48,
+    },
+    modalPrimaryText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+
+    // Empty
+    empty: {
+        flex: 1,
+        backgroundColor: UI.bg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.md,
+    },
+    emptyTitle: {
+        color: UI.text,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    emptySubText: {
+        color: UI.muted,
+        fontSize: Typography.fontSize.sm,
+        textAlign: 'center',
+    },
+    emptyBtn: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: UI.border,
+        paddingHorizontal: Spacing.xl,
+        paddingVertical: Spacing.sm,
+    },
+    emptyBtnText: {
+        color: UI.text,
+        fontWeight: Typography.fontWeight.bold,
+    },
 });

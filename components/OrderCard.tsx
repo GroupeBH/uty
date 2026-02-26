@@ -5,8 +5,8 @@
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import {
     Order,
+    getOrderItemCurrency,
     getOrderItemName,
-    getOrderItemProduct,
     getOrderPartyName,
 } from '@/types/order';
 import { formatCurrencyAmount } from '@/utils/currency';
@@ -35,9 +35,9 @@ const formatDate = (dateString?: string) => {
 
 const getOrderCurrency = (order: Order) => {
     for (const item of order.items || []) {
-        const product = getOrderItemProduct(item);
-        if (product?.currency) {
-            return product.currency;
+        const currency = getOrderItemCurrency(item);
+        if (currency) {
+            return currency;
         }
     }
     return undefined;

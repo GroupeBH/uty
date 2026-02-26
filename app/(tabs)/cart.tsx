@@ -12,7 +12,7 @@ import { useAddToCartMutation, useCheckoutCartMutation, useClearCartMutation, us
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Announcement } from '@/types/announcement';
-import { Cart as CartType, CartProduct as CartItemType } from '@/types/cart';
+import { CartProduct as CartItemType, Cart as CartType } from '@/types/cart';
 import { formatCurrencyAmount, resolveCurrencyDisplay } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -672,8 +672,8 @@ export default function CartScreen() {
                 <View style={[styles.emptyContainer, { justifyContent: 'center' }]}>
                     <Text style={{ textAlign: 'center' }}>Chargement du panier...</Text>
                 </View>
-                
-        </SafeAreaView>
+
+            </SafeAreaView>
         );
     }
 
@@ -693,8 +693,8 @@ export default function CartScreen() {
                         onPress={() => router.push('/')}
                     />
                 </View>
-                
-        </SafeAreaView>
+
+            </SafeAreaView>
         );
     }
 
@@ -717,18 +717,29 @@ export default function CartScreen() {
                 }}
                 renderSectionHeader={({ section }) => (
                     <View style={styles.sellerHeader}>
-                        <View>
-                            <Text style={styles.sellerTitle}>{section.title}</Text>
-                            <Text style={styles.sellerMeta}>{section.totalQuantity} article(s)</Text>
+                        <View style={styles.sellerHeaderLeft}>
+                            <View style={styles.sellerAvatar}>
+                                <Text style={styles.sellerAvatarText}>
+                                    {(section.title || 'V').charAt(0).toUpperCase()}
+                                </Text>
+                            </View>
+                            <View>
+                                <Text style={styles.sellerTitle}>{section.title}</Text>
+                                <Text style={styles.sellerMeta}>{section.totalQuantity} article(s)</Text>
+                            </View>
                         </View>
-                        <Text style={styles.sellerSubtotal}>
-                            {formatAmount(section.subtotal)}
-                        </Text>
+                        <View style={styles.sellerSubtotalBadge}>
+                            <Text style={styles.sellerSubtotal}>
+                                {formatAmount(section.subtotal)}
+                            </Text>
+                        </View>
                     </View>
                 )}
                 renderSectionFooter={() => (
                     <View style={styles.sellerSummary}>
-                        <Ionicons name="information-circle-outline" size={14} color={Colors.gray500} />
+                        <View style={styles.sellerSummaryIcon}>
+                            <Ionicons name="cube-outline" size={13} color={Colors.primary} />
+                        </View>
                         <Text style={styles.sellerNote}>Livraison calculee sur l ensemble du panier pour ce vendeur.</Text>
                     </View>
                 )}
@@ -788,12 +799,17 @@ export default function CartScreen() {
                         ) : null}
                         <View style={styles.deliveryCard}>
                             <View style={styles.deliveryHeader}>
-                                <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
+                                <View style={styles.deliveryTitleRow}>
+                                    <View style={styles.deliveryPinIcon}>
+                                        <Ionicons name="location" size={16} color={Colors.white} />
+                                    </View>
+                                    <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
+                                </View>
                                 <TouchableOpacity
                                     style={styles.deliveryButton}
                                     onPress={() => setMapVisible(true)}
                                 >
-                                    <Ionicons name="map-outline" size={16} color={Colors.primary} />
+                                    <Ionicons name="map-outline" size={14} color={Colors.white} />
                                     <Text style={styles.deliveryButtonText}>
                                         {deliveryDisplayLabel ? 'Modifier' : 'Choisir'}
                                     </Text>
@@ -802,6 +818,12 @@ export default function CartScreen() {
                             <Text style={styles.deliveryAddressText}>
                                 {deliveryDisplayLabel || 'Aucune adresse selectionnee'}
                             </Text>
+                            {hasDeliveryCoordinates && deliveryModeLabel !== 'En attente' ? (
+                                <View style={styles.deliveryModeBadge}>
+                                    <Ionicons name={deliveryMode === 'walking' ? 'walk-outline' : 'car-outline'} size={12} color={Colors.primary} />
+                                    <Text style={styles.deliveryModeBadgeText}>{deliveryModeLabel}</Text>
+                                </View>
+                            ) : null}
                             <Text style={styles.deliveryHint}>
                                 Le cout est calcule automatiquement selon la distance et la classe de poids.
                             </Text>
@@ -810,26 +832,36 @@ export default function CartScreen() {
                 }
                 ListFooterComponent={
                     <Card style={styles.summaryCard}>
-                        <Text style={styles.summaryTitle}>Recapitulatif</Text>
+                        <View style={styles.summaryTitleRow}>
+                            <Ionicons name="receipt-outline" size={18} color={Colors.primary} />
+                            <Text style={styles.summaryTitle}>Recapitulatif</Text>
+                        </View>
 
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Sous-total</Text>
+                            <View style={styles.summaryLabelRow}>
+                                <Ionicons name="cart-outline" size={14} color={Colors.gray400} />
+                                <Text style={styles.summaryLabel}>Sous-total</Text>
+                            </View>
                             <Text style={styles.summaryValue}>{formatAmount(subtotal)}</Text>
                         </View>
 
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>TVA (20%)</Text>
+                            <View style={styles.summaryLabelRow}>
+                                <Ionicons name="document-text-outline" size={14} color={Colors.gray400} />
+                                <Text style={styles.summaryLabel}>TVA (20%)</Text>
+                            </View>
                             <Text style={styles.summaryValue}>{formatAmount(tax)}</Text>
                         </View>
 
                         <View style={styles.summaryRow}>
-                            <Text style={styles.summaryLabel}>Livraison</Text>
+                            <View style={styles.summaryLabelRow}>
+                                <Ionicons name="bicycle-outline" size={14} color={Colors.gray400} />
+                                <Text style={styles.summaryLabel}>Livraison</Text>
+                            </View>
                             <Text style={styles.summaryValue}>{formatAmount(deliveryCost)}</Text>
                         </View>
 
                         <Text style={styles.deliveryNote}>{deliveryExplanation}</Text>
-
-                        <Text style={styles.deliveryMode}>Mode: {deliveryModeLabel}</Text>
 
                         {currencyNote ? (
                             <Text style={styles.currencyNote}>{currencyNote}</Text>
@@ -837,9 +869,11 @@ export default function CartScreen() {
 
                         <View style={styles.divider} />
 
-                        <View style={styles.summaryRow}>
-                            <Text style={styles.totalLabel}>Total</Text>
-                            <Text style={styles.totalValue}>{formatAmount(total)}</Text>
+                        <View style={styles.totalRow}>
+                            <Text style={styles.totalLabel}>Total a payer</Text>
+                            <View style={styles.totalValueBadge}>
+                                <Text style={styles.totalValue}>{formatAmount(total)}</Text>
+                            </View>
                         </View>
                     </Card>
                 }
@@ -965,37 +999,38 @@ const styles = StyleSheet.create({
     listContent: {
         padding: Spacing.xl,
         paddingTop: Spacing.huge,
-        paddingBottom: 190,
+        paddingBottom: 200,
     },
     heroCard: {
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.xl,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.xxl,
         marginBottom: Spacing.lg,
-        ...Shadows.lg,
+        ...Shadows.xl,
     },
     heroTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.xl,
     },
     heroTitle: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
+        letterSpacing: 0.3,
     },
     heroBadge: {
-        backgroundColor: Colors.white + '33',
+        backgroundColor: Colors.white + '28',
         borderRadius: BorderRadius.full,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
+        paddingVertical: Spacing.xs + 2,
         borderWidth: 1,
-        borderColor: Colors.white + '4D',
+        borderColor: Colors.white + '40',
     },
     heroBadgeText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.white,
-        fontWeight: Typography.fontWeight.semibold,
+        fontWeight: Typography.fontWeight.bold,
     },
     heroBottomRow: {
         flexDirection: 'row',
@@ -1004,12 +1039,15 @@ const styles = StyleSheet.create({
         gap: Spacing.md,
     },
     heroLabel: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.white + 'CC',
-        marginBottom: Spacing.xs / 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.white + 'AA',
+        marginBottom: 2,
+        textTransform: 'uppercase',
+        letterSpacing: 0.6,
+        fontWeight: Typography.fontWeight.semibold,
     },
     heroTotal: {
-        fontSize: Typography.fontSize.xxxl,
+        fontSize: Typography.fontSize.huge,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
@@ -1019,13 +1057,14 @@ const styles = StyleSheet.create({
         gap: Spacing.xs,
         backgroundColor: Colors.accent,
         borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.sm + 2,
+        ...Shadows.sm,
     },
     heroActionText: {
         fontSize: Typography.fontSize.sm,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primaryDark,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     groupedNotice: {
         backgroundColor: Colors.white,
@@ -1033,11 +1072,11 @@ const styles = StyleSheet.create({
         padding: Spacing.lg,
         marginBottom: Spacing.lg,
         borderWidth: 1,
-        borderColor: Colors.borderLight,
+        borderColor: Colors.primary + '15',
         ...Shadows.sm,
     },
     groupedNoticeTitle: {
-        fontSize: Typography.fontSize.lg,
+        fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
         marginBottom: Spacing.xs,
@@ -1045,14 +1084,15 @@ const styles = StyleSheet.create({
     groupedNoticeText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray500,
+        lineHeight: 18,
     },
     sanitizeNotice: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.xs,
-        backgroundColor: Colors.primary + '12',
+        gap: Spacing.sm,
+        backgroundColor: Colors.primary + '0D',
         borderWidth: 1,
-        borderColor: Colors.primary + '30',
+        borderColor: Colors.primary + '22',
         borderRadius: BorderRadius.md,
         paddingHorizontal: Spacing.md,
         paddingVertical: Spacing.sm,
@@ -1065,18 +1105,31 @@ const styles = StyleSheet.create({
     },
     deliveryCard: {
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.md,
+        borderRadius: BorderRadius.lg,
         padding: Spacing.lg,
         marginBottom: Spacing.xl,
         borderWidth: 1,
-        borderColor: Colors.borderLight,
-        ...Shadows.sm,
+        borderColor: Colors.primary + '18',
+        ...Shadows.md,
     },
     deliveryHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.sm,
+        marginBottom: Spacing.md,
+    },
+    deliveryTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    deliveryPinIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     deliveryTitle: {
         fontSize: Typography.fontSize.md,
@@ -1086,36 +1139,50 @@ const styles = StyleSheet.create({
     deliveryButton: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.xs,
+        gap: 4,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
+        paddingVertical: Spacing.xs + 2,
         borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.primary,
+        backgroundColor: Colors.primary,
     },
     deliveryButtonText: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.medium,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.white,
+        fontWeight: Typography.fontWeight.bold,
     },
     deliveryAddressText: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.gray600,
+        fontSize: Typography.fontSize.base,
+        color: Colors.gray700,
         marginBottom: Spacing.xs,
+        fontWeight: Typography.fontWeight.medium,
+        lineHeight: 20,
+    },
+    deliveryModeBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: Colors.primary + '0D',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+        alignSelf: 'flex-start',
+        marginBottom: Spacing.xs,
+    },
+    deliveryModeBadgeText: {
+        fontSize: 10,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
     },
     deliveryHint: {
         fontSize: Typography.fontSize.xs,
         color: Colors.gray400,
+        lineHeight: 16,
     },
     sellerNote: {
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
         flex: 1,
-    },
-    deliveryMode: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.gray500,
-        marginTop: Spacing.xs,
+        lineHeight: 16,
     },
     currencyNote: {
         fontSize: Typography.fontSize.xs,
@@ -1124,36 +1191,75 @@ const styles = StyleSheet.create({
     },
     sellerHeader: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         justifyContent: 'space-between',
         marginBottom: Spacing.md,
-        marginTop: Spacing.xs,
+        marginTop: Spacing.sm,
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        ...Shadows.sm,
+    },
+    sellerHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        flex: 1,
+    },
+    sellerAvatar: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    sellerAvatarText: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
     },
     sellerTitle: {
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.primary,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.gray800,
     },
     sellerMeta: {
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
-        marginTop: Spacing.xs / 2,
+        marginTop: 1,
+    },
+    sellerSubtotalBadge: {
+        backgroundColor: Colors.accent + '1A',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
     },
     sellerSubtotal: {
         fontSize: Typography.fontSize.sm,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
+        color: Colors.accentDark,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     sellerSummary: {
-        backgroundColor: Colors.gray50,
+        backgroundColor: Colors.primary + '08',
         borderRadius: BorderRadius.md,
         padding: Spacing.md,
         borderWidth: 1,
-        borderColor: Colors.borderLight,
+        borderColor: Colors.primary + '12',
         marginBottom: Spacing.xl,
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
+    },
+    sellerSummaryIcon: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: Colors.primary + '15',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     emptyContainer: {
         flex: 1,
@@ -1173,57 +1279,83 @@ const styles = StyleSheet.create({
         color: Colors.gray400,
         textAlign: 'center',
         marginBottom: Spacing.huge,
-        lineHeight: Typography.fontSize.md * 1.5,
+        lineHeight: Typography.fontSize.md * 1.6,
     },
     summaryCard: {
         marginTop: Spacing.sm,
-        padding: Spacing.xl,
-        borderRadius: BorderRadius.lg,
+        padding: Spacing.xxl,
+        borderRadius: BorderRadius.xl,
         backgroundColor: Colors.white,
         ...Shadows.lg,
     },
+    summaryTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        marginBottom: Spacing.xl,
+    },
     summaryTitle: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
-        marginBottom: Spacing.xl,
     },
     summaryRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: Spacing.lg,
+        marginBottom: Spacing.md,
+        paddingBottom: Spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
+    },
+    summaryLabelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
     },
     summaryLabel: {
-        fontSize: Typography.fontSize.md,
-        color: Colors.gray500,
+        fontSize: Typography.fontSize.base,
+        color: Colors.gray600,
         fontWeight: Typography.fontWeight.medium,
     },
     summaryValue: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
+        color: Colors.gray800,
     },
     deliveryNote: {
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.xs,
         color: Colors.gray400,
-        marginBottom: Spacing.lg,
-        marginTop: -Spacing.sm,
+        marginBottom: Spacing.md,
+        marginTop: -Spacing.xs,
+        lineHeight: 16,
     },
     divider: {
         height: 2,
-        backgroundColor: Colors.gray100,
-        marginVertical: Spacing.xl,
+        backgroundColor: Colors.primary + '12',
+        marginVertical: Spacing.lg,
+        borderRadius: 1,
+    },
+    totalRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
     },
     totalLabel: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
+    },
+    totalValueBadge: {
+        backgroundColor: Colors.accent + '20',
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.sm,
     },
     totalValue: {
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.accent,
+        color: Colors.accentDark,
     },
     checkoutButton: {
         flex: 1.25,
@@ -1235,10 +1367,10 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         bottom: 0,
-        backgroundColor: Colors.white + 'F5',
+        backgroundColor: Colors.white + 'F8',
         borderTopWidth: 1,
-        borderTopColor: Colors.borderLight,
-        ...Shadows.lg,
+        borderTopColor: Colors.primary + '15',
+        ...Shadows.xl,
     },
     checkoutBarInner: {
         flexDirection: 'row',
@@ -1248,7 +1380,7 @@ const styles = StyleSheet.create({
         paddingTop: Spacing.md,
         paddingBottom: Spacing.md,
         gap: Spacing.md,
-        minHeight: 88,
+        minHeight: 92,
     },
     checkoutInfo: {
         flex: 0.95,
@@ -1257,19 +1389,23 @@ const styles = StyleSheet.create({
         maxWidth: 190,
     },
     checkoutLabel: {
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        fontWeight: Typography.fontWeight.semibold,
     },
     checkoutValue: {
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
-        lineHeight: 28,
+        lineHeight: 30,
         includeFontPadding: false,
+        marginTop: 2,
     },
     checkoutModalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        backgroundColor: 'rgba(0, 0, 0, 0.55)',
         justifyContent: 'center',
         alignItems: 'center',
         padding: Spacing.xl,
@@ -1283,21 +1419,21 @@ const styles = StyleSheet.create({
         ...Shadows.xl,
     },
     checkoutModalHeader: {
-        paddingHorizontal: Spacing.xl,
-        paddingVertical: Spacing.lg,
+        paddingHorizontal: Spacing.xxl,
+        paddingVertical: Spacing.xl,
     },
     checkoutModalTitle: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.xxl,
         color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
     },
     checkoutModalSubtitle: {
         marginTop: Spacing.xs,
         fontSize: Typography.fontSize.sm,
-        color: Colors.white + 'CC',
+        color: Colors.white + 'BB',
     },
     checkoutModalBody: {
-        padding: Spacing.xl,
+        padding: Spacing.xxl,
         gap: Spacing.md,
         backgroundColor: Colors.gray50,
     },
@@ -1306,29 +1442,32 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         alignItems: 'flex-start',
         gap: Spacing.md,
-        paddingVertical: Spacing.xs,
+        paddingVertical: Spacing.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray200,
     },
     checkoutModalLabel: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray500,
         flex: 1,
+        fontWeight: Typography.fontWeight.medium,
     },
     checkoutModalValue: {
         fontSize: Typography.fontSize.sm,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.gray800,
+        fontWeight: Typography.fontWeight.bold,
         textAlign: 'right',
         flex: 1.4,
         lineHeight: 20,
     },
     checkoutModalTotalLabel: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.lg,
         color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
+        fontWeight: Typography.fontWeight.extrabold,
         flex: 1,
     },
     checkoutModalTotalValue: {
-        fontSize: Typography.fontSize.lg,
+        fontSize: Typography.fontSize.xl,
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.extrabold,
         textAlign: 'right',
@@ -1337,25 +1476,25 @@ const styles = StyleSheet.create({
     checkoutModalActions: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        paddingHorizontal: Spacing.xl,
-        paddingBottom: Spacing.xl,
-        paddingTop: Spacing.sm,
+        gap: Spacing.md,
+        paddingHorizontal: Spacing.xxl,
+        paddingBottom: Spacing.xxl,
+        paddingTop: Spacing.md,
     },
     checkoutModalCancelButton: {
         flex: 1,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
+        borderWidth: 1.5,
+        borderColor: Colors.gray300,
         borderRadius: BorderRadius.md,
         alignItems: 'center',
         justifyContent: 'center',
         height: 52,
-        backgroundColor: Colors.gray50,
+        backgroundColor: Colors.white,
     },
     checkoutModalCancelText: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.base,
         color: Colors.gray600,
-        fontWeight: Typography.fontWeight.semibold,
+        fontWeight: Typography.fontWeight.bold,
     },
     checkoutModalConfirmButton: {
         flex: 1.2,

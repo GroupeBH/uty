@@ -54,12 +54,7 @@ export default function ProfileScreen() {
             ),
         ),
     );
-    const hasSellerRole = Boolean(
-        user?.roles?.some((role) =>
-            ['seller', 'admin'].includes((role || '').toLowerCase()),
-        ),
-    );
-    const sellerSpaceReady = Boolean(hasSellerRole || myShop?._id);
+    const sellerSpaceReady = Boolean(myShop?._id);
 
     const handleLogout = () => {
         setIsLogoutConfirmVisible(true);

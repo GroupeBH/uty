@@ -22,6 +22,10 @@ export const usePushNotifications = () => {
     const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     useEffect(() => {
+        initializeBackgroundPushHandlers();
+    }, []);
+
+    useEffect(() => {
         const resolveDeliveryRoute = (deliveryId: string, data: Record<string, string>) => {
             const roleCandidate =
                 (typeof data.viewerRole === 'string' && data.viewerRole) ||
@@ -137,7 +141,6 @@ export const usePushNotifications = () => {
 
         const bootstrapPush = async () => {
             try {
-                initializeBackgroundPushHandlers();
                 await initializeForegroundPushHandlers();
 
                 const token = await registerForPushNotifications();

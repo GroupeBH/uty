@@ -19,18 +19,31 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const dispatch = useAppDispatch();
     const params = useLocalSearchParams<{ returnUrl?: string; message?: string }>();
 
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
+    const scrollRef = React.useRef<ScrollView | null>(null);
 
     const [login, { isLoading }] = useLoginMutation();
+    const keyboardVerticalOffset = Platform.select({
+        ios: 0,
+        android: Math.max(insets.bottom, 10),
+        default: 0,
+    });
+
+    const scrollToForm = () => {
+        setTimeout(() => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+        }, 120);
+    };
 
     const handleLogin = async () => {
         if (!phone.trim()) {
@@ -94,11 +107,15 @@ export default function LoginScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={keyboardVerticalOffset}
             >
                 <ScrollView
+                    ref={scrollRef}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
                     {/* Header */}
                     <View style={styles.header}>
@@ -142,6 +159,7 @@ export default function LoginScreen() {
                                     style={styles.input}
                                     value={phone}
                                     onChangeText={setPhone}
+                                    onFocus={scrollToForm}
                                     placeholder="Ex: 0812345678"
                                     placeholderTextColor={Colors.gray400}
                                     keyboardType="phone-pad"
@@ -159,6 +177,7 @@ export default function LoginScreen() {
                                     style={styles.input}
                                     value={pin}
                                     onChangeText={setPin}
+                                    onFocus={scrollToForm}
                                     placeholder="4 chiffres"
                                     placeholderTextColor={Colors.gray400}
                                     secureTextEntry={!showPin}
@@ -195,7 +214,7 @@ export default function LoginScreen() {
 
                         {/* Register Link */}
                         <View style={styles.footer}>
-                            <Text style={styles.footerText}>Vous n'avez pas de compte ?</Text>
+                            <Text style={styles.footerText}>Vous n&apos;avez pas de compte ?</Text>
                             <Link href="/(auth)/register" asChild>
                                 <TouchableOpacity>
                                     <Text style={styles.footerLink}>Créer un compte</Text>

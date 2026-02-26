@@ -24,6 +24,8 @@ export const store = configureStore({
                     'api/executeMutation/fulfilled',
                     'api/executeMutation/rejected',
                 ],
+                ignoredPaths: [baseApi.reducerPath],
+                warnAfter: 128,
             },
         }).concat(baseApi.middleware),
 });

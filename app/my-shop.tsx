@@ -148,6 +148,11 @@ export default function MyShopScreen() {
     }, [shop]);
 
     const captureImage = async (field: ImageField) => {
+        if (field === 'logo') {
+            await pickLogoFromLibrary();
+            return;
+        }
+
         const permission = await ImagePicker.requestCameraPermissionsAsync();
         if (permission.status !== 'granted') {
             showAlert('Permission requise', 'Autorisez l acces a la camera pour capturer vos documents.', 'warning');
@@ -155,13 +160,10 @@ export default function MyShopScreen() {
         }
 
         const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsEditing: true,
             quality: 0.8,
-            cameraType:
-                field === 'logo'
-                    ? ImagePicker.CameraType.front
-                    : ImagePicker.CameraType.back,
+            cameraType: ImagePicker.CameraType.back,
         });
         if (result.canceled || !result.assets?.length) return;
 
@@ -174,7 +176,6 @@ export default function MyShopScreen() {
             type,
         };
 
-        if (field === 'logo') setLogo(picked);
         if (field === 'ownerIdCard') setOwnerIdCard(picked);
     };
 
@@ -186,7 +187,7 @@ export default function MyShopScreen() {
         }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsEditing: true,
             quality: 0.9,
             selectionLimit: 1,
@@ -455,7 +456,7 @@ export default function MyShopScreen() {
                                     onPress={startLogoEdit}
                                     activeOpacity={0.85}
                                 >
-                                    <Ionicons name="camera-outline" size={15} color={Colors.white} />
+                                    <Ionicons name="images-outline" size={15} color={Colors.white} />
                                     <Text style={styles.heroLogoButtonText}>
                                         {shop.logo ? 'Modifier logo' : 'Ajouter logo'}
                                     </Text>
@@ -657,32 +658,28 @@ export default function MyShopScreen() {
 
                                         <View style={[styles.kycCaptureCard, !hasKycSelfie && styles.kycCaptureCardDisabled]}>
                                             <View style={styles.kycCaptureHeader}>
-                                                <Text style={styles.kycCaptureTitle}>1. Logo boutique / selfie</Text>
+                                                <Text style={styles.kycCaptureTitle}>1. Logo boutique (galerie)</Text>
                                                 <View style={[styles.kycStatusBadge, hasKycSelfie && styles.kycStatusBadgeDone]}>
                                                     <Text style={[styles.kycStatusText, hasKycSelfie && styles.kycStatusTextDone]}>
-                                                        {hasKycSelfie ? 'Capturee' : 'Requise'}
+                                                        {hasKycSelfie ? 'Ajoute' : 'Requis'}
                                                     </Text>
                                                 </View>
                                             </View>
-                                            <TouchableOpacity style={styles.filePicker} onPress={() => captureImage('logo')} activeOpacity={0.85}>
+                                            <TouchableOpacity style={styles.filePicker} onPress={pickLogoFromLibrary} activeOpacity={0.85}>
                                                 {logo ? (
                                                     <Image source={{ uri: logo.uri }} style={styles.filePreview} />
                                                 ) : shop.logo ? (
                                                     <Image source={{ uri: shop.logo }} style={styles.filePreview} />
                                                 ) : (
                                                     <View style={styles.filePlaceholder}>
-                                                        <Ionicons name="camera-outline" size={24} color={Colors.primary} />
-                                                        <Text style={styles.filePlaceholderText}>Capturer ou ajouter le logo</Text>
+                                                        <Ionicons name="images-outline" size={24} color={Colors.primary} />
+                                                        <Text style={styles.filePlaceholderText}>Joindre le logo depuis la galerie</Text>
                                                     </View>
                                                 )}
                                             </TouchableOpacity>
-                                            <TouchableOpacity style={styles.captureActionButton} onPress={() => captureImage('logo')} activeOpacity={0.85}>
-                                                <Ionicons name={hasKycSelfie ? 'refresh-outline' : 'camera'} size={16} color={Colors.primary} />
-                                                <Text style={styles.captureActionText}>{hasKycSelfie ? 'Reprendre la capture' : 'Capturer maintenant'}</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity style={styles.captureActionSecondary} onPress={pickLogoFromLibrary} activeOpacity={0.85}>
-                                                <Ionicons name="images-outline" size={16} color={Colors.gray600} />
-                                                <Text style={styles.captureActionSecondaryText}>Importer un logo depuis la galerie</Text>
+                                            <TouchableOpacity style={styles.captureActionButton} onPress={pickLogoFromLibrary} activeOpacity={0.85}>
+                                                <Ionicons name={hasKycSelfie ? 'refresh-outline' : 'images-outline'} size={16} color={Colors.primary} />
+                                                <Text style={styles.captureActionText}>{hasKycSelfie ? 'Changer le logo' : 'Choisir dans la galerie'}</Text>
                                             </TouchableOpacity>
                                             {logo ? (
                                                 <TouchableOpacity

@@ -1,14 +1,15 @@
 import { Button } from '@/components/ui/Button';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { QrCodeMatrix } from '@/components/ui/QrCodeMatrix';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
     useAcceptDeliveryMutation,
-    useGenerateDropoffQrMutation,
-    useGeneratePickupQrMutation,
     useDriverArriveDropoffMutation,
     useDriverArrivePickupMutation,
+    useGenerateDropoffQrMutation,
+    useGeneratePickupQrMutation,
     useGetDeliveryMessagesQuery,
     useGetDeliveryQuery,
     useGetDeliveryTrackingQuery,
@@ -18,7 +19,7 @@ import {
     useUpdateDeliveryLocationMutation,
 } from '@/store/api/deliveriesApi';
 import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
-import { useGetDirectionsMutation, useLazyGeocodeQuery } from '@/store/api/googleMapsApi';
+import { useGetDirectionsMutation, useLazyGeocodeQuery, useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     DELIVERY_STATUS_LABELS,
     DeliveryCalculatedRoute,
@@ -30,13 +31,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     Alert,
     Dimensions,
-    Image,
     LayoutAnimation,
     Linking,
     Modal,
@@ -92,13 +92,13 @@ const DELIVERY_STAGE_ORDER: {
     label: string;
     icon: keyof typeof Ionicons.glyphMap;
 }[] = [
-    { key: 'pending', label: 'Demande', icon: 'time-outline' },
-    { key: 'assigned', label: 'Assignee', icon: 'person-outline' },
-    { key: 'at_pickup', label: 'Pickup', icon: 'storefront-outline' },
-    { key: 'in_transit', label: 'Transit', icon: 'car-outline' },
-    { key: 'at_dropoff', label: 'Dropoff', icon: 'location-outline' },
-    { key: 'delivered', label: 'Livree', icon: 'checkmark-circle-outline' },
-];
+        { key: 'pending', label: 'Demande', icon: 'time-outline' },
+        { key: 'assigned', label: 'Assignee', icon: 'person-outline' },
+        { key: 'at_pickup', label: 'Retrait', icon: 'storefront-outline' },
+        { key: 'in_transit', label: 'Transit', icon: 'car-outline' },
+        { key: 'at_dropoff', label: 'Livraison', icon: 'location-outline' },
+        { key: 'delivered', label: 'Livree', icon: 'checkmark-circle-outline' },
+    ];
 
 const hasDeliveryRole = (roles?: string[]) =>
     Boolean(
@@ -108,9 +108,6 @@ const hasDeliveryRole = (roles?: string[]) =>
             ),
         ),
     );
-
-const qrImageUrl = (token: string): string =>
-    `https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(token)}`;
 
 const parseError = (error: any, fallback: string): string =>
     (Array.isArray(error?.data?.message) && String(error.data.message[0])) ||
@@ -148,6 +145,43 @@ const coordinatesToLabel = (value?: DeliveryGeoPoint | null): string => {
     return `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
 };
 
+const formatLocationLabel = (
+    value: unknown,
+    fallbackCoordinates?: DeliveryGeoPoint | null,
+    fallback = '',
+): string => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+    }
+
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        const addressCandidate =
+            (typeof asRecord.address === 'string' && asRecord.address.trim()) ||
+            (typeof asRecord.formattedAddress === 'string' && asRecord.formattedAddress.trim()) ||
+            (typeof asRecord.label === 'string' && asRecord.label.trim()) ||
+            '';
+        if (addressCandidate) return addressCandidate;
+
+        if (Array.isArray(asRecord.coordinates)) {
+            const [lng, lat] = asRecord.coordinates;
+            const lngNumber = Number(lng);
+            const latNumber = Number(lat);
+            if (
+                Number.isFinite(latNumber) &&
+                Number.isFinite(lngNumber) &&
+                Math.abs(latNumber) <= 90 &&
+                Math.abs(lngNumber) <= 180
+            ) {
+                return `${latNumber.toFixed(5)},${lngNumber.toFixed(5)}`;
+            }
+        }
+    }
+
+    return coordinatesToLabel(fallbackCoordinates) || fallback;
+};
+
 const stripHtmlInstruction = (value?: string): string => {
     if (!value) return 'Continuez tout droit';
     const withoutTags = value.replace(/<[^>]*>/g, ' ');
@@ -175,8 +209,8 @@ const haversineMeters = (from: LatLng, to: LatLng): number => {
     const a =
         Math.sin(dLat / 2) ** 2 +
         Math.cos(toRad(from.latitude)) *
-            Math.cos(toRad(to.latitude)) *
-            Math.sin(dLng / 2) ** 2;
+        Math.cos(toRad(to.latitude)) *
+        Math.sin(dLng / 2) ** 2;
     return 2 * 6371000 * Math.asin(Math.sqrt(a));
 };
 
@@ -434,8 +468,8 @@ const parseStepsFromPayload = (payload: Record<string, unknown>): NavigationStep
     const directRawSteps = Array.isArray(payload.routeSteps)
         ? payload.routeSteps
         : Array.isArray(payload.steps)
-          ? payload.steps
-          : [];
+            ? payload.steps
+            : [];
     if (directRawSteps.length > 0) {
         return directRawSteps
             .map((step) => parseNavigationStep(step))
@@ -470,10 +504,10 @@ const parseRoutePayload = (
 
     const coordinates = parseRouteCoordinates(
         record.coordinates ??
-            record.routeCoordinates ??
-            record.path ??
-            record.routePath ??
-            record.points,
+        record.routeCoordinates ??
+        record.path ??
+        record.routePath ??
+        record.points,
     );
     const polylineCandidate =
         record.overviewPolyline ??
@@ -488,17 +522,17 @@ const parseRoutePayload = (
         coordinates.length >= 2
             ? coordinates
             : decodedPolyline.length >= 2
-              ? decodedPolyline
-              : [];
+                ? decodedPolyline
+                : [];
 
     const normalizedSteps = parseStepsFromPayload(record);
 
     const distanceMeters =
         parseNumeric(
             record.distanceMeters ??
-                record.routeDistanceMeters ??
-                record.distance ??
-                record.totalDistanceMeters,
+            record.routeDistanceMeters ??
+            record.distance ??
+            record.totalDistanceMeters,
         ) ??
         (() => {
             const legDistance = sumLegMetric(record.legs, 'distance');
@@ -515,9 +549,9 @@ const parseRoutePayload = (
     const durationSeconds =
         parseNumeric(
             record.durationSeconds ??
-                record.routeDurationSeconds ??
-                record.duration ??
-                record.totalDurationSeconds,
+            record.routeDurationSeconds ??
+            record.duration ??
+            record.totalDurationSeconds,
         ) ??
         (() => {
             const legDuration = sumLegMetric(record.legs, 'duration');
@@ -548,10 +582,10 @@ const parseRoutePayload = (
     const metrics =
         computedDistanceKm > 0 || computedDurationMin > 0 || summary
             ? {
-                  distanceKm: Math.max(computedDistanceKm, 0),
-                  durationMin: Math.max(Math.round(computedDurationMin), 0),
-                  summary,
-              }
+                distanceKm: Math.max(computedDistanceKm, 0),
+                durationMin: Math.max(Math.round(computedDurationMin), 0),
+                summary,
+            }
             : null;
 
     if (normalizedCoordinates.length < 2 && normalizedSteps.length === 0 && !metrics) {
@@ -586,8 +620,8 @@ const extractBackendRoute = (
             typeof record.routePolyline === 'string'
                 ? record.routePolyline
                 : typeof record.overviewPolyline === 'string'
-                  ? record.overviewPolyline
-                  : undefined,
+                    ? record.overviewPolyline
+                    : undefined,
         distanceKm: parseNumeric(record.routeDistanceKm) ?? undefined,
         distanceMeters: parseNumeric(record.routeDistanceMeters) ?? undefined,
         durationMin: parseNumeric(record.routeDurationMin) ?? undefined,
@@ -641,6 +675,11 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const currentUserId = user?._id || '';
     const mapRef = React.useRef<MapView | null>(null);
     const watchRef = React.useRef<Location.LocationSubscription | null>(null);
+    const lastGuidanceCameraRef = React.useRef<{
+        center: LatLng;
+        heading: number;
+        at: number;
+    } | null>(null);
 
     const [qrModalVisible, setQrModalVisible] = React.useState(false);
     const [qrMode, setQrMode] = React.useState<'display' | 'scan'>('scan');
@@ -671,6 +710,11 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const [routeMetrics, setRouteMetrics] = React.useState<RouteMetrics | null>(null);
     const [routeSource, setRouteSource] = React.useState<RouteSource>('none');
     const [routeCost, setRouteCost] = React.useState<{ amount: number; currency: string } | null>(null);
+    const [isMapExpanded, setIsMapExpanded] = React.useState(true);
+    const [resolvedPickupAddress, setResolvedPickupAddress] = React.useState('');
+    const [resolvedDropoffAddress, setResolvedDropoffAddress] = React.useState('');
+    const [pickupAddressLookupDone, setPickupAddressLookupDone] = React.useState(false);
+    const [dropoffAddressLookupDone, setDropoffAddressLookupDone] = React.useState(false);
     const [routeRefreshKey, setRouteRefreshKey] = React.useState(0);
     const [androidDetailsModalVisible, setAndroidDetailsModalVisible] = React.useState(false);
     const [androidDetailsModalType, setAndroidDetailsModalType] = React.useState<'route' | 'timeline'>('route');
@@ -710,6 +754,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const canBeDeliveryPerson = hasDeliveryRole(user?.roles || []);
     const { data: deliveryProfile } = useGetMyDeliveryPersonProfileQuery(undefined, { skip: !canBeDeliveryPerson });
     const [triggerGeocode] = useLazyGeocodeQuery();
+    const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
     const [fetchDirections, { isLoading: isRouting }] = useGetDirectionsMutation();
 
     const [acceptDelivery, { isLoading: isAccepting }] = useAcceptDeliveryMutation();
@@ -735,10 +780,10 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const autoViewerRole: ViewerRole = isAssignedDriver
         ? 'driver'
         : isSeller
-          ? 'seller'
-          : isBuyer
-            ? 'buyer'
-            : 'observer';
+            ? 'seller'
+            : isBuyer
+                ? 'buyer'
+                : 'observer';
     const viewerRole: ViewerRole = forcedViewerRole || autoViewerRole;
 
     const buyerActor = typeof delivery?.buyerId === 'object' ? delivery.buyerId : null;
@@ -811,14 +856,52 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const dropoffCoordinatesKey = Array.isArray(dropoffCoordinatesSource?.coordinates)
         ? dropoffCoordinatesSource.coordinates.join(',')
         : '';
+    const basePickupLabel = formatLocationLabel(
+        tracking?.pickupLocation ?? delivery?.pickupLocation,
+        pickupCoordinatesSource,
+        'Adresse de retrait indisponible',
+    );
+    const baseDropoffLabel = formatLocationLabel(
+        tracking?.deliveryLocation ?? delivery?.deliveryLocation,
+        dropoffCoordinatesSource,
+        'Adresse de livraison indisponible',
+    );
+    const pickupBaseIsCoordinates = Boolean(parseCoordinateString(basePickupLabel));
+    const dropoffBaseIsCoordinates = Boolean(parseCoordinateString(baseDropoffLabel));
+    const pickupResolvePoint =
+        parseGeoPoint(pickupCoordinatesSource) ||
+        (pickupBaseIsCoordinates ? parseCoordinateString(basePickupLabel) : null);
+    const dropoffResolvePoint =
+        parseGeoPoint(dropoffCoordinatesSource) ||
+        (dropoffBaseIsCoordinates ? parseCoordinateString(baseDropoffLabel) : null);
+    const pickupResolveLat = pickupResolvePoint?.latitude ?? null;
+    const pickupResolveLng = pickupResolvePoint?.longitude ?? null;
+    const dropoffResolveLat = dropoffResolvePoint?.latitude ?? null;
+    const dropoffResolveLng = dropoffResolvePoint?.longitude ?? null;
+    const shouldResolvePickupAddress = Boolean(
+        pickupResolveLat !== null &&
+        pickupResolveLng !== null &&
+        (!basePickupLabel || pickupBaseIsCoordinates),
+    );
+    const shouldResolveDropoffAddress = Boolean(
+        dropoffResolveLat !== null &&
+        dropoffResolveLng !== null &&
+        (!baseDropoffLabel || dropoffBaseIsCoordinates),
+    );
     const pickupLabel =
-        tracking?.pickupLocation ||
-        delivery?.pickupLocation ||
-        coordinatesToLabel(pickupCoordinatesSource);
+        resolvedPickupAddress ||
+        (shouldResolvePickupAddress
+            ? pickupAddressLookupDone
+                ? 'Adresse de retrait indisponible'
+                : "Recherche de l'adresse..."
+            : basePickupLabel || 'Adresse de retrait indisponible');
     const dropoffLabel =
-        tracking?.deliveryLocation ||
-        delivery?.deliveryLocation ||
-        coordinatesToLabel(dropoffCoordinatesSource);
+        resolvedDropoffAddress ||
+        (shouldResolveDropoffAddress
+            ? dropoffAddressLookupDone
+                ? 'Adresse de livraison indisponible'
+                : "Recherche de l'adresse..."
+            : baseDropoffLabel || 'Adresse de livraison indisponible');
 
     const trackedDriverPoint = React.useMemo(() => {
         const coords = tracking?.currentLocation?.coordinates || delivery?.currentLocation?.coordinates;
@@ -854,6 +937,69 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             null
         );
     }, [delivery, tracking]);
+
+    React.useEffect(() => {
+        setResolvedPickupAddress(shouldResolvePickupAddress ? '' : basePickupLabel);
+        setResolvedDropoffAddress(shouldResolveDropoffAddress ? '' : baseDropoffLabel);
+        setPickupAddressLookupDone(!shouldResolvePickupAddress);
+        setDropoffAddressLookupDone(!shouldResolveDropoffAddress);
+
+        if (!shouldResolvePickupAddress && !shouldResolveDropoffAddress) return;
+
+        let cancelled = false;
+        (async () => {
+            const [pickupResponse, dropoffResponse] = await Promise.all([
+                shouldResolvePickupAddress
+                    ? triggerReverseGeocode({
+                        lat: pickupResolveLat as number,
+                        lng: pickupResolveLng as number,
+                        language: 'fr',
+                    })
+                        .unwrap()
+                        .catch(() => null)
+                    : Promise.resolve(null),
+                shouldResolveDropoffAddress
+                    ? triggerReverseGeocode({
+                        lat: dropoffResolveLat as number,
+                        lng: dropoffResolveLng as number,
+                        language: 'fr',
+                    })
+                        .unwrap()
+                        .catch(() => null)
+                    : Promise.resolve(null),
+            ]);
+
+            if (cancelled) return;
+            if (shouldResolvePickupAddress) setPickupAddressLookupDone(true);
+            if (shouldResolveDropoffAddress) setDropoffAddressLookupDone(true);
+
+            const pickupAddress =
+                typeof (pickupResponse as any)?.formattedAddress === 'string'
+                    ? (pickupResponse as any).formattedAddress.trim()
+                    : '';
+            const dropoffAddress =
+                typeof (dropoffResponse as any)?.formattedAddress === 'string'
+                    ? (dropoffResponse as any).formattedAddress.trim()
+                    : '';
+
+            if (pickupAddress) setResolvedPickupAddress(pickupAddress);
+            if (dropoffAddress) setResolvedDropoffAddress(dropoffAddress);
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [
+        baseDropoffLabel,
+        basePickupLabel,
+        dropoffResolveLat,
+        dropoffResolveLng,
+        pickupResolveLat,
+        pickupResolveLng,
+        shouldResolveDropoffAddress,
+        shouldResolvePickupAddress,
+        triggerReverseGeocode,
+    ]);
 
     const canShareLiveLocation = isAssignedDriver && isDriverShareStatus(status);
 
@@ -1094,8 +1240,8 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         setIsResolvingPoints(true);
         (async () => {
             const [pickup, dropoff] = await Promise.all([
-                resolvePoint(pickupLabel, pickupDirect),
-                resolvePoint(dropoffLabel, dropoffDirect),
+                resolvePoint(basePickupLabel, pickupDirect),
+                resolvePoint(baseDropoffLabel, dropoffDirect),
             ]);
             if (cancelled) return;
             setPickupPoint(pickup);
@@ -1108,8 +1254,8 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         };
     }, [
         deliveryId,
-        dropoffLabel,
-        pickupLabel,
+        baseDropoffLabel,
+        basePickupLabel,
         pickupCoordinatesKey,
         dropoffCoordinatesKey,
         triggerGeocode,
@@ -1126,7 +1272,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     React.useEffect(() => {
         setRouteCost(
             parseRouteCost(routePayloadForCost) ||
-                parseRouteCost((delivery as any)?.orderId?.deliveryCost),
+            parseRouteCost((delivery as any)?.orderId?.deliveryCost),
         );
     }, [delivery, routePayloadForCost]);
 
@@ -1264,6 +1410,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
 
     React.useEffect(() => {
         if (isGuidanceMode) return;
+        if (!isMapExpanded) return;
         if (!mapRef.current) return;
         const points = [pickupPoint, dropoffPoint, driverPoint].filter(Boolean) as LatLng[];
         if (points.length === 0) return;
@@ -1276,7 +1423,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         }, 250);
 
         return () => clearTimeout(timeout);
-    }, [driverPoint, dropoffPoint, isGuidanceMode, pickupPoint, routeCoordinates.length]);
+    }, [driverPoint, dropoffPoint, isGuidanceMode, isMapExpanded, pickupPoint, routeCoordinates.length]);
 
     React.useEffect(() => {
         if (!driverPoint || routeSteps.length === 0) {
@@ -1299,12 +1446,28 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     }, [driverPoint, routeSteps]);
 
     React.useEffect(() => {
-        if (!isGuidanceMode || !mapRef.current || !driverPoint) {
+        if (!isGuidanceMode || !isMapExpanded || !mapRef.current || !driverPoint) {
             return;
         }
 
         const targetForBearing = activeTargetPoint || routeSteps[activeStepIndex]?.end;
         const heading = targetForBearing ? bearingDegrees(driverPoint, targetForBearing) : 0;
+        const now = Date.now();
+        const previousCamera = lastGuidanceCameraRef.current;
+        if (previousCamera) {
+            const movedMeters = haversineMeters(previousCamera.center, driverPoint);
+            const rawDelta = Math.abs(heading - previousCamera.heading);
+            const headingDelta = Math.min(rawDelta, 360 - rawDelta);
+            const elapsed = now - previousCamera.at;
+            if (movedMeters < 9 && headingDelta < 12 && elapsed < 1000) {
+                return;
+            }
+        }
+        lastGuidanceCameraRef.current = {
+            center: driverPoint,
+            heading,
+            at: now,
+        };
 
         mapRef.current.animateCamera(
             {
@@ -1315,7 +1478,13 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             },
             { duration: 700 },
         );
-    }, [activeStepIndex, activeTargetPoint, driverPoint, isGuidanceMode, routeSteps]);
+    }, [activeStepIndex, activeTargetPoint, driverPoint, isGuidanceMode, isMapExpanded, routeSteps]);
+
+    React.useEffect(() => {
+        if (!isGuidanceMode || !isMapExpanded) {
+            lastGuidanceCameraRef.current = null;
+        }
+    }, [isGuidanceMode, isMapExpanded]);
 
     const recenterMap = React.useCallback(() => {
         if (!mapRef.current) return;
@@ -1450,37 +1619,37 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         routeSource === 'backend'
             ? 'Trajet backend'
             : routeSource === 'google'
-              ? 'Trajet live'
-              : routeSource === 'fallback'
-                ? 'Trajet direct'
-                : 'Trajet en attente';
+                ? 'Trajet live'
+                : routeSource === 'fallback'
+                    ? 'Trajet direct'
+                    : 'Trajet en attente';
     const routeSourceHint =
         routeSource === 'backend'
             ? `Source: ${backendRouteCandidate?.provider === 'tracking' ? 'tracking' : 'delivery'}`
             : routeSource === 'google'
-              ? 'Source: calcul mobile'
-              : routeSource === 'fallback'
-                ? 'Source: ligne directe'
-                : 'Source: --';
+                ? 'Source: calcul mobile'
+                : routeSource === 'fallback'
+                    ? 'Source: ligne directe'
+                    : 'Source: --';
     const etaArrivalLabel =
         routeMetrics && routeMetrics.durationMin > 0
             ? (() => {
-                  const etaDate = new Date();
-                  etaDate.setMinutes(etaDate.getMinutes() + routeMetrics.durationMin);
-                  return etaDate.toLocaleTimeString('fr-FR', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                  });
-              })()
+                const etaDate = new Date();
+                etaDate.setMinutes(etaDate.getMinutes() + routeMetrics.durationMin);
+                return etaDate.toLocaleTimeString('fr-FR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                });
+            })()
             : '--:--';
     const routeSummaryLabel =
         routeMetrics?.summary?.trim() ||
-        (headingToPickup ? 'Vers le point de pickup' : 'Vers le point de livraison');
+        (headingToPickup ? 'Vers le point de retrait' : 'Vers le point de livraison');
     const startPointLabel = isAssignedDriver
         ? 'Ma position actuelle'
         : driverPoint
-        ? `${driverPoint.latitude.toFixed(5)}, ${driverPoint.longitude.toFixed(5)}`
-        : 'Position livreur indisponible';
+            ? `${driverPoint.latitude.toFixed(5)}, ${driverPoint.longitude.toFixed(5)}`
+            : 'Position livreur indisponible';
     const activeInstruction = routeSteps[activeStepIndex];
     const nextInstructions = routeSteps.slice(activeStepIndex + 1, activeStepIndex + 3);
     const instructionDistanceLabel =
@@ -1517,14 +1686,14 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         if (canArrivePickup) {
             actions.push({
                 key: 'arrive-pickup',
-                title: 'Confirmer arrivee pickup',
+                title: 'Confirmer arrivee au retrait',
                 subtitle: 'Le livreur est chez le vendeur',
                 icon: 'storefront-outline',
                 loading: isArrivingPickup,
                 onPress: () =>
                     void runAction(
                         () => driverArrivePickup(deliveryId).unwrap(),
-                        'Arrivee pickup confirmee.',
+                        'Arrivee au retrait confirmee.',
                     ),
             });
         }
@@ -1532,7 +1701,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         if (canSellerShowPickupQr) {
             actions.push({
                 key: 'show-pickup-qr',
-                title: 'Afficher QR pickup',
+                title: 'Afficher QR de retrait',
                 subtitle: 'A montrer au livreur',
                 icon: 'qr-code-outline',
                 loading: isGeneratingPickupQr,
@@ -1544,7 +1713,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             actions.push({
                 key: 'scan-pickup-qr',
                 title: 'Scanner QR vendeur',
-                subtitle: 'Valide le pickup',
+                subtitle: 'Valide le retrait',
                 icon: 'scan-outline',
                 loading: isScanningPickupQr,
                 onPress: () =>
@@ -1560,14 +1729,14 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         if (canArriveDropoff) {
             actions.push({
                 key: 'arrive-dropoff',
-                title: 'Confirmer arrivee dropoff',
+                title: 'Confirmer arrivee a destination',
                 subtitle: 'Le livreur est chez l acheteur',
                 icon: 'location-outline',
                 loading: isArrivingDropoff,
                 onPress: () =>
                     void runAction(
                         () => driverArriveDropoff(deliveryId).unwrap(),
-                        'Arrivee dropoff confirmee.',
+                        'Arrivee a destination confirmee.',
                     ),
             });
         }
@@ -1606,8 +1775,8 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const dropoffFullyConfirmed = buyerDropoffConfirmed && Boolean(
         (tracking?.driverDropoffConfirmed ?? delivery?.driverDropoffConfirmed) === true,
     );
-    const pickupSummaryLabel = pickupFullyConfirmed ? 'Pickup valide' : 'Pickup en attente';
-    const dropoffSummaryLabel = dropoffFullyConfirmed ? 'Dropoff valide' : 'Dropoff en attente';
+    const pickupSummaryLabel = pickupFullyConfirmed ? 'Retrait valide' : 'Retrait en attente';
+    const dropoffSummaryLabel = dropoffFullyConfirmed ? 'Livraison valide' : 'Livraison en attente';
     const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
     const latestMessagePreview = latestMessage?.message?.trim()
         ? latestMessage.message.trim()
@@ -1621,7 +1790,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         },
         {
             key: 'pickup-arrival',
-            label: 'Arrivee pickup',
+            label: 'Arrivee au retrait',
             done: Boolean(delivery?.arrivedAtPickupAt || tracking?.arrivedAtPickupAt),
             at: formatClockTime(tracking?.arrivedAtPickupAt || delivery?.arrivedAtPickupAt || null),
         },
@@ -1633,7 +1802,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         },
         {
             key: 'dropoff-arrival',
-            label: 'Arrivee dropoff',
+            label: 'Arrivee a destination',
             done: Boolean(delivery?.arrivedAtDropoffAt || tracking?.arrivedAtDropoffAt),
             at: formatClockTime(tracking?.arrivedAtDropoffAt || delivery?.arrivedAtDropoffAt || null),
         },
@@ -1649,45 +1818,45 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         status === 'delivered'
             ? 3
             : ['picked_up', 'in_transit', 'at_dropoff'].includes(status)
-              ? 2
-              : ['assigned', 'at_pickup'].includes(status)
-                ? 1
-                : 0;
+                ? 2
+                : ['assigned', 'at_pickup'].includes(status)
+                    ? 1
+                    : 0;
     const buyerFlowProgressPercent = ((buyerFlowIndex + 1) / buyerFlowLabels.length) * 100;
     const buyerHeroTitle =
         status === 'delivered'
             ? 'Livraison confirmee'
             : buyerFlowIndex >= 2
-              ? 'Livreur en route'
-              : buyerFlowIndex === 1
-                ? 'Commande en preparation'
-                : 'Commande confirmee';
+                ? 'Livreur en route'
+                : buyerFlowIndex === 1
+                    ? 'Commande en preparation'
+                    : 'Commande confirmee';
     const sellerProgressPercent =
         status === 'delivered'
             ? 100
             : status === 'at_dropoff'
-              ? 92
-              : status === 'picked_up' || status === 'in_transit'
-                ? 80
-                : status === 'at_pickup'
-                  ? 65
-                  : status === 'assigned'
-                    ? 45
-                    : 25;
+                ? 92
+                : status === 'picked_up' || status === 'in_transit'
+                    ? 80
+                    : status === 'at_pickup'
+                        ? 65
+                        : status === 'assigned'
+                            ? 45
+                            : 25;
     const sellerProgressHint =
         status === 'delivered'
             ? 'Commande remise au client'
             : headingToPickup
-              ? `Pickup estime dans ${durationLabel}`
-              : `Dropoff estime dans ${durationLabel}`;
+                ? `Retrait estime dans ${durationLabel}`
+                : `Livraison estimee dans ${durationLabel}`;
     const rolePrimaryAction = prioritizedStepActions[0] || null;
     const roleSecondaryActions = prioritizedStepActions.slice(1, 3);
     const roleCardBadgeLabel =
         viewerRole === 'driver'
             ? 'Espace livreur'
             : viewerRole === 'seller'
-              ? 'Espace vendeur'
-              : 'Espace acheteur';
+                ? 'Espace vendeur'
+                : 'Espace acheteur';
     const shouldShowRoleStoryboard = viewerRole !== 'observer';
     const openMessagesSection = () => {
         setExpandedSections((prev) => ({ ...prev, messages: true }));
@@ -1741,9 +1910,9 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         <View style={styles.roleJourneyPoint}>
                             <Ionicons name="storefront" size={15} color={Colors.accent} />
                             <View style={styles.roleJourneyTextWrap}>
-                                <Text style={styles.roleJourneyLabel}>Pickup · {sellerDisplayName}</Text>
+                                <Text style={styles.roleJourneyLabel}>Retrait - {sellerDisplayName}</Text>
                                 <Text style={styles.roleJourneyValue} numberOfLines={2}>
-                                    {pickupLabel || 'Point pickup non defini'}
+                                    {pickupLabel || 'Point de retrait non defini'}
                                 </Text>
                             </View>
                         </View>
@@ -1751,9 +1920,9 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         <View style={styles.roleJourneyPoint}>
                             <Ionicons name="location" size={15} color={Colors.accent} />
                             <View style={styles.roleJourneyTextWrap}>
-                                <Text style={styles.roleJourneyLabel}>Dropoff · {buyerDisplayName}</Text>
+                                <Text style={styles.roleJourneyLabel}>Livraison Â· {buyerDisplayName}</Text>
                                 <Text style={styles.roleJourneyValue} numberOfLines={2}>
-                                    {dropoffLabel || 'Point dropoff non defini'}
+                                    {dropoffLabel || 'Point de livraison non defini'}
                                 </Text>
                             </View>
                         </View>
@@ -1860,7 +2029,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
 
                     <View style={styles.roleCodeCard}>
                         <View style={styles.roleCodeTextWrap}>
-                            <Text style={styles.roleCodeLabel}>Code pickup</Text>
+                            <Text style={styles.roleCodeLabel}>Code retrait</Text>
                             <Text style={styles.roleCodeValue}>
                                 {canSellerShowPickupQr
                                     ? `Generez le QR pour ${driverDisplayName}`
@@ -2052,7 +2221,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             </View>
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-                <View style={styles.mapExperienceCard}>
+                <View style={[styles.mapExperienceCard, !isMapExpanded && styles.mapExperienceCardCollapsed]}>
                     <MapView
                         ref={mapRef}
                         style={styles.map}
@@ -2061,13 +2230,45 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         showsUserLocation={isAssignedDriver}
                     >
                         {pickupPoint ? (
-                            <Marker coordinate={pickupPoint} pinColor={Colors.accentDark} title="Point de pickup" description={pickupLabel || undefined} />
+                            <Marker
+                                coordinate={pickupPoint}
+                                title="Point de retrait"
+                                description={pickupLabel || undefined}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                tracksViewChanges={false}
+                                tracksInfoWindowChanges={false}
+                            >
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.accentDark }]}>
+                                    <Ionicons name="storefront" size={15} color={Colors.white} />
+                                </View>
+                            </Marker>
                         ) : null}
                         {dropoffPoint ? (
-                            <Marker coordinate={dropoffPoint} pinColor={Colors.success} title="Point de livraison" description={dropoffLabel || undefined} />
+                            <Marker
+                                coordinate={dropoffPoint}
+                                title="Point de livraison"
+                                description={dropoffLabel || undefined}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                tracksViewChanges={false}
+                                tracksInfoWindowChanges={false}
+                            >
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.success }]}>
+                                    <Ionicons name="location" size={16} color={Colors.white} />
+                                </View>
+                            </Marker>
                         ) : null}
                         {driverPoint ? (
-                            <Marker coordinate={driverPoint} pinColor={Colors.primary} title="Livreur" />
+                            <Marker
+                                coordinate={driverPoint}
+                                title="Position livreur"
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                tracksViewChanges={false}
+                                tracksInfoWindowChanges={false}
+                            >
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.primary }]}>
+                                    <Ionicons name="bicycle" size={15} color={Colors.white} />
+                                </View>
+                            </Marker>
                         ) : null}
                         {routeCoordinates.length >= 2 ? (
                             <>
@@ -2077,6 +2278,23 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         ) : null}
                     </MapView>
 
+                    <TouchableOpacity
+                        style={styles.mapExpandToggle}
+                        onPress={() => setIsMapExpanded((value) => !value)}
+                        activeOpacity={0.9}
+                    >
+                        <Ionicons
+                            name={isMapExpanded ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={Colors.primary}
+                        />
+                        <Text style={styles.mapExpandToggleText}>
+                            {isMapExpanded ? 'Replier la carte' : 'Deplier la carte'}
+                        </Text>
+                    </TouchableOpacity>
+
+                    {isMapExpanded ? (
+                        <>
                     <View style={styles.routePlannerCard}>
                         <View style={styles.routePlannerIcons}>
                             <Ionicons name="radio-button-on" size={12} color={Colors.primaryLight} />
@@ -2090,7 +2308,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                             </Text>
                             <View style={styles.routePlannerDivider} />
                             <Text style={styles.routePlannerLabel}>
-                                {headingToPickup ? 'Point de pickup' : 'Point de livraison'}
+                                {headingToPickup ? 'Point de retrait' : 'Point de livraison'}
                             </Text>
                             <Text style={styles.routePlannerValue} numberOfLines={2}>
                                 {activeTargetLabel || 'Destination non definie'}
@@ -2195,6 +2413,15 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                             <Text style={styles.mapOverlayText}>Resolution des points...</Text>
                         </View>
                     ) : null}
+                        </>
+                    ) : (
+                        <View style={styles.mapCollapsedInfo}>
+                            <Ionicons name="pin-outline" size={14} color={Colors.primary} />
+                            <Text style={styles.mapCollapsedInfoText} numberOfLines={1}>
+                                {activeTargetLabel || 'Carte repliee'}
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
                 {renderRoleStoryboard()}
@@ -2270,93 +2497,93 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
 
                 {!shouldShowRoleStoryboard ? (
                     <>
-                <View style={styles.rideSheetCard}>
-                    <LinearGradient
-                        colors={['#1A4172', '#2561A8']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.rideSheetGradient}
-                    >
-                        <View style={styles.rideSheetTopRow}>
-                            <View style={styles.rideSheetEtaBlock}>
-                                <Text style={styles.rideSheetStatusLabel}>
-                                    {DELIVERY_STATUS_LABELS[status] || status}
-                                </Text>
-                                <Text style={styles.rideSheetEtaValue}>{durationLabel}</Text>
-                                <Text style={styles.rideSheetEtaSub}>Arrivee estimee: {etaArrivalLabel}</Text>
-                            </View>
-                            <View style={styles.rideSheetDistanceBlock}>
-                                <Text style={styles.rideSheetDistanceLabel}>Distance</Text>
-                                <Text style={styles.rideSheetDistanceValue}>{distanceLabel}</Text>
-                                <Text style={styles.rideSheetCostText}>{routeCostLabel}</Text>
-                                <Text style={styles.rideSheetDistanceSub}>
-                                    {routeModeLabel} · {routeSourceHint}
-                                </Text>
-                            </View>
-                        </View>
-
-                        <View style={styles.rideSheetDivider} />
-
-                        <View style={styles.rideStopsRow}>
-                            <View style={styles.rideStopsRail}>
-                                <View style={styles.rideStopDotStart} />
-                                <View style={styles.rideStopRail} />
-                                <View style={styles.rideStopDotEnd} />
-                            </View>
-                            <View style={styles.rideStopsContent}>
-                                <Text style={styles.rideStopLabel}>Depart</Text>
-                                <Text style={styles.rideStopValue} numberOfLines={1}>
-                                    {startPointLabel}
-                                </Text>
-                                <View style={styles.rideStopSeparator} />
-                                <Text style={styles.rideStopLabel}>
-                                    {headingToPickup ? 'Pickup' : 'Livraison'}
-                                </Text>
-                                <Text style={styles.rideStopValue} numberOfLines={2}>
-                                    {activeTargetLabel || 'Destination non definie'}
-                                </Text>
-                            </View>
-                        </View>
-
-                        <View style={styles.rideFooterRow}>
-                            <Text style={styles.rideSummaryText} numberOfLines={1}>
-                                {routeSummaryLabel}
-                            </Text>
-                            <View
-                                style={[
-                                    styles.routeSourcePill,
-                                    routeSource === 'backend' && styles.routeSourcePillBackend,
-                                    routeSource === 'fallback' && styles.routeSourcePillFallback,
-                                ]}
+                        <View style={styles.rideSheetCard}>
+                            <LinearGradient
+                                colors={['#1A4172', '#2561A8']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.rideSheetGradient}
                             >
-                                <Text style={styles.routeSourcePillText}>{routeSourceLabel}</Text>
+                                <View style={styles.rideSheetTopRow}>
+                                    <View style={styles.rideSheetEtaBlock}>
+                                        <Text style={styles.rideSheetStatusLabel}>
+                                            {DELIVERY_STATUS_LABELS[status] || status}
+                                        </Text>
+                                        <Text style={styles.rideSheetEtaValue}>{durationLabel}</Text>
+                                        <Text style={styles.rideSheetEtaSub}>Arrivee estimee: {etaArrivalLabel}</Text>
+                                    </View>
+                                    <View style={styles.rideSheetDistanceBlock}>
+                                        <Text style={styles.rideSheetDistanceLabel}>Distance</Text>
+                                        <Text style={styles.rideSheetDistanceValue}>{distanceLabel}</Text>
+                                        <Text style={styles.rideSheetCostText}>{routeCostLabel}</Text>
+                                        <Text style={styles.rideSheetDistanceSub}>
+                                            {routeModeLabel} Â· {routeSourceHint}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.rideSheetDivider} />
+
+                                <View style={styles.rideStopsRow}>
+                                    <View style={styles.rideStopsRail}>
+                                        <View style={styles.rideStopDotStart} />
+                                        <View style={styles.rideStopRail} />
+                                        <View style={styles.rideStopDotEnd} />
+                                    </View>
+                                    <View style={styles.rideStopsContent}>
+                                        <Text style={styles.rideStopLabel}>Depart</Text>
+                                        <Text style={styles.rideStopValue} numberOfLines={1}>
+                                            {startPointLabel}
+                                        </Text>
+                                        <View style={styles.rideStopSeparator} />
+                                        <Text style={styles.rideStopLabel}>
+                                            {headingToPickup ? 'Retrait' : 'Livraison'}
+                                        </Text>
+                                        <Text style={styles.rideStopValue} numberOfLines={2}>
+                                            {activeTargetLabel || 'Destination non definie'}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.rideFooterRow}>
+                                    <Text style={styles.rideSummaryText} numberOfLines={1}>
+                                        {routeSummaryLabel}
+                                    </Text>
+                                    <View
+                                        style={[
+                                            styles.routeSourcePill,
+                                            routeSource === 'backend' && styles.routeSourcePillBackend,
+                                            routeSource === 'fallback' && styles.routeSourcePillFallback,
+                                        ]}
+                                    >
+                                        <Text style={styles.routeSourcePillText}>{routeSourceLabel}</Text>
+                                    </View>
+                                </View>
+                            </LinearGradient>
+                        </View>
+
+                        <View style={styles.overviewCard}>
+                            <View style={styles.overviewChip}>
+                                <Text style={styles.overviewLabel}>Statut</Text>
+                                <Text style={styles.overviewValue}>{DELIVERY_STATUS_LABELS[status] || status}</Text>
+                            </View>
+                            <View style={styles.overviewChip}>
+                                <Text style={styles.overviewLabel}>ETA</Text>
+                                <Text style={styles.overviewValue}>{durationLabel}</Text>
+                            </View>
+                            <View style={styles.overviewChip}>
+                                <Text style={styles.overviewLabel}>Distance</Text>
+                                <Text style={styles.overviewValue}>{distanceLabel}</Text>
+                            </View>
+                            <View style={styles.overviewChip}>
+                                <Text style={styles.overviewLabel}>Cout trajet</Text>
+                                <Text style={styles.overviewValue}>{routeCostLabel}</Text>
+                            </View>
+                            <View style={styles.overviewChip}>
+                                <Text style={styles.overviewLabel}>Trajet</Text>
+                                <Text style={styles.overviewValue}>{routeSourceLabel}</Text>
                             </View>
                         </View>
-                    </LinearGradient>
-                </View>
-
-                <View style={styles.overviewCard}>
-                    <View style={styles.overviewChip}>
-                        <Text style={styles.overviewLabel}>Statut</Text>
-                        <Text style={styles.overviewValue}>{DELIVERY_STATUS_LABELS[status] || status}</Text>
-                    </View>
-                    <View style={styles.overviewChip}>
-                        <Text style={styles.overviewLabel}>ETA</Text>
-                        <Text style={styles.overviewValue}>{durationLabel}</Text>
-                    </View>
-                    <View style={styles.overviewChip}>
-                        <Text style={styles.overviewLabel}>Distance</Text>
-                        <Text style={styles.overviewValue}>{distanceLabel}</Text>
-                    </View>
-                    <View style={styles.overviewChip}>
-                        <Text style={styles.overviewLabel}>Cout trajet</Text>
-                        <Text style={styles.overviewValue}>{routeCostLabel}</Text>
-                    </View>
-                    <View style={styles.overviewChip}>
-                        <Text style={styles.overviewLabel}>Trajet</Text>
-                        <Text style={styles.overviewValue}>{routeSourceLabel}</Text>
-                    </View>
-                </View>
                     </>
                 ) : null}
 
@@ -2439,8 +2666,29 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                             {routeSource === 'backend'
                                                 ? 'Sync backend'
                                                 : isRouting
-                                                  ? 'Calcul...'
-                                                  : 'Recalculer'}
+                                                    ? 'Calcul...'
+                                                    : 'Recalculer'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.mapFoldButton,
+                                            !isMapExpanded && styles.mapFoldButtonCollapsed,
+                                        ]}
+                                        onPress={() => setIsMapExpanded((value) => !value)}
+                                    >
+                                        <Ionicons
+                                            name={isMapExpanded ? 'contract-outline' : 'expand-outline'}
+                                            size={14}
+                                            color={isMapExpanded ? Colors.primary : Colors.white}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.mapFoldButtonText,
+                                                !isMapExpanded && styles.mapFoldButtonTextCollapsed,
+                                            ]}
+                                        >
+                                            {isMapExpanded ? 'Replier' : 'Deplier'}
                                         </Text>
                                     </TouchableOpacity>
                                 </View>
@@ -2526,7 +2774,8 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                             <View style={styles.accordionTextWrap}>
                                 <Text style={styles.accordionTitle}>Progression</Text>
                                 <Text style={styles.accordionSubtitle}>
-                                    Etapes de validation pickup/dropoff
+                                    Etapes de validation retrait/livraison
+
                                 </Text>
                             </View>
                         </View>
@@ -2627,7 +2876,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                 <Button title="Accepter livraison" variant="secondary" loading={isAccepting} onPress={() => runAction(() => acceptDelivery(deliveryId).unwrap(), 'Livraison acceptee.')} style={styles.actionBtn} />
                             ) : null}
                             {canArrivePickup ? (
-                                <Button title="Arrive pickup" variant="secondary" loading={isArrivingPickup} onPress={() => runAction(() => driverArrivePickup(deliveryId).unwrap(), 'Arrivee pickup confirmee.')} style={styles.actionBtn} />
+                                <Button title="Arrivee au retrait" variant="secondary" loading={isArrivingPickup} onPress={() => runAction(() => driverArrivePickup(deliveryId).unwrap(), 'Arrivee au retrait confirmee.')} style={styles.actionBtn} />
                             ) : null}
                             {canSellerShowPickupQr ? (
                                 <Button
@@ -2653,7 +2902,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                 />
                             ) : null}
                             {canArriveDropoff ? (
-                                <Button title="Arrive dropoff" variant="secondary" loading={isArrivingDropoff} onPress={() => runAction(() => driverArriveDropoff(deliveryId).unwrap(), 'Arrivee dropoff confirmee.')} style={styles.actionBtn} />
+                                <Button title="Arrivee a destination" variant="secondary" loading={isArrivingDropoff} onPress={() => runAction(() => driverArriveDropoff(deliveryId).unwrap(), 'Arrivee a destination confirmee.')} style={styles.actionBtn} />
                             ) : null}
                             {canDriverShowDropoffQr ? (
                                 <Button
@@ -2774,7 +3023,11 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         {qrDisplayToken ? (
                             <View style={styles.qrBlock}>
                                 <Text style={styles.qrLabel}>Votre QR a presenter</Text>
-                                <Image source={{ uri: qrImageUrl(qrDisplayToken) }} style={styles.qrImage} />
+                                <QrCodeMatrix
+                                    value={qrDisplayToken}
+                                    size={170}
+                                    style={styles.qrImage}
+                                />
                                 <Text style={styles.qrCode}>{qrDisplayToken}</Text>
                             </View>
                         ) : null}
@@ -2924,35 +3177,35 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.lg,
         paddingTop: Spacing.md,
         paddingBottom: Spacing.md,
-        backgroundColor: Colors.white + 'E8',
+        backgroundColor: Colors.white + 'F4',
         borderBottomWidth: 1,
-        borderBottomColor: Colors.white + 'CC',
+        borderBottomColor: Colors.primary + '15',
     },
     headerButton: {
-        width: 38,
-        height: 38,
+        width: 40,
+        height: 40,
         borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
+        borderWidth: 1.5,
+        borderColor: Colors.primary + '18',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.white + 'F2',
+        backgroundColor: Colors.white,
     },
     headerBody: { flex: 1 },
-    headerTitle: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold, color: Colors.primary },
-    headerSubtitle: { fontSize: Typography.fontSize.sm, color: Colors.gray500 },
-    content: { paddingHorizontal: Spacing.lg, gap: Spacing.md, paddingBottom: 112 },
+    headerTitle: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold, color: Colors.primary, letterSpacing: 0.3 },
+    headerSubtitle: { fontSize: Typography.fontSize.sm, color: Colors.gray500, marginTop: 1 },
+    content: { paddingHorizontal: Spacing.lg, gap: Spacing.md, paddingBottom: 120 },
     overviewCard: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: Spacing.sm,
         marginTop: Spacing.xs,
-        backgroundColor: Colors.white + 'E8',
-        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
         borderWidth: 1,
-        borderColor: Colors.white,
-        padding: Spacing.sm,
-        ...Shadows.sm,
+        borderColor: Colors.primary + '10',
+        padding: Spacing.md,
+        ...Shadows.md,
     },
     overviewChip: {
         minWidth: 88,
@@ -2977,20 +3230,67 @@ const styles = StyleSheet.create({
     mapExperienceCard: {
         marginTop: Spacing.sm,
         height: MAP_DOMINANT_HEIGHT,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.xl + 4,
         overflow: 'hidden',
         backgroundColor: '#DCE8FB',
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         ...Shadows.lg,
+    },
+    mapExperienceCardCollapsed: {
+        height: 210,
+    },
+    mapExpandToggle: {
+        position: 'absolute',
+        top: Spacing.sm,
+        right: Spacing.sm,
+        zIndex: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '2C',
+        backgroundColor: Colors.white + 'F0',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
+    },
+    mapExpandToggleText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    mapCollapsedInfo: {
+        position: 'absolute',
+        left: Spacing.sm,
+        right: Spacing.sm,
+        bottom: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '24',
+        backgroundColor: Colors.white + 'F2',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    mapCollapsedInfoText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     roleStoryboardCard: {
         marginTop: -Spacing.xxl,
         marginHorizontal: Spacing.xs,
-        borderRadius: BorderRadius.xl,
-        borderWidth: 1,
-        borderColor: Colors.primary + '45',
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.md,
-        gap: Spacing.sm,
+        borderRadius: BorderRadius.xl + 2,
+        borderWidth: 1.5,
+        borderColor: Colors.primary + '38',
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.lg,
+        gap: Spacing.md,
         ...Shadows.lg,
     },
     roleStoryboardDriver: {
@@ -3038,15 +3338,15 @@ const styles = StyleSheet.create({
     roleMetricsRow: {
         flexDirection: 'row',
         alignItems: 'stretch',
-        gap: Spacing.xs,
+        gap: Spacing.sm,
     },
     roleMetricTile: {
         flex: 1,
-        minHeight: 72,
-        borderRadius: BorderRadius.md,
+        minHeight: 76,
+        borderRadius: BorderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.white + '2F',
-        backgroundColor: Colors.white + '12',
+        borderColor: Colors.white + '25',
+        backgroundColor: Colors.white + '14',
         paddingHorizontal: Spacing.sm,
         paddingVertical: Spacing.sm,
         justifyContent: 'space-between',
@@ -3058,7 +3358,7 @@ const styles = StyleSheet.create({
     },
     roleMetricValue: {
         marginTop: 4,
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.lg,
         color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
     },
@@ -3263,11 +3563,11 @@ const styles = StyleSheet.create({
     priorityActionsCard: {
         marginTop: Spacing.sm,
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
+        borderRadius: BorderRadius.xl,
         borderWidth: 1,
-        borderColor: Colors.white,
-        padding: Spacing.md,
-        gap: Spacing.sm,
+        borderColor: Colors.primary + '10',
+        padding: Spacing.lg,
+        gap: Spacing.md,
         ...Shadows.md,
     },
     priorityActionsHeader: {
@@ -3304,11 +3604,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: Spacing.sm,
-        borderRadius: BorderRadius.md,
+        borderRadius: BorderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.gray100,
-        backgroundColor: Colors.gray50,
-        padding: Spacing.sm,
+        borderColor: Colors.primary + '12',
+        backgroundColor: Colors.primary + '05',
+        padding: Spacing.md,
     },
     priorityActionInfo: {
         flex: 1,
@@ -3317,12 +3617,12 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
     },
     priorityActionIcon: {
-        width: 32,
-        height: 32,
-        borderRadius: BorderRadius.full,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         borderWidth: 1,
-        borderColor: Colors.primary + '26',
-        backgroundColor: Colors.primary + '10',
+        borderColor: Colors.primary + '20',
+        backgroundColor: Colors.primary + '12',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -3534,6 +3834,16 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
     },
     map: { width: '100%', height: '100%' },
+    mapMarkerBadge: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        borderWidth: 2.5,
+        borderColor: Colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.md,
+    },
     routePlannerCard: {
         position: 'absolute',
         top: Spacing.sm,
@@ -3598,12 +3908,12 @@ const styles = StyleSheet.create({
     stageChipText: { color: Colors.gray500, fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold },
     stageChipTextDone: { color: Colors.white },
     accordionCard: {
-        borderRadius: BorderRadius.lg,
+        borderRadius: BorderRadius.xl,
         borderWidth: 1,
-        borderColor: Colors.white,
-        backgroundColor: Colors.white + 'EC',
+        borderColor: Colors.primary + '10',
+        backgroundColor: Colors.white + 'F5',
         overflow: 'hidden',
-        ...Shadows.sm,
+        ...Shadows.md,
     },
     accordionHeader: {
         minHeight: 74,
@@ -3765,6 +4075,29 @@ const styles = StyleSheet.create({
     mapModeButtonTextActive: { color: Colors.white },
     mapRefreshButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: Spacing.sm, paddingVertical: 5, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.gray200, backgroundColor: Colors.gray50 },
     mapRefreshText: { fontSize: Typography.fontSize.xs, fontWeight: Typography.fontWeight.semibold, color: Colors.primary },
+    mapFoldButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 5,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '35',
+        backgroundColor: Colors.primary + '12',
+    },
+    mapFoldButtonCollapsed: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    mapFoldButtonText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.primary,
+    },
+    mapFoldButtonTextCollapsed: {
+        color: Colors.white,
+    },
     mapOverlayInfo: { position: 'absolute', top: 122, left: Spacing.sm, right: Spacing.sm, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.primary + '30', backgroundColor: Colors.white + 'F5', paddingHorizontal: Spacing.sm, paddingVertical: 6 },
     mapOverlayText: { fontSize: Typography.fontSize.xs, color: Colors.primary, fontWeight: Typography.fontWeight.semibold },
     guidanceTopCard: {
@@ -3789,15 +4122,15 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: Spacing.sm,
         top: 218,
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
+        width: 46,
+        height: 46,
+        borderRadius: 23,
+        borderWidth: 1.5,
+        borderColor: Colors.primary + '18',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.white + 'F5',
-        ...Shadows.md,
+        backgroundColor: Colors.white,
+        ...Shadows.lg,
     },
     guidanceBottomCard: {
         position: 'absolute',
@@ -3860,7 +4193,7 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontWeight: Typography.fontWeight.bold,
     },
-    card: { backgroundColor: Colors.white, borderRadius: BorderRadius.lg, borderWidth: 1, borderColor: Colors.white, padding: Spacing.md, ...Shadows.sm },
+    card: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, borderWidth: 1, borderColor: Colors.primary + '10', padding: Spacing.lg, ...Shadows.md },
     infoText: { fontSize: Typography.fontSize.sm, color: Colors.gray600, marginBottom: 2 },
     actionBtn: { marginBottom: Spacing.sm },
     qrBlock: { marginTop: Spacing.sm, alignItems: 'center', borderWidth: 1, borderColor: Colors.borderLight, borderRadius: BorderRadius.md, backgroundColor: Colors.gray50, padding: Spacing.sm, width: '100%' },

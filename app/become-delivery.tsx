@@ -6,7 +6,10 @@ import { useBecomeDeliveryPersonMutation } from '@/store/api/deliveryPersonsApi'
 import { useGetMyKycEligibilityQuery, useGetMyKycQuery } from '@/store/api/usersApi';
 import { useAppDispatch } from '@/store/hooks';
 import { setUser } from '@/store/slices/authSlice';
+import { KycIdType } from '@/types/kyc';
+import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -15,6 +18,7 @@ import {
     ActivityIndicator,
     Image,
     KeyboardAvoidingView,
+    Modal,
     Platform,
     ScrollView,
     StyleSheet,
@@ -25,6 +29,7 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Camera as VisionCamera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 
 type VehicleType = 'motorcycle' | 'bicycle' | 'car';
 type AlertType = 'success' | 'error' | 'info' | 'warning';
@@ -42,6 +47,13 @@ const DELIVERY_STEPS = [
     { id: 3, title: 'Vehicule', icon: 'bicycle-outline' as const },
 ];
 
+const KYC_ID_OPTIONS: { label: string; value: KycIdType }[] = [
+    { label: 'Carte nationale', value: 'national_id' },
+    { label: 'Passeport', value: 'passport' },
+    { label: 'Permis de conduire', value: 'driver_license' },
+    { label: 'Carte electeur', value: 'voter_card' },
+];
+
 export default function BecomeDeliveryScreen() {
     const router = useRouter();
     const dispatch = useAppDispatch();
@@ -55,8 +67,16 @@ export default function BecomeDeliveryScreen() {
     const [step, setStep] = React.useState(1);
     const [profileImageUrl, setProfileImageUrl] = React.useState<string>((user?.image || '').trim());
     const [profileImagePreview, setProfileImagePreview] = React.useState<string>((user?.image || '').trim());
+    const [profileImageLocalUri, setProfileImageLocalUri] = React.useState('');
     const [isCapturingProfileImage, setIsCapturingProfileImage] = React.useState(false);
+    const [cameraModalVisible, setCameraModalVisible] = React.useState(false);
+    const [cameraReady, setCameraReady] = React.useState(false);
     const [kycModalVisible, setKycModalVisible] = React.useState(false);
+    const [kycFullName, setKycFullName] = React.useState(
+        `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim(),
+    );
+    const [kycIdType, setKycIdType] = React.useState<KycIdType>('national_id');
+    const [kycIdNumber, setKycIdNumber] = React.useState('');
     const [deliveryLookupId, setDeliveryLookupId] = React.useState('');
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
@@ -69,6 +89,12 @@ export default function BecomeDeliveryScreen() {
         message: '',
         type: 'info',
     });
+    const cameraRef = React.useRef<VisionCamera | null>(null);
+    const { hasPermission: hasCameraPermission, requestPermission: requestCameraPermission } =
+        useCameraPermission();
+    const frontCameraDevice = useCameraDevice('front');
+    const backCameraDevice = useCameraDevice('back');
+    const cameraDevice = frontCameraDevice ?? backCameraDevice;
 
     const { data: kycEligibility, refetch: refetchKycEligibility, isFetching: isCheckingKyc } =
         useGetMyKycEligibilityQuery(undefined, { skip: !user?._id });
@@ -89,6 +115,12 @@ export default function BecomeDeliveryScreen() {
         setProfileImagePreview((prev) => prev || incomingImage);
     }, [user?.image]);
 
+    React.useEffect(() => {
+        const nextFullName = `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim();
+        if (!nextFullName) return;
+        setKycFullName((prev) => prev || nextFullName);
+    }, [user]);
+
     const hasDeliveryRole = React.useMemo(
         () =>
             Boolean(
@@ -106,6 +138,20 @@ export default function BecomeDeliveryScreen() {
             message,
             type,
         });
+    };
+
+    const openKycModal = () => {
+        if (!kycFullName.trim()) {
+            showAlert('Identite requise', 'Renseignez le nom complet avant de lancer le KYC.', 'warning');
+            return;
+        }
+
+        if (!kycIdNumber.trim()) {
+            showAlert('Numero requis', 'Renseignez le numero du document avant de lancer le KYC.', 'warning');
+            return;
+        }
+
+        setKycModalVisible(true);
     };
 
     const parseApiErrorMessage = (error: any, fallback: string) => {
@@ -134,11 +180,11 @@ export default function BecomeDeliveryScreen() {
                 'Vous devez d abord valider votre KYC pour continuer.',
                 'warning',
             );
-            setKycModalVisible(true);
+            openKycModal();
             return false;
         }
 
-        if (step === 2 && !getResolvedProfileImage()) {
+        if (step === 2 && !getResolvedProfileImage() && !profileImageLocalUri.trim()) {
             showAlert(
                 'Photo requise',
                 'Capturez votre photo de profil avant de continuer.',
@@ -171,21 +217,87 @@ export default function BecomeDeliveryScreen() {
         setStep((prev) => Math.max(prev - 1, 1));
     };
 
-    const captureProfileImage = async () => {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
-        if (permission.status !== 'granted') {
+    const closeProfileCamera = () => {
+        if (isCapturingProfileImage) {
+            return;
+        }
+        setCameraModalVisible(false);
+        setCameraReady(false);
+    };
+
+    const openProfileCamera = async () => {
+        if (isCapturingProfileImage) {
+            return;
+        }
+
+        let granted = hasCameraPermission;
+        if (!granted) {
+            try {
+                granted = await requestCameraPermission();
+            } catch {
+                granted = false;
+            }
+        }
+
+        if (!granted) {
             showAlert('Permission requise', 'Autorisez la camera pour capturer votre photo de profil.', 'warning');
             return;
         }
 
-        setIsCapturingProfileImage(true);
+        setCameraReady(false);
+        setCameraModalVisible(true);
+    };
+
+    const takeProfilePhoto = async () => {
+        if (!cameraRef.current || !cameraReady || isCapturingProfileImage) {
+            return;
+        }
+
         try {
-            const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                quality: 0.8,
-                base64: true,
-                cameraType: ImagePicker.CameraType.front,
+            setIsCapturingProfileImage(true);
+            const photo = await cameraRef.current.takePhoto({
+                flash: 'off',
+                enableShutterSound: false,
+            });
+            const localUri = photo.path.startsWith('file://') ? photo.path : `file://${photo.path}`;
+            setProfileImageLocalUri(localUri);
+            setProfileImageUrl('');
+            setProfileImagePreview(localUri);
+            setCameraModalVisible(false);
+            setCameraReady(false);
+        } catch (error: any) {
+            showAlert(
+                'Capture impossible',
+                parseApiErrorMessage(error, "Impossible de capturer la photo pour le moment."),
+                'error',
+            );
+        } finally {
+            setIsCapturingProfileImage(false);
+        }
+    };
+
+    const pickProfileImageFromLibrary = async () => {
+        if (isCapturingProfileImage) {
+            return;
+        }
+
+        try {
+            const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (permission.status !== 'granted') {
+                showAlert(
+                    'Permission requise',
+                    'Autorisez la galerie pour choisir une photo de profil.',
+                    'warning',
+                );
+                return;
+            }
+
+            setIsCapturingProfileImage(true);
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: false,
+                quality: 0.45,
+                selectionLimit: 1,
             });
 
             if (result.canceled || !result.assets?.length) {
@@ -193,16 +305,20 @@ export default function BecomeDeliveryScreen() {
             }
 
             const asset = result.assets[0];
-            if (!asset.base64) {
-                showAlert('Capture invalide', 'Impossible de lire la photo capturee.', 'error');
+            if (!asset.uri) {
+                showAlert('Image invalide', "Impossible de lire l'image selectionnee.", 'error');
                 return;
             }
 
-            const mimeType =
-                asset.mimeType && asset.mimeType.startsWith('image/') ? asset.mimeType : 'image/jpeg';
-            const dataUrl = `data:${mimeType};base64,${asset.base64}`;
-            setProfileImageUrl(dataUrl);
+            setProfileImageLocalUri(asset.uri);
+            setProfileImageUrl('');
             setProfileImagePreview(asset.uri);
+        } catch (error: any) {
+            showAlert(
+                'Selection impossible',
+                parseApiErrorMessage(error, "Impossible d'ouvrir la galerie pour le moment."),
+                'error',
+            );
         } finally {
             setIsCapturingProfileImage(false);
         }
@@ -224,11 +340,42 @@ export default function BecomeDeliveryScreen() {
                 'warning',
             );
             setStep(1);
-            setKycModalVisible(true);
+            openKycModal();
             return;
         }
 
-        const resolvedProfileImage = getResolvedProfileImage();
+        let resolvedProfileImage = getResolvedProfileImage();
+
+        if (profileImageLocalUri.trim()) {
+            try {
+                const localUri = profileImageLocalUri.trim();
+                const mimeType = getImageMimeType(localUri);
+                const base64 = await FileSystem.readAsStringAsync(localUri, {
+                    encoding: 'base64',
+                });
+                if (!base64) {
+                    showAlert(
+                        'Photo invalide',
+                        'Impossible de convertir la photo capturee. Reprenez la photo.',
+                        'error',
+                    );
+                    setStep(2);
+                    return;
+                }
+                resolvedProfileImage = `data:${mimeType};base64,${base64}`;
+            } catch (error: any) {
+                showAlert(
+                    'Photo invalide',
+                    parseApiErrorMessage(
+                        error,
+                        'La photo capturee est illisible. Reprenez une photo.',
+                    ),
+                    'error',
+                );
+                setStep(2);
+                return;
+            }
+        }
 
         if (!resolvedProfileImage) {
             showAlert(
@@ -255,11 +402,16 @@ export default function BecomeDeliveryScreen() {
                 const mergedRoles = Array.from(
                     new Set([...(user.roles || []), 'driver', 'delivery_person']),
                 );
+                const nextUserImage =
+                    resolvedProfileImage.startsWith('http://') ||
+                    resolvedProfileImage.startsWith('https://')
+                        ? resolvedProfileImage
+                        : (user.image || '').trim();
                 dispatch(
                     setUser({
                         ...user,
                         roles: mergedRoles,
-                        image: resolvedProfileImage,
+                        image: nextUserImage,
                     }),
                 );
             }
@@ -326,6 +478,55 @@ export default function BecomeDeliveryScreen() {
                         Le KYC approuve est obligatoire avant l activation du profil livreur.
                     </Text>
 
+                    <View style={styles.kycIdentityCard}>
+                        <Text style={styles.kycIdentityTitle}>Identite du titulaire</Text>
+
+                        <Text style={styles.label}>Nom complet *</Text>
+                        <TextInput
+                            value={kycFullName}
+                            onChangeText={setKycFullName}
+                            style={styles.input}
+                            placeholder="Ex: Jean Koffi"
+                            placeholderTextColor={Colors.gray400}
+                        />
+
+                        <Text style={styles.label}>Type de document *</Text>
+                        <View style={styles.kycIdentityChipsRow}>
+                            {KYC_ID_OPTIONS.map((option) => {
+                                const isSelected = option.value === kycIdType;
+                                return (
+                                    <TouchableOpacity
+                                        key={option.value}
+                                        style={[
+                                            styles.kycIdentityChip,
+                                            isSelected && styles.kycIdentityChipSelected,
+                                        ]}
+                                        onPress={() => setKycIdType(option.value)}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.kycIdentityChipText,
+                                                isSelected && styles.kycIdentityChipTextSelected,
+                                            ]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+
+                        <Text style={styles.label}>Numero du document *</Text>
+                        <TextInput
+                            value={kycIdNumber}
+                            onChangeText={setKycIdNumber}
+                            style={styles.input}
+                            placeholder="Ex: CI-1234-5678"
+                            placeholderTextColor={Colors.gray400}
+                            autoCapitalize="characters"
+                        />
+                    </View>
+
                     <View style={styles.kycCard}>
                         <View style={styles.kycHeader}>
                             <Text style={styles.kycTitle}>Statut KYC</Text>
@@ -346,7 +547,7 @@ export default function BecomeDeliveryScreen() {
                         </Text>
                         <TouchableOpacity
                             style={styles.kycActionButton}
-                            onPress={() => setKycModalVisible(true)}
+                            onPress={openKycModal}
                         >
                             <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
                             <Text style={styles.kycActionText}>
@@ -368,7 +569,7 @@ export default function BecomeDeliveryScreen() {
                     </Text>
 
                     <Text style={styles.label}>Photo de profil livreur *</Text>
-                    <TouchableOpacity style={styles.profilePhotoCard} onPress={captureProfileImage} activeOpacity={0.85}>
+                    <TouchableOpacity style={styles.profilePhotoCard} onPress={openProfileCamera} activeOpacity={0.85}>
                         {profileImagePreview ? (
                             <Image source={{ uri: profileImagePreview }} style={styles.profilePhotoImage} />
                         ) : (
@@ -378,7 +579,7 @@ export default function BecomeDeliveryScreen() {
                             </View>
                         )}
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.profilePhotoActionButton} onPress={captureProfileImage} activeOpacity={0.85}>
+                    <TouchableOpacity style={styles.profilePhotoActionButton} onPress={openProfileCamera} activeOpacity={0.85}>
                         {isCapturingProfileImage ? (
                             <ActivityIndicator color={Colors.primary} />
                         ) : (
@@ -387,6 +588,16 @@ export default function BecomeDeliveryScreen() {
                                 <Text style={styles.profilePhotoActionText}>
                                     {profileImagePreview ? 'Reprendre la photo' : 'Demarrer la capture'}
                                 </Text>
+                            </>
+                        )}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.profilePhotoActionButton} onPress={pickProfileImageFromLibrary} activeOpacity={0.85}>
+                        {isCapturingProfileImage ? (
+                            <ActivityIndicator color={Colors.primary} />
+                        ) : (
+                            <>
+                                <Ionicons name="images-outline" size={16} color={Colors.primary} />
+                                <Text style={styles.profilePhotoActionText}>Choisir depuis galerie</Text>
                             </>
                         )}
                     </TouchableOpacity>
@@ -606,6 +817,82 @@ export default function BecomeDeliveryScreen() {
                 </ScrollView>
             </KeyboardAvoidingView>
 
+            <Modal
+                visible={cameraModalVisible}
+                animationType="slide"
+                transparent={false}
+                onRequestClose={closeProfileCamera}
+            >
+                <View style={styles.cameraRoot}>
+                    {cameraDevice ? (
+                        <VisionCamera
+                            ref={cameraRef}
+                            style={StyleSheet.absoluteFill}
+                            device={cameraDevice}
+                            isActive={cameraModalVisible}
+                            photo
+                            onInitialized={() => setCameraReady(true)}
+                            onError={(error) => {
+                                showAlert('Camera indisponible', error.message, 'error');
+                                setCameraModalVisible(false);
+                                setCameraReady(false);
+                            }}
+                        />
+                    ) : (
+                        <View style={styles.cameraFallback}>
+                            <ActivityIndicator color={Colors.white} />
+                            <Text style={styles.cameraFallbackText}>Initialisation de la camera...</Text>
+                        </View>
+                    )}
+
+                    <View style={styles.cameraOverlay}>
+                        <View style={styles.cameraTopBar}>
+                            <TouchableOpacity
+                                style={styles.cameraCloseButton}
+                                onPress={closeProfileCamera}
+                                disabled={isCapturingProfileImage}
+                            >
+                                <Ionicons name="close" size={22} color={Colors.white} />
+                            </TouchableOpacity>
+                            <View style={styles.cameraTopText}>
+                                <Text style={styles.cameraTitle}>Photo de profil</Text>
+                                <Text style={styles.cameraSubtitle}>Capture Vision Camera</Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.cameraGuideArea}>
+                            <View style={styles.cameraGuideRound} />
+                        </View>
+
+                        <View style={styles.cameraBottomPanel}>
+                            <Text style={styles.cameraHint}>
+                                {cameraReady
+                                    ? 'Cadrez votre visage puis appuyez pour capturer.'
+                                    : 'Preparation de la camera...'}
+                            </Text>
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.cameraManualButton,
+                                    (!cameraReady || isCapturingProfileImage) && styles.cameraManualButtonDisabled,
+                                ]}
+                                onPress={() => void takeProfilePhoto()}
+                                disabled={!cameraReady || isCapturingProfileImage}
+                            >
+                                {isCapturingProfileImage ? (
+                                    <ActivityIndicator color={Colors.primary} />
+                                ) : (
+                                    <>
+                                        <Ionicons name="camera" size={16} color={Colors.primary} />
+                                        <Text style={styles.cameraManualButtonText}>Prendre la photo</Text>
+                                    </>
+                                )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
             <CustomAlert
                 visible={alertState.visible}
                 title={alertState.title}
@@ -623,12 +910,17 @@ export default function BecomeDeliveryScreen() {
 
             <KycFlowModal
                 visible={kycModalVisible}
-                initialFullName={`${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim()}
+                identity={{
+                    fullName: kycFullName.trim(),
+                    idType: kycIdType,
+                    idNumber: kycIdNumber.trim(),
+                }}
                 onClose={() => setKycModalVisible(false)}
                 onSuccess={async (result) => {
                     if (result?.selfieUrl) {
                         setProfileImageUrl(result.selfieUrl);
                         setProfileImagePreview(result.selfieUrl);
+                        setProfileImageLocalUri('');
                     }
                     await Promise.allSettled([refetchKycEligibility(), refetchMyKyc()]);
                 }}
@@ -840,6 +1132,45 @@ const styles = StyleSheet.create({
         color: Colors.textPrimary,
         fontSize: Typography.fontSize.base,
     },
+    kycIdentityCard: {
+        marginBottom: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+    },
+    kycIdentityTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        marginBottom: Spacing.xs,
+    },
+    kycIdentityChipsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.xs,
+    },
+    kycIdentityChip: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.gray300,
+        backgroundColor: Colors.white,
+    },
+    kycIdentityChipSelected: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    kycIdentityChipText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    kycIdentityChipTextSelected: {
+        color: Colors.white,
+    },
     kycCard: {
         marginBottom: Spacing.sm,
         borderWidth: 1,
@@ -941,6 +1272,101 @@ const styles = StyleSheet.create({
         paddingVertical: Spacing.sm,
     },
     profilePhotoActionText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    cameraRoot: {
+        flex: 1,
+        backgroundColor: Colors.black,
+    },
+    cameraFallback: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        backgroundColor: Colors.black,
+    },
+    cameraFallbackText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    cameraOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        justifyContent: 'space-between',
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.huge,
+        paddingBottom: Spacing.xl,
+    },
+    cameraTopBar: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+    },
+    cameraCloseButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    cameraTopText: {
+        flex: 1,
+    },
+    cameraTitle: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    cameraSubtitle: {
+        marginTop: 2,
+        color: Colors.white + 'D0',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    cameraGuideArea: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    cameraGuideRound: {
+        width: 250,
+        height: 250,
+        borderRadius: 125,
+        borderWidth: 2,
+        borderColor: Colors.white,
+        backgroundColor: 'transparent',
+    },
+    cameraBottomPanel: {
+        backgroundColor: 'rgba(1, 9, 23, 0.68)',
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
+        borderWidth: 1,
+        borderColor: 'rgba(255, 255, 255, 0.18)',
+        gap: Spacing.sm,
+    },
+    cameraHint: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 19,
+    },
+    cameraManualButton: {
+        height: 44,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: Spacing.xs,
+    },
+    cameraManualButtonDisabled: {
+        backgroundColor: Colors.gray100,
+    },
+    cameraManualButtonText: {
         color: Colors.primary,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,

@@ -6,9 +6,11 @@ import {
     useAcceptDeliveryMutation,
     useGetOngoingDeliveriesQuery,
 } from '@/store/api/deliveriesApi';
+import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     DELIVERY_STATUS_LABELS,
     Delivery,
+    DeliveryGeoPoint,
     getDeliveryPersonRefId,
     getDeliveryPersonUserId,
 } from '@/types/delivery';
@@ -116,18 +118,114 @@ const getRouteMetrics = (
 };
 
 const formatDistance = (meters?: number): string => {
-    if (!Number.isFinite(meters || 0) || !meters || meters <= 0) return 'N/A';
+    if (!Number.isFinite(meters || 0) || !meters || meters <= 0) return '--';
     if (meters < 1000) return `${Math.round(meters)} m`;
     return `${(meters / 1000).toFixed(1)} km`;
 };
 
 const formatDuration = (seconds?: number): string => {
-    if (!Number.isFinite(seconds || 0) || !seconds || seconds <= 0) return 'N/A';
+    if (!Number.isFinite(seconds || 0) || !seconds || seconds <= 0) return '--';
     const minutes = Math.round(seconds / 60);
     if (minutes < 60) return `${minutes} min`;
     const hours = Math.floor(minutes / 60);
     const remain = minutes % 60;
     return remain > 0 ? `${hours} h ${remain} min` : `${hours} h`;
+};
+
+const parseGeoPoint = (value?: DeliveryGeoPoint | null): { latitude: number; longitude: number } | null => {
+    const coordinates = value?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length !== 2) return null;
+    const lng = Number(coordinates[0]);
+    const lat = Number(coordinates[1]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+    return { latitude: lat, longitude: lng };
+};
+
+const parseCoordinateLabel = (value?: string | null): { latitude: number; longitude: number } | null => {
+    if (!value?.trim()) return null;
+    const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (!match) return null;
+    const latitude = Number(match[1]);
+    const longitude = Number(match[2]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+    return { latitude, longitude };
+};
+
+const getLocationPoint = (
+    value: unknown,
+    fallbackCoordinates?: DeliveryGeoPoint | null,
+): { latitude: number; longitude: number } | null => {
+    if (typeof value === 'string') {
+        const parsed = parseCoordinateLabel(value);
+        if (parsed) return parsed;
+    }
+
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        if (Array.isArray(asRecord.coordinates)) {
+            const [lng, lat] = asRecord.coordinates;
+            const lngNumber = Number(lng);
+            const latNumber = Number(lat);
+            if (
+                Number.isFinite(latNumber) &&
+                Number.isFinite(lngNumber) &&
+                Math.abs(latNumber) <= 90 &&
+                Math.abs(lngNumber) <= 180
+            ) {
+                return { latitude: latNumber, longitude: lngNumber };
+            }
+        }
+    }
+
+    return parseGeoPoint(fallbackCoordinates);
+};
+
+const toCoordinateKey = (point: { latitude: number; longitude: number }): string =>
+    `${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`;
+
+const coordinatesToLabel = (value?: DeliveryGeoPoint | null): string => {
+    const point = parseGeoPoint(value);
+    if (!point) return '';
+    return `${point.latitude.toFixed(5)},${point.longitude.toFixed(5)}`;
+};
+
+const formatLocationLabel = (
+    value: unknown,
+    fallbackCoordinates?: DeliveryGeoPoint | null,
+    fallback = 'Adresse indisponible',
+): string => {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (trimmed) return trimmed;
+    }
+
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        const addressCandidate =
+            (typeof asRecord.address === 'string' && asRecord.address.trim()) ||
+            (typeof asRecord.formattedAddress === 'string' && asRecord.formattedAddress.trim()) ||
+            (typeof asRecord.label === 'string' && asRecord.label.trim()) ||
+            '';
+        if (addressCandidate) return addressCandidate;
+
+        if (Array.isArray(asRecord.coordinates)) {
+            const [lng, lat] = asRecord.coordinates;
+            const lngNumber = Number(lng);
+            const latNumber = Number(lat);
+            if (
+                Number.isFinite(latNumber) &&
+                Number.isFinite(lngNumber) &&
+                Math.abs(latNumber) <= 90 &&
+                Math.abs(lngNumber) <= 180
+            ) {
+                return `${latNumber.toFixed(5)},${lngNumber.toFixed(5)}`;
+            }
+        }
+    }
+
+    return coordinatesToLabel(fallbackCoordinates) || fallback;
 };
 
 type DriverDeliveriesPoolScreenProps = {
@@ -139,9 +237,17 @@ export default function DriverDeliveriesPoolScreen({
 }: DriverDeliveriesPoolScreenProps) {
     const router = useRouter();
     const { user, requireAuth } = useAuth();
+    const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
     const [acceptDelivery, { isLoading: isAcceptingAny }] = useAcceptDeliveryMutation();
     const [acceptingId, setAcceptingId] = React.useState<string | null>(null);
     const [errorMessage, setErrorMessage] = React.useState('');
+    const [resolvedAddressByKey, setResolvedAddressByKey] = React.useState<Record<string, string>>(
+        {},
+    );
+    const [requestedAddressByKey, setRequestedAddressByKey] = React.useState<Record<string, true>>(
+        {},
+    );
+    const [failedAddressByKey, setFailedAddressByKey] = React.useState<Record<string, true>>({});
 
     React.useEffect(() => {
         requireAuth('Vous devez etre connecte pour voir les livraisons disponibles.');
@@ -205,6 +311,115 @@ export default function DriverDeliveriesPoolScreen({
                 return false;
             }),
         [currentUserId, myDeliveryPersonId, sortedDeliveries],
+    );
+
+    const reverseGeocodeTargets = React.useMemo(() => {
+        const candidates = [...myOngoingDeliveries, ...availableDeliveries];
+        const byKey: Record<string, { latitude: number; longitude: number }> = {};
+
+        for (const delivery of candidates) {
+            const pickupPoint = getLocationPoint(delivery.pickupLocation, delivery.pickupCoordinates);
+            const dropoffPoint = getLocationPoint(
+                delivery.deliveryLocation,
+                delivery.deliveryCoordinates,
+            );
+
+            if (pickupPoint) {
+                byKey[toCoordinateKey(pickupPoint)] = pickupPoint;
+            }
+            if (dropoffPoint) {
+                byKey[toCoordinateKey(dropoffPoint)] = dropoffPoint;
+            }
+        }
+
+        return Object.entries(byKey)
+            .filter(
+                ([key]) =>
+                    !resolvedAddressByKey[key] &&
+                    !requestedAddressByKey[key] &&
+                    !failedAddressByKey[key],
+            )
+            .map(([key, point]) => ({ key, ...point }));
+    }, [
+        availableDeliveries,
+        failedAddressByKey,
+        myOngoingDeliveries,
+        requestedAddressByKey,
+        resolvedAddressByKey,
+    ]);
+
+    React.useEffect(() => {
+        if (reverseGeocodeTargets.length === 0) return;
+
+        setRequestedAddressByKey((prev) => {
+            const next = { ...prev };
+            for (const target of reverseGeocodeTargets) {
+                next[target.key] = true;
+            }
+            return next;
+        });
+
+        let cancelled = false;
+        (async () => {
+            for (const target of reverseGeocodeTargets) {
+                try {
+                    const response = await triggerReverseGeocode({
+                        lat: target.latitude,
+                        lng: target.longitude,
+                        language: 'fr',
+                    }).unwrap();
+                    if (cancelled) return;
+
+                    const formattedAddress =
+                        typeof response?.formattedAddress === 'string'
+                            ? response.formattedAddress.trim()
+                            : '';
+
+                    if (!formattedAddress) {
+                        setFailedAddressByKey((prev) =>
+                            prev[target.key] ? prev : { ...prev, [target.key]: true },
+                        );
+                        continue;
+                    }
+
+                    setResolvedAddressByKey((prev) =>
+                        prev[target.key]
+                            ? prev
+                            : { ...prev, [target.key]: formattedAddress },
+                    );
+                } catch {
+                    if (cancelled) return;
+                    setFailedAddressByKey((prev) =>
+                        prev[target.key] ? prev : { ...prev, [target.key]: true },
+                    );
+                }
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [reverseGeocodeTargets, triggerReverseGeocode]);
+
+    const getResolvedLocationLabel = React.useCallback(
+        (
+            value: unknown,
+            fallbackCoordinates?: DeliveryGeoPoint | null,
+            fallback = 'Adresse indisponible',
+        ): string => {
+            const point = getLocationPoint(value, fallbackCoordinates);
+            if (point) {
+                const key = toCoordinateKey(point);
+                const resolvedAddress = resolvedAddressByKey[key];
+                if (resolvedAddress) return resolvedAddress;
+                if (failedAddressByKey[key]) return fallback;
+                if (requestedAddressByKey[key]) return "Recherche de l'adresse...";
+                return "Recherche de l'adresse...";
+            }
+
+            return formatLocationLabel(value, fallbackCoordinates, fallback);
+        },
+        [failedAddressByKey, requestedAddressByKey, resolvedAddressByKey],
     );
 
     const onAccept = async (deliveryId: string) => {
@@ -295,29 +510,39 @@ export default function DriverDeliveriesPoolScreen({
                 {myOngoingDeliveries.length > 0 ? (
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Mes livraisons en cours</Text>
-                        {myOngoingDeliveries.map((delivery) => (
-                            <TouchableOpacity
-                                key={`mine-${delivery._id}`}
-                                style={styles.activeCard}
-                                onPress={() =>
-                                    router.push(`/delivery/deliver-persons/${delivery._id}` as any)
-                                }
-                            >
-                                <View style={styles.cardTopRow}>
-                                    <Text style={styles.cardCode}>#{getOrderCode(delivery)}</Text>
-                                    <Text style={styles.statusChip}>
-                                        {DELIVERY_STATUS_LABELS[delivery.status]}
+                        {myOngoingDeliveries.map((delivery) => {
+                            const pickupLabel = getResolvedLocationLabel(
+                                delivery.pickupLocation,
+                                delivery.pickupCoordinates,
+                                'Adresse de retrait indisponible',
+                            );
+                            const dropoffLabel = getResolvedLocationLabel(
+                                delivery.deliveryLocation,
+                                delivery.deliveryCoordinates,
+                                'Adresse de livraison indisponible',
+                            );
+                            return (
+                                <TouchableOpacity
+                                    key={`mine-${delivery._id}`}
+                                    style={styles.activeCard}
+                                    onPress={() =>
+                                        router.push(`/delivery/deliver-persons/${delivery._id}` as any)
+                                    }
+                                >
+                                    <View style={styles.cardTopRow}>
+                                        <Text style={styles.cardCode}>#{getOrderCode(delivery)}</Text>
+                                        <Text style={styles.statusChip}>
+                                            {DELIVERY_STATUS_LABELS[delivery.status]}
+                                        </Text>
+                                    </View>
+                                    <Text style={styles.cardLocationLine}>{pickupLabel}</Text>
+                                    <Text style={styles.cardLocationLineMuted}>
+                                        {'-> '}
+                                        {dropoffLabel}
                                     </Text>
-                                </View>
-                                <Text style={styles.cardLocationLine}>
-                                    {delivery.pickupLocation || 'Pickup non renseigne'}
-                                </Text>
-                                <Text style={styles.cardLocationLineMuted}>
-                                    {'-> '}
-                                    {delivery.deliveryLocation || 'Dropoff non renseigne'}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+                                </TouchableOpacity>
+                            );
+                        })}
                     </View>
                 ) : null}
 
@@ -337,6 +562,16 @@ export default function DriverDeliveriesPoolScreen({
                             const earningsLabel = getEstimatedEarningsLabel(delivery);
                             const itemCount = getItemCount(delivery);
                             const isTaking = acceptingId === delivery._id;
+                            const pickupLabel = getResolvedLocationLabel(
+                                delivery.pickupLocation,
+                                delivery.pickupCoordinates,
+                                'Adresse de retrait indisponible',
+                            );
+                            const dropoffLabel = getResolvedLocationLabel(
+                                delivery.deliveryLocation,
+                                delivery.deliveryCoordinates,
+                                'Adresse de livraison indisponible',
+                            );
 
                             return (
                                 <View key={delivery._id} style={styles.deliveryCard}>
@@ -372,13 +607,13 @@ export default function DriverDeliveriesPoolScreen({
                                         <View style={styles.locationRow}>
                                             <Ionicons name="storefront-outline" size={16} color={Colors.primary} />
                                             <Text style={styles.locationText} numberOfLines={2}>
-                                                {delivery.pickupLocation || 'Pickup non renseigne'}
+                                                {pickupLabel}
                                             </Text>
                                         </View>
                                         <View style={styles.locationRow}>
                                             <Ionicons name="location-outline" size={16} color={Colors.accentDark} />
                                             <Text style={styles.locationText} numberOfLines={2}>
-                                                {delivery.deliveryLocation || 'Dropoff non renseigne'}
+                                                {dropoffLabel}
                                             </Text>
                                         </View>
                                     </View>
@@ -390,7 +625,7 @@ export default function DriverDeliveriesPoolScreen({
                                                 router.push(`/delivery/deliver-persons/${delivery._id}` as any)
                                             }
                                         >
-                                            <Text style={styles.secondaryButtonText}>Details</Text>
+                                            <Text style={styles.secondaryButtonText}>Voir</Text>
                                         </TouchableOpacity>
                                         <TouchableOpacity
                                             style={[

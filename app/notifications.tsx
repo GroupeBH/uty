@@ -96,7 +96,7 @@ const resolveNotificationRoute = (
 
 export default function NotificationsScreen() {
     const router = useRouter();
-    const { isAuthenticated, requireAuth } = useAuth();
+    const { user, isAuthenticated, requireAuth } = useAuth();
     const [processingId, setProcessingId] = React.useState<string | null>(null);
     const [isMarkingAll, setIsMarkingAll] = React.useState(false);
 
