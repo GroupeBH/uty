@@ -3,6 +3,7 @@
  */
 
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetProfileQuery } from '@/store/api/authApi';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +11,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-    Alert,
     Image,
     KeyboardAvoidingView,
     Platform,
@@ -29,6 +29,7 @@ export default function EditProfileScreen() {
     const router = useRouter();
     const { user } = useAuth();
     const { data: profile, isLoading } = useGetProfileQuery();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [formData, setFormData] = useState({
         firstName: '',
@@ -59,7 +60,7 @@ export default function EditProfileScreen() {
     const handlePickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission refusée', 'Nous avons besoin de la permission pour accéder à vos photos.');
+            showStyledAlert('Permission refusée', 'Nous avons besoin de la permission pour accéder à vos photos.', undefined, 'warning');
             return;
         }
 
@@ -77,7 +78,7 @@ export default function EditProfileScreen() {
 
     const handleSave = async () => {
         if (!formData.firstName.trim() || !formData.lastName.trim()) {
-            Alert.alert('Erreur', 'Le prénom et le nom sont obligatoires');
+            showStyledAlert('Erreur', 'Le prénom et le nom sont obligatoires');
             return;
         }
 
@@ -85,11 +86,11 @@ export default function EditProfileScreen() {
         try {
             // TODO: Implémenter l'API de mise à jour du profil
             // await updateProfile({ ...formData, image }).unwrap();
-            Alert.alert('Succès', 'Profil mis à jour avec succès', [
+            showStyledAlert('Succès', 'Profil mis à jour avec succès', [
                 { text: 'OK', onPress: () => router.back() },
             ]);
         } catch (error: any) {
-            Alert.alert('Erreur', error?.data?.message || 'Impossible de mettre à jour le profil');
+            showStyledAlert('Erreur', error?.data?.message || 'Impossible de mettre à jour le profil');
         } finally {
             setIsSaving(false);
         }
@@ -178,7 +179,7 @@ export default function EditProfileScreen() {
                         </View>
 
                         <View style={styles.inputContainer}>
-                            <Text style={styles.inputLabel}>Nom d'utilisateur</Text>
+                            <Text style={styles.inputLabel}>Nom d&apos;utilisateur</Text>
                             <TextInput
                                 style={styles.input}
                                 placeholder="Votre nom d'utilisateur"
@@ -236,6 +237,7 @@ export default function EditProfileScreen() {
                     </LinearGradient>
                 </TouchableOpacity>
             </View>
+            {alertNode}
         </SafeAreaView>
     );
 }

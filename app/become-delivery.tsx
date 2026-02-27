@@ -1308,7 +1308,7 @@ const styles = StyleSheet.create({
         width: 42,
         height: 42,
         borderRadius: 21,
-        backgroundColor: 'rgba(0, 0, 0, 0.4)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,

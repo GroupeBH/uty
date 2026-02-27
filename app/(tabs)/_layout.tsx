@@ -79,6 +79,35 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="orders"
+        options={{
+          title: 'Commandes',
+          tabBarIcon: ({ color, focused }) => (
+            <IconSymbol
+              size={focused ? 30 : 26}
+              name="list.bullet.rectangle.fill"
+              color={color}
+            />
+          ),
+        }}
+        listeners={{
+          tabPress: (event) => {
+            if (!isAuthenticated) {
+              event.preventDefault();
+              router.push({
+                pathname: '/modal',
+                params: {
+                  mode: 'login',
+                  title: 'Connexion requise',
+                  reason: 'Connectez-vous pour acceder a vos commandes.',
+                  source: 'tab_orders',
+                },
+              });
+            }
+          },
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: 'Profil',

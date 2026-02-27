@@ -4,12 +4,12 @@ import { useLoginMutation } from '@/store/api/authApi';
 import { setCredentials } from '@/store/slices/authSlice';
 import { tokenService } from '@/services/tokenService';
 import { storage } from '@/utils/storage';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -26,6 +26,7 @@ export default function LoginScreen() {
     const insets = useSafeAreaInsets();
     const dispatch = useAppDispatch();
     const params = useLocalSearchParams<{ returnUrl?: string; message?: string }>();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
@@ -47,11 +48,11 @@ export default function LoginScreen() {
 
     const handleLogin = async () => {
         if (!phone.trim()) {
-            Alert.alert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+            showStyledAlert('Erreur', 'Veuillez entrer votre numéro de téléphone');
             return;
         }
         if (!pin.trim() || pin.length !== 4) {
-            Alert.alert('Erreur', 'Le code PIN doit contenir 4 chiffres');
+            showStyledAlert('Erreur', 'Le code PIN doit contenir 4 chiffres');
             return;
         }
 
@@ -82,7 +83,7 @@ export default function LoginScreen() {
                 })
             );
 
-            Alert.alert('Succès', 'Connexion réussie !', [
+            showStyledAlert('Succès', 'Connexion réussie !', [
                 {
                     text: 'OK',
                     onPress: () => {
@@ -96,7 +97,7 @@ export default function LoginScreen() {
             ]);
         } catch (error: any) {
             console.error('Login error:', error);
-            Alert.alert(
+            showStyledAlert(
                 'Erreur',
                 error?.data?.message || 'Numéro de téléphone ou code PIN incorrect'
             );
@@ -224,6 +225,7 @@ export default function LoginScreen() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
+            {alertNode}
         </SafeAreaView>
     );
 }

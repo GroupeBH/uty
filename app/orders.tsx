@@ -1,10 +1,13 @@
 import { OrderCard } from '@/components/OrderCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
+import { useGetMyShopQuery } from '@/store/api/shopsApi';
 import { Order, OrderStatusValue, getOrderPartyId } from '@/types/order';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
@@ -30,11 +33,6 @@ const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
     { value: 'cancelled', label: 'Annulees' },
 ];
 
-const isSellerRole = (role?: string) => {
-    const normalized = (role || '').toLowerCase();
-    return normalized === 'seller' || normalized === 'admin';
-};
-
 const normalizeViewQuery = (viewParam: unknown): ViewMode | null => {
     if (viewParam !== 'sales' && viewParam !== 'purchases') return null;
     return viewParam === 'sales' ? 'seller' : 'buyer';
@@ -48,49 +46,75 @@ const sortByDateDesc = (orders: Order[]) =>
     });
 
 export default function OrdersScreen() {
-    const { user } = useAuth();
+    const { user, isAuthenticated, requireAuth } = useAuth();
     const router = useRouter();
     const { view } = useLocalSearchParams<{ view?: string }>();
     const requestedView = normalizeViewQuery(view);
-    const [refreshing, setRefreshing] = React.useState(false);
+
+    const [activeView, setActiveView] = React.useState<ViewMode>('buyer');
     const [selectedStatus, setSelectedStatus] = React.useState<StatusFilter>('all');
-    const hasSellerRole = Boolean(user?.roles?.some((role) => isSellerRole(role)));
-    const [activeView, setActiveView] = React.useState<ViewMode>(
-        requestedView && (requestedView === 'buyer' || hasSellerRole) ? requestedView : 'buyer',
-    );
+    const [refreshing, setRefreshing] = React.useState(false);
 
     React.useEffect(() => {
-        if (requestedView && (requestedView === 'buyer' || hasSellerRole)) {
-            setActiveView(requestedView);
-            return;
-        }
+        if (isAuthenticated) return;
+        requireAuth('Connectez-vous pour consulter vos commandes.');
+    }, [isAuthenticated, requireAuth]);
 
-        if (!hasSellerRole && activeView === 'seller') {
-            setActiveView('buyer');
-        }
-    }, [activeView, hasSellerRole, requestedView]);
+    const { data: orders = [], isLoading, isFetching, refetch } = useGetOrdersQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const { data: myShop } = useGetMyShopQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const { data: myAnnouncements = [] } = useGetMyAnnouncementsQuery(undefined, {
+        skip: !isAuthenticated,
+    });
 
-    const { data: orders = [], isLoading, refetch } = useGetOrdersQuery();
-    // console.log("this orders:", orders[0].items[0])
+    const hasShop = Boolean(myShop?._id);
+    const hasPublishedAnnouncements = myAnnouncements.length > 0;
     const currentUserId = user?._id || '';
 
-    const viewOrders = React.useMemo(() => {
+    const buyerOrders = React.useMemo(() => {
         if (!currentUserId) return [] as Order[];
+        return orders.filter((order) => getOrderPartyId(order.userId) === currentUserId);
+    }, [currentUserId, orders]);
 
-        return orders.filter((order) => {
-            const buyerId = getOrderPartyId(order.userId);
-            const sellerId = getOrderPartyId(order.sellerId);
-            if (activeView === 'seller') return sellerId === currentUserId;
-            return buyerId === currentUserId;
-        });
-    }, [activeView, currentUserId, orders]);
+    const receivedOrders = React.useMemo(() => {
+        if (!currentUserId) return [] as Order[];
+        return orders.filter((order) => getOrderPartyId(order.sellerId) === currentUserId);
+    }, [currentUserId, orders]);
 
-    const filteredOrders = React.useMemo(() => {
-        const base = selectedStatus === 'all'
-            ? viewOrders
-            : viewOrders.filter((order) => order.status === selectedStatus);
-        return sortByDateDesc(base);
-    }, [selectedStatus, viewOrders]);
+    const openSellerOrders = React.useCallback(() => {
+        router.push('/seller/orders' as any);
+    }, [router]);
+
+    const selectBuyerView = React.useCallback(() => {
+        setActiveView('buyer');
+    }, []);
+
+    const selectReceivedView = React.useCallback(() => {
+        if (hasShop) {
+            openSellerOrders();
+            return;
+        }
+        setActiveView('seller');
+    }, [hasShop, openSellerOrders]);
+
+    React.useEffect(() => {
+        if (requestedView === 'buyer') {
+            setActiveView('buyer');
+            return;
+        }
+        if (requestedView === 'seller') {
+            selectReceivedView();
+        }
+    }, [requestedView, selectReceivedView]);
+
+    const activeOrders = React.useMemo(() => {
+        const base = activeView === 'seller' ? receivedOrders : buyerOrders;
+        if (selectedStatus === 'all') return sortByDateDesc(base);
+        return sortByDateDesc(base.filter((order) => order.status === selectedStatus));
+    }, [activeView, buyerOrders, receivedOrders, selectedStatus]);
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -98,45 +122,103 @@ export default function OrdersScreen() {
         setRefreshing(false);
     };
 
+    if (!isAuthenticated) {
+        return <LoadingSpinner fullScreen />;
+    }
+
     if (isLoading && orders.length === 0) {
         return <LoadingSpinner fullScreen />;
     }
 
+    const activeCount = activeView === 'seller' ? receivedOrders.length : buyerOrders.length;
+    const subtitle = activeView === 'seller' ? 'Commandes recue' : 'Commandes passee';
+    const emptyTitle =
+        activeView === 'seller'
+            ? hasShop
+                ? 'Commandes recues dans espace vendeur'
+                : 'Aucune commande recue'
+            : 'Aucune commande passee';
+    const emptyMessage =
+        activeView === 'seller'
+            ? hasShop
+                ? 'Utilisez votre espace vendeur pour gerer les commandes recues.'
+                : hasPublishedAnnouncements
+                    ? 'Les commandes de vos annonces apparaitront ici.'
+                    : 'Publiez des annonces pour commencer a recevoir des commandes.'
+            : 'Vos achats valides apparaitront ici.';
+
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-            <View style={styles.header}>
-                <TouchableOpacity
-                    style={styles.backButton}
-                    onPress={() => router.back()}
-                    accessibilityLabel="Retour"
-                >
-                    <Ionicons name="arrow-back" size={20} color={Colors.primary} />
+            <View style={styles.headerWrap}>
+                <TouchableOpacity style={styles.backButton} onPress={() => router.back()} accessibilityLabel="Retour">
+                    <Ionicons name="arrow-back" size={20} color={Colors.white} />
                 </TouchableOpacity>
-                <Text style={styles.title}>Gestion des commandes</Text>
-                <Text style={styles.subtitle}>
-                    {activeView === 'seller' ? 'Commandes recues' : 'Commandes passees'}
-                </Text>
+                <LinearGradient colors={Gradients.primary} style={styles.heroCard}>
+                    <View style={styles.heroRow}>
+                        <View style={styles.heroCopy}>
+                            <Text style={styles.heroTitle}>Mes commandes</Text>
+                            <Text style={styles.heroSubtitle}>{subtitle} • {activeCount}</Text>
+                        </View>
+                        <View style={styles.heroIconWrap}>
+                            <Ionicons name="receipt-outline" size={24} color={Colors.accent} />
+                        </View>
+                    </View>
+                    <View style={styles.heroStats}>
+                        <TouchableOpacity
+                            style={[styles.heroStatCard, activeView === 'buyer' && styles.heroStatCardActive]}
+                            onPress={selectBuyerView}
+                            activeOpacity={0.9}
+                        >
+                            <Text style={styles.heroStatLabel}>Passees</Text>
+                            <Text style={styles.heroStatValue}>{buyerOrders.length}</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.heroStatCard, activeView === 'seller' && !hasShop && styles.heroStatCardActive]}
+                            onPress={selectReceivedView}
+                            activeOpacity={0.9}
+                        >
+                            <Text style={styles.heroStatLabel}>Recues</Text>
+                            <Text style={styles.heroStatValue}>{receivedOrders.length}</Text>
+                        </TouchableOpacity>
+                    </View>
+                </LinearGradient>
             </View>
 
-            {hasSellerRole ? (
-                <View style={styles.switchContainer}>
-                    <TouchableOpacity
-                        style={[styles.switchChip, activeView === 'buyer' && styles.switchChipActive]}
-                        onPress={() => setActiveView('buyer')}
+            <View style={styles.tabSwitch}>
+                <TouchableOpacity
+                    style={[styles.tabChip, activeView === 'buyer' && styles.tabChipActive]}
+                    onPress={selectBuyerView}
+                >
+                    <Text style={[styles.tabChipText, activeView === 'buyer' && styles.tabChipTextActive]}>
+                        Commandes passees
+                    </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={[styles.tabChip, activeView === 'seller' && !hasShop && styles.tabChipActive]}
+                    onPress={selectReceivedView}
+                >
+                    <Text
+                        style={[
+                            styles.tabChipText,
+                            activeView === 'seller' && !hasShop && styles.tabChipTextActive,
+                        ]}
                     >
-                        <Text style={[styles.switchChipText, activeView === 'buyer' && styles.switchChipTextActive]}>
-                            Mes achats
-                        </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                        style={[styles.switchChip, activeView === 'seller' && styles.switchChipActive]}
-                        onPress={() => setActiveView('seller')}
-                    >
-                        <Text style={[styles.switchChipText, activeView === 'seller' && styles.switchChipTextActive]}>
-                            Ma boutique
-                        </Text>
-                    </TouchableOpacity>
-                </View>
+                        Commandes recues
+                    </Text>
+                    {hasShop ? (
+                        <Ionicons name="open-outline" size={13} color={Colors.primary} />
+                    ) : null}
+                </TouchableOpacity>
+            </View>
+
+            {hasShop ? (
+                <TouchableOpacity style={styles.redirectBanner} onPress={openSellerOrders}>
+                    <Ionicons name="storefront-outline" size={16} color={Colors.primary} />
+                    <Text style={styles.redirectBannerText}>
+                        Vos commandes recues se gerent dans l espace vendeur.
+                    </Text>
+                    <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
+                </TouchableOpacity>
             ) : null}
 
             <View style={styles.filtersContainer}>
@@ -164,18 +246,18 @@ export default function OrdersScreen() {
             </View>
 
             <FlatList
-                data={filteredOrders}
+                data={activeOrders}
+                keyExtractor={(item) => item._id}
                 renderItem={({ item }) => (
                     <OrderCard
                         order={item}
                         perspective={activeView === 'seller' ? 'seller' : 'buyer'}
                     />
                 )}
-                keyExtractor={(item) => item._id}
                 contentContainerStyle={styles.listContent}
                 refreshControl={
                     <RefreshControl
-                        refreshing={refreshing}
+                        refreshing={refreshing || isFetching}
                         onRefresh={onRefresh}
                         tintColor={Colors.accent}
                         colors={[Colors.accent]}
@@ -183,16 +265,14 @@ export default function OrdersScreen() {
                 }
                 ListEmptyComponent={
                     <View style={styles.emptyContainer}>
-                        <Text style={styles.emptyTitle}>
-                            {activeView === 'seller'
-                                ? 'Aucune commande boutique'
-                                : 'Aucune commande client'}
-                        </Text>
-                        <Text style={styles.emptyText}>
-                            {activeView === 'seller'
-                                ? 'Les nouvelles ventes apparaitront ici.'
-                                : 'Vos achats valides apparaitront ici.'}
-                        </Text>
+                        <Ionicons name="receipt-outline" size={28} color={Colors.gray400} />
+                        <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+                        <Text style={styles.emptyText}>{emptyMessage}</Text>
+                        {activeView === 'seller' && hasShop ? (
+                            <TouchableOpacity style={styles.emptySellerBtn} onPress={openSellerOrders}>
+                                <Text style={styles.emptySellerBtnText}>Ouvrir l espace vendeur</Text>
+                            </TouchableOpacity>
+                        ) : null}
                     </View>
                 }
             />
@@ -205,76 +285,149 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: Colors.backgroundSecondary,
     },
-    header: {
-        paddingHorizontal: Spacing.xl,
-        paddingTop: Spacing.lg,
+    headerWrap: {
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
         paddingBottom: Spacing.md,
     },
     backButton: {
-        width: 36,
-        height: 36,
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        backgroundColor: Colors.white,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: Colors.primaryDark,
         marginBottom: Spacing.sm,
+        ...Shadows.md,
     },
-    title: {
+    heroCard: {
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.lg,
+        borderWidth: 1,
+        borderColor: Colors.white + '22',
+        ...Shadows.lg,
+    },
+    heroRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    heroCopy: {
+        flex: 1,
+    },
+    heroTitle: {
+        color: Colors.white,
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.primary,
     },
-    subtitle: {
-        marginTop: Spacing.xs / 2,
+    heroSubtitle: {
+        marginTop: 2,
+        color: Colors.white + 'D4',
         fontSize: Typography.fontSize.sm,
-        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
     },
-    switchContainer: {
+    heroIconWrap: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white + '16',
+        borderWidth: 1,
+        borderColor: Colors.white + '28',
+    },
+    heroStats: {
+        marginTop: Spacing.md,
         flexDirection: 'row',
-        paddingHorizontal: Spacing.xl,
         gap: Spacing.sm,
-        marginBottom: Spacing.md,
     },
-    switchChip: {
+    heroStatCard: {
         flex: 1,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.white + '2A',
+        backgroundColor: Colors.white + '12',
+        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+    },
+    heroStatCardActive: {
+        backgroundColor: Colors.accent + '22',
+        borderColor: Colors.accent + 'A0',
+    },
+    heroStatLabel: {
+        color: Colors.white + 'D0',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    heroStatValue: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    tabSwitch: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.lg,
+        marginBottom: Spacing.sm,
+    },
+    tabChip: {
+        flex: 1,
+        minHeight: 42,
         borderRadius: BorderRadius.full,
         borderWidth: 1,
         borderColor: Colors.gray200,
         backgroundColor: Colors.white,
-        paddingVertical: Spacing.sm,
+        paddingHorizontal: Spacing.md,
         alignItems: 'center',
         justifyContent: 'center',
+        flexDirection: 'row',
+        gap: 6,
     },
-    switchChipActive: {
-        backgroundColor: Colors.primary,
+    tabChipActive: {
         borderColor: Colors.primary,
-        ...Shadows.sm,
+        backgroundColor: Colors.primary + '14',
     },
-    switchChipText: {
-        fontSize: Typography.fontSize.sm,
+    tabChipText: {
         color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.semibold,
     },
-    switchChipTextActive: {
-        color: Colors.white,
+    tabChipTextActive: {
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    redirectBanner: {
+        marginHorizontal: Spacing.lg,
+        marginBottom: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '2E',
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+    },
+    redirectBannerText: {
+        flex: 1,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     filtersContainer: {
-        backgroundColor: Colors.white,
-        paddingVertical: Spacing.md,
-        paddingHorizontal: Spacing.xl,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.gray50,
+        paddingHorizontal: Spacing.lg,
+        paddingBottom: Spacing.sm,
     },
     filterChip: {
         paddingHorizontal: Spacing.lg,
         paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray100,
+        backgroundColor: Colors.white,
         marginRight: Spacing.sm,
         borderWidth: 1,
-        borderColor: 'transparent',
+        borderColor: Colors.gray200,
     },
     filterChipActive: {
         backgroundColor: Colors.accent + '25',
@@ -290,24 +443,46 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
     },
     listContent: {
-        paddingHorizontal: Spacing.xl,
-        paddingTop: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
         paddingBottom: 120,
     },
     emptyContainer: {
+        marginTop: Spacing.xl,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.white,
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: Spacing.massive,
+        paddingHorizontal: Spacing.xl,
+        paddingVertical: Spacing.xxxl,
+        ...Shadows.sm,
     },
     emptyTitle: {
+        marginTop: Spacing.sm,
         fontSize: Typography.fontSize.lg,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
+        textAlign: 'center',
     },
     emptyText: {
         marginTop: Spacing.xs,
         fontSize: Typography.fontSize.sm,
         color: Colors.gray500,
         textAlign: 'center',
+        lineHeight: 20,
+    },
+    emptySellerBtn: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.sm,
+    },
+    emptySellerBtnText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
     },
 });

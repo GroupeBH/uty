@@ -5,6 +5,7 @@
 
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { CustomAlert } from '@/components/ui/CustomAlert';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
@@ -15,7 +16,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Alert,
     Image,
     ScrollView,
     StyleSheet,
@@ -28,6 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function ProfileScreen() {
     const router = useRouter();
     const { user, logout, isLoading, isAuthenticated } = useAuth();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
     const { data: announcements } = useGetMyAnnouncementsQuery(undefined, {
         skip: !isAuthenticated,
     });
@@ -101,7 +102,7 @@ export default function ProfileScreen() {
             icon: 'heart-outline',
             color: Colors.error,
             gradient: Gradients.warm,
-            onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+            onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
         },
     ];
 
@@ -159,14 +160,14 @@ export default function ProfileScreen() {
                     label: 'Adresses',
                     subtitle: 'Gérer mes adresses',
                     gradient: Gradients.cool,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
                 },
                 {
                     icon: 'card-outline',
                     label: 'Moyens de paiement',
                     subtitle: 'Cartes et portefeuilles',
                     gradient: Gradients.accent,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
                 },
             ],
         },
@@ -192,7 +193,7 @@ export default function ProfileScreen() {
                     label: 'Aide & Support',
                     subtitle: 'FAQ et contact',
                     gradient: Gradients.success,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
                 },
             ],
         },
@@ -355,6 +356,7 @@ export default function ProfileScreen() {
                 confirmText="Fermer"
                 onConfirm={() => setLogoutErrorMessage('')}
             />
+            {alertNode}
         </SafeAreaView>
     );
 }

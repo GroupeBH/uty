@@ -941,17 +941,6 @@ export default function CartScreen() {
             </Modal>
             <View style={styles.checkoutBar}>
                 <SafeAreaView edges={['bottom']} style={styles.checkoutBarInner}>
-                    <View style={styles.checkoutInfo}>
-                        <Text style={styles.checkoutLabel}>A payer</Text>
-                        <Text
-                            style={styles.checkoutValue}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.75}
-                        >
-                            {formatAmount(total)}
-                        </Text>
-                    </View>
                     <Button
                         title="Passer la commande"
                         variant="primary"
@@ -1358,8 +1347,7 @@ const styles = StyleSheet.create({
         color: Colors.accentDark,
     },
     checkoutButton: {
-        flex: 1.25,
-        minWidth: 180,
+        width: '100%',
         borderRadius: BorderRadius.lg,
     },
     checkoutBar: {
@@ -1375,37 +1363,16 @@ const styles = StyleSheet.create({
     checkoutBarInner: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         paddingHorizontal: Spacing.xl,
         paddingTop: Spacing.md,
         paddingBottom: Spacing.md,
         gap: Spacing.md,
         minHeight: 92,
     },
-    checkoutInfo: {
-        flex: 0.95,
-        minWidth: 0,
-        paddingRight: Spacing.sm,
-        maxWidth: 190,
-    },
-    checkoutLabel: {
-        fontSize: Typography.fontSize.xs,
-        color: Colors.gray500,
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    checkoutValue: {
-        fontSize: Typography.fontSize.xxl,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.primary,
-        lineHeight: 30,
-        includeFontPadding: false,
-        marginTop: 2,
-    },
     checkoutModalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.55)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         justifyContent: 'center',
         alignItems: 'center',
         padding: Spacing.xl,
@@ -1414,7 +1381,9 @@ const styles = StyleSheet.create({
         width: '100%',
         maxWidth: 520,
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.xxl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         overflow: 'hidden',
         ...Shadows.xl,
     },
@@ -1485,7 +1454,7 @@ const styles = StyleSheet.create({
         flex: 1,
         borderWidth: 1.5,
         borderColor: Colors.gray300,
-        borderRadius: BorderRadius.md,
+        borderRadius: BorderRadius.xl,
         alignItems: 'center',
         justifyContent: 'center',
         height: 52,
@@ -1500,4 +1469,3 @@ const styles = StyleSheet.create({
         flex: 1.2,
     },
 });
-

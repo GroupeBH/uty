@@ -1,10 +1,10 @@
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -21,16 +21,17 @@ export default function RegisterScreen() {
     const router = useRouter();
     const [phone, setPhone] = useState('');
     const [requestOtp, { isLoading }] = useRequestOtpMutation();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const handleContinue = async () => {
         if (!phone.trim()) {
-            Alert.alert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+            showStyledAlert('Erreur', 'Veuillez entrer votre numéro de téléphone');
             return;
         }
 
         try {
             const response = await requestOtp({ phone }).unwrap();
-            Alert.alert('Succès', response.message || 'Code OTP envoyé !', [
+            showStyledAlert('Succès', response.message || 'Code OTP envoyé !', [
                 {
                     text: 'OK',
                     onPress: () => {
@@ -43,7 +44,7 @@ export default function RegisterScreen() {
             ]);
         } catch (error: any) {
             console.error('OTP request error:', error);
-            Alert.alert('Erreur', error?.data?.message || 'Erreur lors de l\'envoi du code OTP');
+            showStyledAlert('Erreur', error?.data?.message || 'Erreur lors de l\'envoi du code OTP');
         }
     };
 
@@ -124,6 +125,7 @@ export default function RegisterScreen() {
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
+            {alertNode}
         </SafeAreaView>
     );
 }

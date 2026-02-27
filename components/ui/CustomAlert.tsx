@@ -88,6 +88,11 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
     };
 
     const iconConfig = getIconConfig();
+    const typeChipStyle = {
+        backgroundColor: `${iconConfig.color}1A`,
+        borderColor: `${iconConfig.color}36`,
+    };
+    const typeChipTextStyle = { color: iconConfig.color };
     const typeLabel =
         type === 'success'
             ? 'Succes'
@@ -112,14 +117,15 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
                     <LinearGradient colors={iconConfig.gradient} style={styles.topStripe} />
 
                     <View style={styles.iconContainer}>
+                        <View style={[styles.iconGlow, { backgroundColor: `${iconConfig.color}26` }]} />
                         <LinearGradient colors={iconConfig.gradient} style={styles.iconCircle}>
-                            <Ionicons name={iconConfig.name} size={38} color={Colors.white} />
+                            <Ionicons name={iconConfig.name} size={36} color={Colors.white} />
                         </LinearGradient>
                     </View>
 
                     <View style={styles.content}>
-                        <View style={styles.typeChip}>
-                            <Text style={styles.typeChipText}>{typeLabel}</Text>
+                        <View style={[styles.typeChip, typeChipStyle]}>
+                            <Text style={[styles.typeChipText, typeChipTextStyle]}>{typeLabel}</Text>
                         </View>
                         <Text style={styles.title}>{title}</Text>
                         <Text style={styles.message}>{message}</Text>
@@ -154,19 +160,19 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
-        backgroundColor: 'rgba(1, 9, 23, 0.58)',
-        paddingHorizontal: Spacing.lg,
+        backgroundColor: 'rgba(2, 10, 26, 0.62)',
+        paddingHorizontal: Spacing.xl,
     },
     alertContainer: {
         width: '100%',
         maxWidth: 420,
-        backgroundColor: Colors.white,
-        borderRadius: BorderRadius.xxl,
+        backgroundColor: '#FCFDFF',
+        borderRadius: BorderRadius.xxl + 2,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: Colors.borderLight,
+        borderColor: Colors.primary + '18',
         paddingHorizontal: Spacing.xl,
-        paddingTop: Spacing.lg,
+        paddingTop: Spacing.xl,
         paddingBottom: Spacing.xl,
         alignItems: 'center',
         ...Shadows.xl,
@@ -180,6 +186,14 @@ const styles = StyleSheet.create({
     },
     iconContainer: {
         marginBottom: Spacing.md,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    iconGlow: {
+        position: 'absolute',
+        width: 88,
+        height: 88,
+        borderRadius: 44,
     },
     iconCircle: {
         width: 72,
@@ -197,11 +211,10 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.sm,
         paddingVertical: 3,
         borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray100,
+        borderWidth: 1,
         marginBottom: Spacing.sm,
     },
     typeChipText: {
-        color: Colors.gray600,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
         textTransform: 'uppercase',
@@ -213,26 +226,27 @@ const styles = StyleSheet.create({
         color: Colors.textPrimary,
         marginBottom: Spacing.xs,
         textAlign: 'center',
+        lineHeight: 24,
     },
     message: {
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.base,
         color: Colors.textSecondary,
         textAlign: 'center',
-        lineHeight: 20,
+        lineHeight: 22,
     },
     buttons: {
         flexDirection: 'row',
-        gap: Spacing.sm,
+        gap: Spacing.xs,
         width: '100%',
     },
     cancelButton: {
         flex: 1,
-        paddingVertical: Spacing.sm,
+        paddingVertical: Spacing.sm + 1,
         borderRadius: BorderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.gray200,
+        borderColor: Colors.gray300,
         alignItems: 'center',
-        backgroundColor: Colors.gray50,
+        backgroundColor: Colors.white,
     },
     cancelButtonText: {
         fontSize: Typography.fontSize.sm,
@@ -249,7 +263,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     confirmButtonGradient: {
-        paddingVertical: Spacing.sm,
+        paddingVertical: Spacing.sm + 1,
         alignItems: 'center',
     },
     confirmButtonText: {

@@ -5,12 +5,12 @@ import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { setCredentials } from '@/store/slices/authSlice';
 import { tokenService } from '@/services/tokenService';
 import { storage } from '@/utils/storage';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState, useRef } from 'react';
 import {
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -29,6 +29,7 @@ export default function OtpScreen() {
     const router = useRouter();
     const dispatch = useAppDispatch();
     const params = useLocalSearchParams<{ phone: string; mode: 'register' | 'login' }>();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [otp, setOtp] = useState(['', '', '', '', '']);
     const [step, setStep] = useState<SignupStep>('otp');
@@ -71,7 +72,7 @@ export default function OtpScreen() {
     const handleVerifyOtp = async () => {
         const otpCode = otp.join('');
         if (otpCode.length !== 5) {
-            Alert.alert('Erreur', 'Veuillez entrer le code à 5 chiffres');
+            showStyledAlert('Erreur', 'Veuillez entrer le code à 5 chiffres');
             return;
         }
 
@@ -80,7 +81,7 @@ export default function OtpScreen() {
             setStep('identity');
         } catch (error: any) {
             console.error('OTP verification error:', error);
-            Alert.alert('Erreur', error?.data?.message || 'Code OTP invalide');
+            showStyledAlert('Erreur', error?.data?.message || 'Code OTP invalide');
         }
     };
 
@@ -94,7 +95,7 @@ export default function OtpScreen() {
 
     const validateIdentityStep = () => {
         if (!firstName.trim() || !lastName.trim()) {
-            Alert.alert('Erreur', 'Veuillez remplir votre prénom et votre nom');
+            showStyledAlert('Erreur', 'Veuillez remplir votre prénom et votre nom');
             return false;
         }
         return true;
@@ -102,11 +103,11 @@ export default function OtpScreen() {
 
     const validateSecurityStep = () => {
         if (!/^\d{4}$/.test(pin)) {
-            Alert.alert('Erreur', 'Le code PIN doit contenir 4 chiffres');
+            showStyledAlert('Erreur', 'Le code PIN doit contenir 4 chiffres');
             return false;
         }
         if (pin !== confirmPin) {
-            Alert.alert('Erreur', 'Les codes PIN ne correspondent pas');
+            showStyledAlert('Erreur', 'Les codes PIN ne correspondent pas');
             return false;
         }
         return true;
@@ -114,7 +115,7 @@ export default function OtpScreen() {
 
     const validatePreferencesStep = () => {
         if (selectedCategories.length === 0) {
-            Alert.alert('Erreur', 'Veuillez sélectionner au moins une catégorie');
+            showStyledAlert('Erreur', 'Veuillez sélectionner au moins une catégorie');
             return false;
         }
         return true;
@@ -157,7 +158,7 @@ export default function OtpScreen() {
                 })
             );
 
-            Alert.alert('Succès', 'Votre compte a été créé !', [
+            showStyledAlert('Succès', 'Votre compte a été créé !', [
                 {
                     text: 'OK',
                     onPress: () => router.replace('/(tabs)'),
@@ -165,7 +166,7 @@ export default function OtpScreen() {
             ]);
         } catch (error: any) {
             console.error('Registration error:', error);
-            Alert.alert('Erreur', error?.data?.message || 'Erreur lors de l\'inscription');
+            showStyledAlert('Erreur', error?.data?.message || 'Erreur lors de l\'inscription');
         }
     };
 
@@ -482,6 +483,7 @@ export default function OtpScreen() {
                     )}
                 </ScrollView>
             </KeyboardAvoidingView>
+            {alertNode}
         </SafeAreaView>
     );
 }

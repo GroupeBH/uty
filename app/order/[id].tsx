@@ -203,21 +203,42 @@ export default function OrderDetailScreen() {
     const changeStatus = async (nextStatus: OrderStatusValue) => {
         if (!order?._id) return;
 
+        const isPositiveConfirmation = nextStatus === 'confirmed';
+        const isRiskyAction = nextStatus === 'cancelled';
+        const modalType: 'success' | 'warning' | 'info' = isPositiveConfirmation
+            ? 'success'
+            : isRiskyAction
+                ? 'warning'
+                : 'info';
+        const modalTitle = isPositiveConfirmation
+            ? 'Confirmer la commande'
+            : isRiskyAction
+                ? 'Confirmer l annulation'
+                : 'Confirmer le changement';
+        const modalMessage = isPositiveConfirmation
+            ? 'Voulez-vous confirmer cette commande maintenant ?'
+            : `Passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`;
+
         showAlert({
-            title: 'Confirmer le changement',
-            message: `Passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`,
-            type: 'warning',
+            title: modalTitle,
+            message: modalMessage,
+            type: modalType,
             showCancel: true,
-            confirmText: 'Confirmer',
+            confirmText: isPositiveConfirmation ? 'Oui, confirmer' : 'Confirmer',
             cancelText: 'Annuler',
             onConfirm: () => {
                 void (async () => {
                     try {
                         await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
                         await refetch();
+                        const successTitle = nextStatus === 'confirmed' ? 'Commande confirmee' : 'Statut mis a jour';
+                        const successMessage =
+                            nextStatus === 'confirmed'
+                                ? 'La commande a ete confirmee avec succes.'
+                                : 'Le statut de la commande a ete modifie avec succes.';
                         showAlert({
-                            title: 'Statut mis a jour',
-                            message: 'Le statut de la commande a ete modifie avec succes.',
+                            title: successTitle,
+                            message: successMessage,
                             type: 'success',
                         });
                     } catch (error: any) {

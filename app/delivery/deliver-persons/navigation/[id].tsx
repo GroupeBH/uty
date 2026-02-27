@@ -1,4 +1,5 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -16,7 +17,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     ActivityIndicator,
-    Alert,
     Linking,
     Platform,
     ScrollView,
@@ -271,6 +271,7 @@ export default function DriverNavigationGoScreen() {
     const deliveryId = (id || '').trim();
     const { requireAuth } = useAuth();
     const mapRef = React.useRef<MapView | null>(null);
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
     const insets = useSafeAreaInsets();
     const topOverlayOffset = React.useMemo(
         () => Spacing.sm + Math.max(insets.top, 8),
@@ -499,11 +500,11 @@ export default function DriverNavigationGoScreen() {
     const runQuickMutation = React.useCallback(async (executor: () => Promise<unknown>, successMessage: string) => {
         try {
             await executor();
-            Alert.alert('Succes', successMessage);
+            showStyledAlert('Succes', successMessage, undefined, 'success');
         } catch (error: any) {
-            Alert.alert('Action impossible', parseError(error, 'Veuillez reessayer.'));
+            showStyledAlert('Action impossible', parseError(error, 'Veuillez reessayer.'), undefined, 'error');
         }
-    }, []);
+    }, [showStyledAlert]);
 
     const openDeliveryDetails = React.useCallback(() => {
         if (!deliveryId) return;
@@ -795,6 +796,7 @@ export default function DriverNavigationGoScreen() {
                     <Text style={styles.routingText}>Mise a jour de l itineraire...</Text>
                 </View>
             ) : null}
+            {alertNode}
         </SafeAreaView>
     );
 }

@@ -1,5 +1,6 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QrCodeMatrix } from '@/components/ui/QrCodeMatrix';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeliveryStream } from '@/hooks/useDeliveryStream';
@@ -20,7 +21,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Alert,
     Linking,
     Modal,
     Platform,
@@ -138,22 +138,46 @@ const normalizePhone = (value: unknown): string | null => {
 
 const openCall = async (phone: string | null, label: string) => {
     if (!phone) {
-        Alert.alert('Contact indisponible', `Aucun numero ${label} disponible.`);
-        return;
+        return false;
     }
     const url = `tel:${phone}`;
     const ok = await Linking.canOpenURL(url);
     if (!ok) {
-        Alert.alert('Appel impossible', `Impossible d'appeler le ${label}.`);
-        return;
+        return false;
     }
     await Linking.openURL(url);
+    return true;
+};
+
+type ShowAlertFn = (
+    title: string,
+    message?: string,
+    buttons?: { text?: string; onPress?: () => void; style?: 'default' | 'cancel' | 'destructive' }[],
+    forcedType?: 'success' | 'error' | 'info' | 'warning',
+) => void;
+
+const handlePhoneCall = async (
+    phone: string | null,
+    label: string,
+    showAlert: ShowAlertFn,
+) => {
+    if (!phone) {
+        showAlert('Contact indisponible', `Aucun numero ${label} disponible.`, undefined, 'warning');
+        return;
+    }
+
+    const opened = await openCall(phone, label);
+    if (!opened) {
+        showAlert('Appel impossible', `Impossible d'appeler le ${label}.`, undefined, 'error');
+        return;
+    }
 };
 
 export default function SellerDeliveryDetailScreen() {
     const router = useRouter();
     const { user, isAuthenticated } = useAuth();
     const { id } = useLocalSearchParams<{ id?: string }>();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
     const deliveryId = (id || '').trim();
     const insets = useSafeAreaInsets();
 
@@ -258,7 +282,7 @@ export default function SellerDeliveryDetailScreen() {
             setPickupQrExpiresAt(payload?.expiresAt || null);
             setQrModalVisible(Boolean(payload?.qrPayload));
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible de generer le QR de retrait.'));
+            showStyledAlert('Erreur', parseError(error, 'Impossible de generer le QR de retrait.'), undefined, 'error');
         }
     };
 
@@ -267,9 +291,9 @@ export default function SellerDeliveryDetailScreen() {
         try {
             await sellerConfirmPickup(deliveryId).unwrap();
             await onRefreshAll();
-            Alert.alert('Succes', 'Commande marquee prete pour le retrait.');
+            showStyledAlert('Succes', 'Commande marquee prete pour le retrait.', undefined, 'success');
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible de marquer la commande comme prete.'));
+            showStyledAlert('Erreur', parseError(error, 'Impossible de marquer la commande comme prete.'), undefined, 'error');
         }
     };
 
@@ -281,7 +305,7 @@ export default function SellerDeliveryDetailScreen() {
             setMessageInput('');
             await refetchMessages();
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible d envoyer le message.'));
+            showStyledAlert('Erreur', parseError(error, 'Impossible d envoyer le message.'), undefined, 'error');
         }
     };
 
@@ -399,11 +423,11 @@ export default function SellerDeliveryDetailScreen() {
                         </View>
                     </View>
                     <View style={styles.contactRow}>
-                        <TouchableOpacity style={styles.contactBtn} onPress={() => void openCall(driverPhone, 'livreur')}>
+                        <TouchableOpacity style={styles.contactBtn} onPress={() => void handlePhoneCall(driverPhone, 'livreur', showStyledAlert)}>
                             <Ionicons name="call-outline" size={16} color={UI.accent} />
                             <Text style={styles.contactBtnText}>Livreur</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.contactBtn} onPress={() => void openCall(buyerPhone, 'acheteur')}>
+                        <TouchableOpacity style={styles.contactBtn} onPress={() => void handlePhoneCall(buyerPhone, 'acheteur', showStyledAlert)}>
                             <Ionicons name="person-outline" size={16} color={UI.accent} />
                             <Text style={styles.contactBtnText}>Acheteur</Text>
                         </TouchableOpacity>
@@ -627,6 +651,7 @@ export default function SellerDeliveryDetailScreen() {
                     </View>
                 </View>
             </Modal>
+            {alertNode}
         </SafeAreaView>
     );
 }
@@ -1150,16 +1175,18 @@ const styles = StyleSheet.create({
     // Modal
     modalOverlay: {
         flex: 1,
-        backgroundColor: '#000000AA',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: Spacing.lg,
+        padding: Spacing.xl,
     },
     modalCard: {
         width: '100%',
         maxWidth: 380,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.xxl,
         backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         overflow: 'hidden',
         ...Shadows.xl,
     },
@@ -1168,7 +1195,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.sm,
-        paddingVertical: Spacing.lg,
+        paddingVertical: Spacing.xl,
     },
     modalTitle: {
         color: Colors.white,
@@ -1177,7 +1204,9 @@ const styles = StyleSheet.create({
     },
     modalBody: {
         alignItems: 'center',
-        padding: Spacing.xl,
+        paddingHorizontal: Spacing.xl,
+        paddingTop: Spacing.xl,
+        paddingBottom: Spacing.lg,
     },
     modalQr: {
         width: 220,
@@ -1200,11 +1229,11 @@ const styles = StyleSheet.create({
     modalClose: {
         marginHorizontal: Spacing.lg,
         marginBottom: Spacing.lg,
-        borderRadius: BorderRadius.lg,
+        borderRadius: BorderRadius.xl,
         backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
-        height: 48,
+        height: 52,
     },
     modalCloseText: {
         color: Colors.white,

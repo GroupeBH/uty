@@ -1,5 +1,6 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { QrCodeMatrix } from '@/components/ui/QrCodeMatrix';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeliveryStream } from '@/hooks/useDeliveryStream';
@@ -26,7 +27,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Alert,
     Animated,
     Linking,
     Modal,
@@ -385,16 +385,15 @@ const normalizePhone = (value: unknown): string | null => {
 
 const openPhoneCall = async (phone: string | null, label: string) => {
     if (!phone) {
-        Alert.alert('Contact indisponible', `Aucun numero ${label} disponible.`);
-        return;
+        return false;
     }
     const telUrl = `tel:${phone}`;
     const canOpen = await Linking.canOpenURL(telUrl);
     if (!canOpen) {
-        Alert.alert('Erreur', `Impossible d'appeler le ${label}.`);
-        return;
+        return false;
     }
     await Linking.openURL(telUrl);
+    return true;
 };
 
 export default function DriverDeliveryDetailScreen() {
@@ -402,6 +401,7 @@ export default function DriverDeliveryDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const deliveryId = (id || '').trim();
     const { user, isAuthenticated, requireAuth } = useAuth();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
     const [cameraPermission, requestCameraPermission] = useCameraPermissions();
     const insets = useSafeAreaInsets();
 
@@ -580,6 +580,19 @@ export default function DriverDeliveryDetailScreen() {
 
     const sellerPhone = normalizePhone((delivery?.sellerId as any)?.phone);
     const buyerPhone = normalizePhone((delivery?.buyerId as any)?.phone);
+    const handlePhoneCall = React.useCallback(
+        async (phone: string | null, label: string) => {
+            if (!phone) {
+                showStyledAlert('Contact indisponible', `Aucun numero ${label} disponible.`, undefined, 'warning');
+                return;
+            }
+            const opened = await openPhoneCall(phone, label);
+            if (!opened) {
+                showStyledAlert('Erreur', `Impossible d'appeler le ${label}.`, undefined, 'error');
+            }
+        },
+        [showStyledAlert],
+    );
 
     const refetchAll = React.useCallback(async () => {
         await Promise.allSettled([refetchDelivery(), refetchTracking()]);
@@ -788,11 +801,11 @@ export default function DriverDeliveryDetailScreen() {
         try {
             await action();
             await refetchAll();
-            Alert.alert('Succes', successMessage);
+            showStyledAlert('Succes', successMessage, undefined, 'success');
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Operation impossible.'));
+            showStyledAlert('Erreur', parseError(error, 'Operation impossible.'), undefined, 'error');
         }
-    }, [refetchAll]);
+    }, [refetchAll, showStyledAlert]);
 
     const openScanModal = (config: QrScanConfig) => {
         setQrMode('scan');
@@ -823,7 +836,7 @@ export default function DriverDeliveryDetailScreen() {
         try {
             const permission = await requestCameraPermission();
             if (!permission?.granted) {
-                Alert.alert('Permission camera', 'Autorisez la camera pour scanner le QR.');
+                showStyledAlert('Permission camera', 'Autorisez la camera pour scanner le QR.', undefined, 'warning');
                 return;
             }
             setIsCameraVisible(true);
@@ -840,23 +853,23 @@ export default function DriverDeliveryDetailScreen() {
         setIsScanLocked(true);
         setQrInput(value);
         setIsCameraVisible(false);
-        Alert.alert('QR detecte', 'Validez pour continuer.');
+        showStyledAlert('QR detecte', 'Validez pour continuer.', undefined, 'info');
     };
 
     const validateQr = async () => {
         if (qrMode !== 'scan' || !qrAction) return;
         const payload = qrInput.trim();
         if (!payload) {
-            Alert.alert('QR requis', 'Scannez ou saisissez un QR valide.');
+            showStyledAlert('QR requis', 'Scannez ou saisissez un QR valide.', undefined, 'warning');
             return;
         }
         try {
             await qrAction(payload);
             await refetchAll();
             closeQrModal();
-            Alert.alert('Succes', 'Retrait confirme. La livraison a demarre.');
+            showStyledAlert('Succes', 'Retrait confirme. La livraison a demarre.', undefined, 'success');
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible de valider le QR de retrait.'));
+            showStyledAlert('Erreur', parseError(error, 'Impossible de valider le QR de retrait.'), undefined, 'error');
         }
     };
 
@@ -872,7 +885,7 @@ export default function DriverDeliveryDetailScreen() {
             setQrDisplayToken(payload.qrPayload);
             setQrModalVisible(true);
         } catch (error: any) {
-            Alert.alert('Erreur', parseError(error, 'Impossible de generer le QR livraison.'));
+            showStyledAlert('Erreur', parseError(error, 'Impossible de generer le QR livraison.'), undefined, 'error');
         }
     };
 
@@ -1120,7 +1133,7 @@ export default function DriverDeliveryDetailScreen() {
                                 <TouchableOpacity
                                     style={[styles.contactBtn, !sellerPhone && styles.disabled]}
                                     disabled={!sellerPhone}
-                                    onPress={() => void openPhoneCall(sellerPhone, 'vendeur')}
+                                    onPress={() => void handlePhoneCall(sellerPhone, 'vendeur')}
                                 >
                                     <Ionicons name="call-outline" size={13} color={UI.accent} />
                                     <Text style={styles.contactText}>Vendeur</Text>
@@ -1133,7 +1146,7 @@ export default function DriverDeliveryDetailScreen() {
                                 <TouchableOpacity
                                     style={[styles.contactBtn, !buyerPhone && styles.disabled]}
                                     disabled={!buyerPhone}
-                                    onPress={() => void openPhoneCall(buyerPhone, 'acheteur')}
+                                    onPress={() => void handlePhoneCall(buyerPhone, 'acheteur')}
                                 >
                                     <Ionicons name="chatbubble-ellipses-outline" size={13} color={UI.accent} />
                                     <Text style={styles.contactText}>Acheteur</Text>
@@ -1344,6 +1357,7 @@ export default function DriverDeliveryDetailScreen() {
                     </View>
                 </View>
             </Modal>
+            {alertNode}
         </SafeAreaView>
     );
 }
@@ -1808,17 +1822,19 @@ const styles = StyleSheet.create({
     // Journey Guide Modal
     journeyOverlay: {
         flex: 1,
-        backgroundColor: '#000000B3',
+        backgroundColor: 'rgba(3, 12, 30, 0.66)',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: Spacing.lg,
+        paddingHorizontal: Spacing.xl,
     },
     journeyCard: {
         width: '100%',
         maxWidth: 430,
         maxHeight: '78%',
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.xxl,
         backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         overflow: 'hidden',
         ...Shadows.xl,
     },
@@ -2008,16 +2024,18 @@ const styles = StyleSheet.create({
     // Modal
     modalOverlay: {
         flex: 1,
-        backgroundColor: '#000000AA',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: Spacing.lg,
+        paddingHorizontal: Spacing.xl,
     },
     modalCard: {
         width: '100%',
         maxWidth: 400,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.xxl,
         backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
         overflow: 'hidden',
         ...Shadows.xl,
     },
@@ -2026,7 +2044,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.sm,
-        paddingVertical: Spacing.lg,
+        paddingVertical: Spacing.xl,
     },
     modalTitle: {
         color: Colors.white,
@@ -2034,7 +2052,9 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
     },
     modalBody: {
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.lg,
+        paddingBottom: Spacing.xl,
     },
     modalCaption: {
         color: Colors.gray600,
@@ -2107,11 +2127,11 @@ const styles = StyleSheet.create({
     },
     modalPrimary: {
         flex: 1,
-        borderRadius: BorderRadius.lg,
+        borderRadius: BorderRadius.xl,
         backgroundColor: Colors.primary,
         alignItems: 'center',
         justifyContent: 'center',
-        height: 48,
+        height: 50,
     },
     modalPrimaryText: {
         color: Colors.white,

@@ -35,7 +35,6 @@ import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-    Alert,
     Dimensions,
     LayoutAnimation,
     Linking,
@@ -2165,9 +2164,10 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         setAndroidDetailsModalVisible(true);
     };
     const showQuickInfoAlert = () => {
-        Alert.alert(
-            'Infos livraison',
-            [
+        setAlert({
+            visible: true,
+            title: 'Infos livraison',
+            message: [
                 `Statut: ${DELIVERY_STATUS_LABELS[status] || status}`,
                 `Duree: ${durationLabel}`,
                 `Distance: ${distanceLabel}`,
@@ -2176,7 +2176,8 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 `Destination: ${activeTargetLabel || 'Non definie'}`,
                 `Trajet: ${routeSourceLabel}`,
             ].join('\n'),
-        );
+            type: 'info',
+        });
     };
 
     if (!deliveryId || isLoading) return <LoadingSpinner fullScreen />;
@@ -4248,8 +4249,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
     },
     sendBtn: { width: 40, height: 40, borderRadius: BorderRadius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary },
-    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', padding: Spacing.lg },
-    modalCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xl, paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.borderLight, overflow: 'hidden', ...Shadows.lg },
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(3, 12, 30, 0.64)', justifyContent: 'center', padding: Spacing.xl },
+    modalCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xxl, paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.primary + '18', overflow: 'hidden', ...Shadows.xl },
     modalTopStripe: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },
     modalIconWrap: { width: 50, height: 50, borderRadius: 25, backgroundColor: Colors.primary + '12', alignItems: 'center', justifyContent: 'center', alignSelf: 'center', marginBottom: Spacing.sm },
     modalTitle: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold, color: Colors.primary, textAlign: 'center' },
@@ -4266,8 +4267,8 @@ const styles = StyleSheet.create({
     modalActions: { marginTop: Spacing.md, flexDirection: 'row', gap: Spacing.sm },
     modalGhost: { flex: 1, borderWidth: 1, borderColor: Colors.gray300, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.gray50 },
     modalGhostText: { color: Colors.gray600, fontWeight: Typography.fontWeight.semibold },
-    modalPrimary: { flex: 1, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
-    modalSingleAction: { marginTop: Spacing.md, borderRadius: BorderRadius.md, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
+    modalPrimary: { flex: 1, borderRadius: BorderRadius.xl, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
+    modalSingleAction: { marginTop: Spacing.md, borderRadius: BorderRadius.xl, alignItems: 'center', justifyContent: 'center', paddingVertical: Spacing.sm, backgroundColor: Colors.primary },
     modalPrimaryText: { color: Colors.white, fontWeight: Typography.fontWeight.bold },
     androidDetailsOverlay: {
         flex: 1,

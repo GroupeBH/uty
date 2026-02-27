@@ -383,7 +383,7 @@ export default function MyAnnouncementsScreen() {
                         <Text style={styles.statNumber}>
                             {announcements.reduce((sum, a) => sum + (a.likes?.length || 0), 0)}
                         </Text>
-                        <Text style={styles.statLabel}>J'aime</Text>
+                        <Text style={styles.statLabel}>J&apos;aime</Text>
                     </View>
                 </View>
             )}
@@ -502,7 +502,7 @@ export default function MyAnnouncementsScreen() {
 
                         <TouchableOpacity style={styles.actionMenuItem} onPress={handleView}>
                             <Ionicons name="eye-outline" size={24} color={Colors.accent} />
-                            <Text style={styles.actionMenuItemText}>Voir l'annonce</Text>
+                            <Text style={styles.actionMenuItemText}>Voir l&apos;annonce</Text>
                         </TouchableOpacity>
 
                         <TouchableOpacity style={styles.actionMenuItem} onPress={handleEdit}>
@@ -538,9 +538,9 @@ export default function MyAnnouncementsScreen() {
                         <View style={styles.confirmIcon}>
                             <Ionicons name="trash-outline" size={22} color={Colors.white} />
                         </View>
-                        <Text style={styles.confirmTitle}>Supprimer l'annonce ?</Text>
+                        <Text style={styles.confirmTitle}>Supprimer l&apos;annonce ?</Text>
                         <Text style={styles.confirmMessage}>
-                            Cette action est definitive. "{confirmState.announcementName}"
+                            Cette action est definitive. &quot;{confirmState.announcementName}&quot;
                         </Text>
                         <View style={styles.confirmButtons}>
                             <TouchableOpacity style={styles.confirmCancel} onPress={closeDeleteConfirm}>
@@ -816,13 +816,17 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         justifyContent: 'flex-end',
+        paddingHorizontal: Spacing.sm,
+        paddingBottom: Spacing.sm,
     },
     actionMenu: {
         backgroundColor: Colors.white,
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '15',
         padding: Spacing.xl,
         paddingBottom: Spacing.xxxl,
     },
