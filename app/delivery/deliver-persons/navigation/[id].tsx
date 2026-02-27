@@ -43,6 +43,12 @@ type QuickAction = {
     loading?: boolean;
     disabled?: boolean;
 };
+type DirectionsWaypointPayload = {
+    address?: string;
+    lat?: number;
+    lng?: number;
+    placeId?: string;
+};
 
 const DEFAULT_CENTER: LatLng = { latitude: -4.325, longitude: 15.3222 };
 
@@ -208,6 +214,47 @@ const formatLocationLabel = (
     return coordinatesToLabel(fallbackCoordinates) || fallback;
 };
 
+const buildDirectionsWaypoint = (
+    point: LatLng | null,
+    value: unknown,
+): DirectionsWaypointPayload | null => {
+    if (point) {
+        return { lat: point.latitude, lng: point.longitude };
+    }
+
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        const coordinatePoint = parseCoordinateLabel(trimmed);
+        if (coordinatePoint) {
+            return { lat: coordinatePoint.latitude, lng: coordinatePoint.longitude };
+        }
+        return { address: trimmed };
+    }
+
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        if (typeof asRecord.placeId === 'string' && asRecord.placeId.trim()) {
+            return { placeId: asRecord.placeId.trim() };
+        }
+        const addressCandidate =
+            (typeof asRecord.address === 'string' && asRecord.address.trim()) ||
+            (typeof asRecord.formattedAddress === 'string' && asRecord.formattedAddress.trim()) ||
+            (typeof asRecord.label === 'string' && asRecord.label.trim()) ||
+            '';
+        if (addressCandidate) {
+            return { address: addressCandidate };
+        }
+
+        const parsed = parseCoordinateLabel(value);
+        if (parsed) {
+            return { lat: parsed.latitude, lng: parsed.longitude };
+        }
+    }
+
+    return null;
+};
+
 const iconForInstruction = (instruction?: string): keyof typeof Ionicons.glyphMap => {
     const text = (instruction || '').toLowerCase();
     if (text.includes('gauche')) return 'arrow-back-outline';
@@ -254,29 +301,81 @@ export default function DriverNavigationGoScreen() {
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
     const pickupCoordinatesSource = (tracking?.pickupCoordinates || delivery?.pickupCoordinates) as DeliveryGeoPoint | null | undefined;
     const dropoffCoordinatesSource = (tracking?.deliveryCoordinates || delivery?.deliveryCoordinates) as DeliveryGeoPoint | null | undefined;
+    const currentLocationSource = tracking?.currentLocation || delivery?.currentLocation;
     const pickupLocationSource = tracking?.pickupLocation ?? delivery?.pickupLocation;
     const dropoffLocationSource = tracking?.deliveryLocation ?? delivery?.deliveryLocation;
-
-    const pickupPoint = parseGeoPoint(pickupCoordinatesSource) || parseCoordinateLabel(pickupLocationSource);
-    const dropoffPoint = parseGeoPoint(dropoffCoordinatesSource) || parseCoordinateLabel(dropoffLocationSource);
-    const driverPoint = parseGeoPoint((tracking?.currentLocation || delivery?.currentLocation) as DeliveryGeoPoint | null | undefined);
-    const mapCenter = driverPoint || pickupPoint || dropoffPoint || DEFAULT_CENTER;
+    const pickupPoint = React.useMemo(
+        () => parseGeoPoint(pickupCoordinatesSource) || parseCoordinateLabel(pickupLocationSource),
+        [pickupCoordinatesSource, pickupLocationSource],
+    );
+    const dropoffPoint = React.useMemo(
+        () => parseGeoPoint(dropoffCoordinatesSource) || parseCoordinateLabel(dropoffLocationSource),
+        [dropoffCoordinatesSource, dropoffLocationSource],
+    );
+    const driverPoint = React.useMemo(
+        () => parseGeoPoint(currentLocationSource as DeliveryGeoPoint | null | undefined),
+        [currentLocationSource],
+    );
+    const mapCenter = React.useMemo(
+        () => driverPoint || pickupPoint || dropoffPoint || DEFAULT_CENTER,
+        [driverPoint, dropoffPoint, pickupPoint],
+    );
 
     const headingToPickup = ['pending', 'assigned', 'at_pickup'].includes(status);
-    const targetPoint = headingToPickup ? pickupPoint : dropoffPoint;
+    const headingToDropoff = ['picked_up', 'in_transit', 'at_dropoff', 'delivered'].includes(status);
+    const routeOriginPoint = React.useMemo(
+        () =>
+            headingToPickup
+                ? (driverPoint || pickupPoint)
+                : headingToDropoff
+                    ? (pickupPoint || driverPoint)
+                    : (driverPoint || pickupPoint || dropoffPoint),
+        [driverPoint, dropoffPoint, headingToDropoff, headingToPickup, pickupPoint],
+    );
+    const routeDestinationPoint = React.useMemo(
+        () =>
+            headingToPickup
+                ? pickupPoint
+                : headingToDropoff
+                    ? dropoffPoint
+                    : dropoffPoint,
+        [dropoffPoint, headingToDropoff, headingToPickup, pickupPoint],
+    );
+    const targetPoint = routeDestinationPoint;
+
     const pickupLabel = formatLocationLabel(pickupLocationSource, pickupCoordinatesSource, 'Point de retrait');
     const dropoffLabel = formatLocationLabel(dropoffLocationSource, dropoffCoordinatesSource, 'Point de livraison');
     const targetLabel = headingToPickup ? pickupLabel : dropoffLabel;
-    const originPoint = driverPoint || pickupPoint || dropoffPoint || null;
+    const originPoint = routeOriginPoint || null;
+    const routeOriginWaypoint = React.useMemo(
+        () =>
+            buildDirectionsWaypoint(
+                routeOriginPoint || null,
+                headingToPickup ? currentLocationSource : pickupLocationSource,
+            ),
+        [currentLocationSource, headingToPickup, pickupLocationSource, routeOriginPoint],
+    );
+    const routeDestinationWaypoint = React.useMemo(
+        () =>
+            buildDirectionsWaypoint(
+                routeDestinationPoint || null,
+                headingToPickup ? pickupLocationSource : dropoffLocationSource,
+            ),
+        [dropoffLocationSource, headingToPickup, pickupLocationSource, routeDestinationPoint],
+    );
+    const fallbackPathPoints = React.useMemo(
+        () => (originPoint && targetPoint ? [originPoint, targetPoint] : []),
+        [originPoint, targetPoint],
+    );
 
     React.useEffect(() => {
-        if (!originPoint || !targetPoint) return;
+        if (!routeOriginWaypoint || !routeDestinationWaypoint) return;
         let cancelled = false;
         const timeout = setTimeout(async () => {
             try {
                 const response = await fetchDirections({
-                    origin: { lat: originPoint.latitude, lng: originPoint.longitude },
-                    destination: { lat: targetPoint.latitude, lng: targetPoint.longitude },
+                    origin: routeOriginWaypoint,
+                    destination: routeDestinationWaypoint,
                     language: 'fr',
                 }).unwrap();
                 if (cancelled) return;
@@ -303,15 +402,15 @@ export default function DriverNavigationGoScreen() {
                     })
                     .filter((item: NavStep | null): item is NavStep => Boolean(item));
                 setRouteSteps(mappedSteps);
-                setRouteCoordinates(decoded.length >= 2 ? decoded : [originPoint, targetPoint]);
+                setRouteCoordinates(decoded.length >= 2 ? decoded : fallbackPathPoints);
                 setDistanceMeters(legs.reduce((sum: number, leg: any) => sum + parseMetric(leg?.distance), 0));
                 setDurationSeconds(legs.reduce((sum: number, leg: any) => sum + parseMetric(leg?.duration), 0));
                 setActiveStepIndex(0);
             } catch {
                 if (cancelled) return;
-                setRouteCoordinates([originPoint, targetPoint]);
+                setRouteCoordinates(fallbackPathPoints);
                 setRouteSteps([]);
-                setDistanceMeters(haversineMeters(originPoint, targetPoint));
+                setDistanceMeters(originPoint && targetPoint ? haversineMeters(originPoint, targetPoint) : 0);
                 setDurationSeconds(0);
                 setActiveStepIndex(0);
             }
@@ -320,7 +419,7 @@ export default function DriverNavigationGoScreen() {
             cancelled = true;
             clearTimeout(timeout);
         };
-    }, [fetchDirections, originPoint, targetPoint]);
+    }, [fallbackPathPoints, fetchDirections, originPoint, routeDestinationWaypoint, routeOriginWaypoint, targetPoint]);
 
     React.useEffect(() => {
         if (!driverPoint || routeSteps.length === 0) return;
