@@ -5,7 +5,8 @@
 import { ProductCard } from '@/components/ProductCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useAuth } from '@/hooks/useAuth';
+import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { Announcement } from '@/types/announcement';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,6 +64,8 @@ export default function SearchScreen() {
         [categoryIdFromParams],
     );
     const [category, setCategory] = useState<string | undefined>(normalizedCategoryFromParams);
+    const { user, requireAuth } = useAuth();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
 
     const { data: announcements, isLoading } = useGetAnnouncementsQuery();
     const { data: categoriesData = [] } = useGetCategoriesQuery();
@@ -119,9 +122,41 @@ export default function SearchScreen() {
         console.log('Add to cart:', product._id);
     };
 
-    const handleToggleWishlist = (product: Announcement) => {
-        console.log('Toggle wishlist:', product._id);
-    };
+    const currentUserId = useMemo(
+        () => normalizeId((user as any)?._id || (user as any)?.id),
+        [user],
+    );
+    const isInWishlist = React.useCallback(
+        (announcement: Announcement) => {
+            if (!currentUserId) {
+                return false;
+            }
+            const likes = Array.isArray((announcement as any)?.likes)
+                ? (announcement as any).likes
+                : [];
+            return likes.some((entry: any) => normalizeId(entry) === currentUserId);
+        },
+        [currentUserId],
+    );
+    const handleToggleWishlist = React.useCallback(
+        async (product: Announcement) => {
+            if (isTogglingLike) {
+                return;
+            }
+            if (!requireAuth('Vous devez etre connecte pour liker une annonce.')) {
+                return;
+            }
+            if (!product?._id) {
+                return;
+            }
+            try {
+                await toggleLike(product._id).unwrap();
+            } catch (error) {
+                console.error('Toggle like error:', error);
+            }
+        },
+        [isTogglingLike, requireAuth, toggleLike],
+    );
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -226,6 +261,7 @@ export default function SearchScreen() {
                                 product={item}
                                 onAddToCart={handleAddToCart}
                                 onToggleWishlist={handleToggleWishlist}
+                                isInWishlist={isInWishlist(item)}
                             />
                         </View>
                     )}

@@ -5,7 +5,7 @@ import { ProductCard } from '@/components/ProductCard';
 import { ProductCardSkeleton, QuickActionSkeleton } from '@/components/SkeletonLoader';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,13 +48,14 @@ const getRecommendedAnnouncements = (allAnnouncements: any[]) => {
 };
 
 // Component to render announcement pairs horizontally
-const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
+const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist, isInWishlist }: any) => (
     <View style={styles.pairContainer}>
         <View style={styles.pairItem}>
             <ProductCard
                 product={pair[0]}
                 onAddToCart={onAddToCart}
                 onToggleWishlist={onToggleWishlist}
+                isInWishlist={isInWishlist?.(pair[0])}
             />
         </View>
         {pair[1] && (
@@ -63,6 +64,7 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
                     product={pair[1]}
                     onAddToCart={onAddToCart}
                     onToggleWishlist={onToggleWishlist}
+                    isInWishlist={isInWishlist?.(pair[1])}
                 />
             </View>
         )}
@@ -184,6 +186,7 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const router = useRouter();
     const { user, isAuthenticated, requireAuth } = useAuth();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -229,6 +232,40 @@ export default function HomeScreen() {
         }
         requireAuth('Connectez-vous pour acceder aux notifications.');
     }, [isAuthenticated, requireAuth, router]);
+    const currentUserId = useMemo(
+        () => toIdString((user as any)?._id || (user as any)?.id),
+        [user],
+    );
+    const isInWishlist = React.useCallback(
+        (announcement: any) => {
+            if (!currentUserId) {
+                return false;
+            }
+            const likes = Array.isArray(announcement?.likes) ? announcement.likes : [];
+            return likes.some((entry: any) => toIdString(entry) === currentUserId);
+        },
+        [currentUserId],
+    );
+    const handleToggleWishlist = React.useCallback(
+        async (announcement: any) => {
+            if (isTogglingLike) {
+                return;
+            }
+            if (!requireAuth('Vous devez etre connecte pour liker une annonce.')) {
+                return;
+            }
+            const announcementId = toIdString(announcement?._id);
+            if (!announcementId) {
+                return;
+            }
+            try {
+                await toggleLike(announcementId).unwrap();
+            } catch (error) {
+                console.error('Like error:', error);
+            }
+        },
+        [isTogglingLike, requireAuth, toggleLike],
+    );
 
     const personalizedAnnouncementBuckets = useMemo(() => {
         const allAnnouncements = announcements || [];
@@ -678,7 +715,8 @@ export default function HomeScreen() {
                                         key={`recommended-pair-${index}`}
                                         pair={pair}
                                         onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                        onToggleWishlist={handleToggleWishlist}
+                                        isInWishlist={isInWishlist}
                                     />
                                 ))}
                             </>
@@ -744,7 +782,8 @@ export default function HomeScreen() {
                                     key={`recent-pair-${index}`}
                                     pair={pair}
                                     onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                    onToggleWishlist={handleToggleWishlist}
+                                    isInWishlist={isInWishlist}
                                 />
                             ))}
                         </>

@@ -7,7 +7,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
+import { useGetAnnouncementByIdQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import {
     AnnouncementComment,
@@ -42,7 +42,7 @@ export default function ProductDetailScreen() {
     const announcementId = id || '';
     const router = useRouter();
     const insets = useSafeAreaInsets();
-    const { requireAuth, isAuthenticated } = useAuth();
+    const { requireAuth, isAuthenticated, user } = useAuth();
     const safeBack = () => {
         if (router.canGoBack()) {
             router.back();
@@ -62,6 +62,7 @@ export default function ProductDetailScreen() {
         skip: !announcementId,
     });
     const [createComment, { isLoading: isSubmittingReview }] = useCreateCommentMutation();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
@@ -71,7 +72,6 @@ export default function ProductDetailScreen() {
     const [showImageModal, setShowImageModal] = useState(false);
     const [showContactModal, setShowContactModal] = useState(false);
     const [showReviewModal, setShowReviewModal] = useState(false);
-    const [isFavorite, setIsFavorite] = useState(false);
     const [quantity, setQuantity] = useState(1);
     
     // Review form states
@@ -159,6 +159,23 @@ export default function ProductDetailScreen() {
         const total = ratedValues.reduce((sum, value) => sum + value, 0);
         return total / ratedValues.length;
     }, [comments]);
+    const currentUserId = user?._id;
+    const likeCount = Array.isArray(product?.likes) ? product.likes.length : 0;
+    const isFavorite = React.useMemo(() => {
+        if (!currentUserId || !Array.isArray(product?.likes)) {
+            return false;
+        }
+
+        return product.likes.some((entry: any) => {
+            if (typeof entry === 'string') {
+                return entry === currentUserId;
+            }
+            if (entry && typeof entry === 'object') {
+                return entry._id === currentUserId || entry.id === currentUserId;
+            }
+            return false;
+        });
+    }, [currentUserId, product?.likes]);
     const infoChips = [
         product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
         product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
@@ -339,8 +356,23 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const toggleFavorite = () => {
-        setIsFavorite(!isFavorite);
+    const handleToggleFavorite = async () => {
+        if (!product?._id) {
+            return;
+        }
+        if (!requireAuth('Vous devez etre connecte pour liker une annonce')) {
+            return;
+        }
+
+        try {
+            await toggleLike(product._id).unwrap();
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(error, 'Impossible de mettre a jour le like.'),
+                'error',
+            );
+        }
     };
 
     if (isLoading) {
@@ -383,7 +415,11 @@ export default function ProductDetailScreen() {
                             <Ionicons name="arrow-back" size={24} color={Colors.white} />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle} numberOfLines={1}>{product.name}</Text>
-                        <TouchableOpacity onPress={toggleFavorite} style={styles.headerButton}>
+                        <TouchableOpacity
+                            onPress={handleToggleFavorite}
+                            style={styles.headerButton}
+                            disabled={isTogglingLike}
+                        >
                             <Ionicons 
                                 name={isFavorite ? "heart" : "heart-outline"} 
                                 size={24} 
@@ -399,7 +435,11 @@ export default function ProductDetailScreen() {
                 <TouchableOpacity onPress={() => safeBack()} style={styles.floatingButton}>
                     <Ionicons name="arrow-back" size={24} color={Colors.white} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={toggleFavorite} style={styles.floatingButton}>
+                <TouchableOpacity
+                    onPress={handleToggleFavorite}
+                    style={styles.floatingButton}
+                    disabled={isTogglingLike}
+                >
                     <Ionicons 
                         name={isFavorite ? "heart" : "heart-outline"} 
                         size={24} 
@@ -482,6 +522,13 @@ export default function ProductDetailScreen() {
                                         ? `${averageRating.toFixed(1)} (${comments.length})`
                                         : 'Aucun avis'}
                                 </Text>
+                                <Text style={styles.ratingDivider}>•</Text>
+                                <Ionicons
+                                    name={isFavorite ? 'heart' : 'heart-outline'}
+                                    size={16}
+                                    color={isFavorite ? Colors.error : Colors.textSecondary}
+                                />
+                                <Text style={styles.ratingLikeText}>{likeCount}</Text>
                             </View>
                         </View>
                     </View>
@@ -1154,6 +1201,15 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
+    },
+    ratingDivider: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray400,
+    },
+    ratingLikeText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textSecondary,
     },
     infoChips: {
         flexDirection: 'row',
