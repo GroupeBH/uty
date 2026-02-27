@@ -598,43 +598,54 @@ export default function ProductDetailScreen() {
                         <Text style={styles.bottomBarLabel}>Dans le panier</Text>
                         <Text style={styles.bottomBarValue}>{inCartQuantity} article(s)</Text>
                         <Text style={styles.bottomBarState}>
-                            {hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
+                            {inCartQuantity > 0 ? 'Deja au panier' : hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
                         </Text>
                     </View>
 
                     <View style={styles.bottomBarButtons}>
-                        <TouchableOpacity
-                            style={[styles.addToCartButton, !hasStockLeft && styles.addToCartButtonDisabled]}
-                            onPress={handleAddToCart}
-                            activeOpacity={0.8}
-                            disabled={!hasStockLeft}
-                        >
-                            {hasStockLeft ? (
+                        {inCartQuantity > 0 ? (
+                            <TouchableOpacity
+                                style={styles.addToCartButton}
+                                onPress={() => router.push('/(tabs)/cart')}
+                                activeOpacity={0.8}
+                            >
                                 <LinearGradient
-                                    colors={Gradients.accent}
+                                    colors={Gradients.primary}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 1 }}
-                                    style={styles.addToCartGradient}
+                                    style={styles.viewCartGradient}
                                 >
-                                    <Ionicons name="cart" size={20} color={Colors.primary} />
-                                    <Text style={styles.addToCartText}>Ajouter {quantity}</Text>
+                                    <Ionicons name="cart-outline" size={20} color={Colors.white} />
+                                    <Text style={styles.viewCartText}>Voir dans le panier</Text>
                                 </LinearGradient>
-                            ) : (
-                                <View style={[styles.addToCartGradient, styles.addToCartGradientDisabled]}>
-                                    <Ionicons name="alert-circle-outline" size={20} color={Colors.gray500} />
-                                    <Text style={[styles.addToCartText, styles.addToCartTextDisabled]}>
-                                        Stock atteint
-                                    </Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.buyNowButton}
-                            onPress={() => showAlert('Acheter', 'Fonctionnalite a venir', 'info')}
-                        >
-                            <Text style={styles.buyNowText} numberOfLines={2}>Acheter maintenant</Text>
-                        </TouchableOpacity>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={[styles.addToCartButton, !hasStockLeft && styles.addToCartButtonDisabled]}
+                                onPress={handleAddToCart}
+                                activeOpacity={0.8}
+                                disabled={!hasStockLeft}
+                            >
+                                {hasStockLeft ? (
+                                    <LinearGradient
+                                        colors={Gradients.accent}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={styles.addToCartGradient}
+                                    >
+                                        <Ionicons name="cart" size={20} color={Colors.primary} />
+                                        <Text style={styles.addToCartText}>Ajouter {quantity}</Text>
+                                    </LinearGradient>
+                                ) : (
+                                    <View style={[styles.addToCartGradient, styles.addToCartGradientDisabled]}>
+                                        <Ionicons name="alert-circle-outline" size={20} color={Colors.gray500} />
+                                        <Text style={[styles.addToCartText, styles.addToCartTextDisabled]}>
+                                            Stock atteint
+                                        </Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </SafeAreaView>
             </View>
@@ -1293,30 +1304,25 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: Colors.gray200,
     },
+    viewCartGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.md + 2,
+        gap: Spacing.sm,
+    },
     addToCartText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
     },
+    viewCartText: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
     addToCartTextDisabled: {
         color: Colors.gray500,
-    },
-    buyNowButton: {
-        flex: 1,
-        minWidth: 148,
-        backgroundColor: Colors.primary,
-        borderRadius: BorderRadius.xl,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: Spacing.md + 2,
-    },
-    buyNowText: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
-        textAlign: 'center',
-        lineHeight: 20,
-        includeFontPadding: false,
     },
     errorContainer: {
         flex: 1,

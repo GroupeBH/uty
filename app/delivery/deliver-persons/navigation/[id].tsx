@@ -26,7 +26,7 @@ import {
     View,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type LatLng = { latitude: number; longitude: number };
 type NavStep = {
@@ -271,6 +271,19 @@ export default function DriverNavigationGoScreen() {
     const deliveryId = (id || '').trim();
     const { requireAuth } = useAuth();
     const mapRef = React.useRef<MapView | null>(null);
+    const insets = useSafeAreaInsets();
+    const topOverlayOffset = React.useMemo(
+        () => Spacing.sm + Math.max(insets.top, 8),
+        [insets.top],
+    );
+    const bottomOverlayOffset = React.useMemo(
+        () => Spacing.lg + Math.max(insets.bottom, 14),
+        [insets.bottom],
+    );
+    const routingBadgeBottom = React.useMemo(
+        () => bottomOverlayOffset + 72,
+        [bottomOverlayOffset],
+    );
 
     const [fetchDirections, { isLoading: isRouting }] = useGetDirectionsMutation();
     const [acceptDelivery, { isLoading: isAccepting }] = useAcceptDeliveryMutation();
@@ -683,7 +696,7 @@ export default function DriverNavigationGoScreen() {
 
             <LinearGradient colors={[Colors.primaryDark + 'DE', Colors.primaryDark + '0A']} style={styles.topGradient} pointerEvents="none" />
 
-            <View style={styles.topOverlay} pointerEvents="box-none">
+            <View style={[styles.topOverlay, { top: topOverlayOffset }]} pointerEvents="box-none">
                 <View style={styles.topRow}>
                     <TouchableOpacity style={styles.glassBtn} onPress={() => router.back()}>
                         <Ionicons name="arrow-back" size={20} color={Colors.white} />
@@ -731,7 +744,7 @@ export default function DriverNavigationGoScreen() {
                 </TouchableOpacity>
             </View>
 
-            <View style={styles.bottomOverlay} pointerEvents="box-none">
+            <View style={[styles.bottomOverlay, { bottom: bottomOverlayOffset }]} pointerEvents="box-none">
                 {showSteps ? (
                     <View style={styles.stepsCard}>
                         <View style={styles.stepsHeader}>
@@ -777,7 +790,7 @@ export default function DriverNavigationGoScreen() {
             </View>
 
             {isRouting ? (
-                <View style={styles.routingBadge}>
+                <View style={[styles.routingBadge, { bottom: routingBadgeBottom }]}>
                     <ActivityIndicator size="small" color={Colors.white} />
                     <Text style={styles.routingText}>Mise a jour de l itineraire...</Text>
                 </View>
