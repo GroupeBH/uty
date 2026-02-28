@@ -1,8 +1,9 @@
-import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useRequestOtpMutation } from '@/store/api/authApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
     KeyboardAvoidingView,
@@ -14,30 +15,45 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRequestOtpMutation } from '@/store/api/authApi';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RegisterScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const [phone, setPhone] = useState('');
+    const [isPhoneFocused, setIsPhoneFocused] = useState(false);
     const [requestOtp, { isLoading }] = useRequestOtpMutation();
     const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
+    const scrollRef = React.useRef<ScrollView | null>(null);
+
+    const keyboardVerticalOffset = Platform.select({
+        ios: 0,
+        android: Math.max(insets.bottom, 10),
+        default: 0,
+    });
+
+    const scrollToForm = () => {
+        setTimeout(() => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+        }, 120);
+    };
 
     const handleContinue = async () => {
-        if (!phone.trim()) {
-            showStyledAlert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+        const trimmedPhone = phone.trim();
+        if (!trimmedPhone) {
+            showStyledAlert('Erreur', 'Veuillez entrer votre numero de telephone');
             return;
         }
 
         try {
-            const response = await requestOtp({ phone }).unwrap();
-            showStyledAlert('Succès', response.message || 'Code OTP envoyé !', [
+            const response = await requestOtp({ phone: trimmedPhone }).unwrap();
+            showStyledAlert('Succes', response.message || 'Code OTP envoye !', [
                 {
                     text: 'OK',
                     onPress: () => {
                         router.push({
                             pathname: '/(auth)/otp',
-                            params: { phone, mode: 'register' },
+                            params: { phone: trimmedPhone, mode: 'register' },
                         });
                     },
                 },
@@ -52,44 +68,56 @@ export default function RegisterScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={keyboardVerticalOffset}
             >
                 <ScrollView
+                    ref={scrollRef}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
-                    {/* Header */}
+                    <View pointerEvents="none" style={styles.colorOrbCool} />
+                    <View pointerEvents="none" style={styles.colorOrbWarm} />
+
                     <View style={styles.header}>
                         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                             <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
                         </TouchableOpacity>
-                    </View>
-
-                    {/* Illustration */}
-                    <View style={styles.illustrationContainer}>
-                        <LinearGradient colors={Gradients.cool} style={styles.iconCircle}>
-                            <Ionicons name="person-add-outline" size={64} color={Colors.white} />
+                        <LinearGradient colors={Gradients.accent} style={styles.brandBadge}>
+                            <Ionicons name="sparkles-outline" size={14} color={Colors.white} />
+                            <Text style={styles.brandBadgeText}>UTY Start</Text>
                         </LinearGradient>
                     </View>
 
-                    {/* Title */}
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.title}>Créer un compte</Text>
-                        <Text style={styles.subtitle}>
-                            Entrez votre numéro de téléphone pour commencer
-                        </Text>
+                    <View style={styles.modeCard}>
+                        <LinearGradient colors={Gradients.cool} style={styles.modeCardGradient}>
+                            <View style={styles.modeIconCircle}>
+                                <Ionicons name="person-add-outline" size={22} color={Colors.white} />
+                            </View>
+                            <View style={styles.modeTextWrap}>
+                                <Text style={styles.modeStep}>Inscription</Text>
+                                <Text style={styles.modeTitle}>Creer un compte</Text>
+                                <Text style={styles.modeSubtitle}>Demarrez rapidement avec verification OTP.</Text>
+                            </View>
+                        </LinearGradient>
                     </View>
 
-                    {/* Form */}
                     <View style={styles.form}>
                         <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Numéro de téléphone</Text>
-                            <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Numero de telephone</Text>
+                            <View style={[styles.inputContainer, isPhoneFocused && styles.inputContainerFocused]}>
                                 <Ionicons name="call-outline" size={20} color={Colors.gray400} />
                                 <TextInput
                                     style={styles.input}
                                     value={phone}
                                     onChangeText={setPhone}
+                                    onFocus={() => {
+                                        setIsPhoneFocused(true);
+                                        scrollToForm();
+                                    }}
+                                    onBlur={() => setIsPhoneFocused(false)}
                                     placeholder="Ex: 0812345678"
                                     placeholderTextColor={Colors.gray400}
                                     keyboardType="phone-pad"
@@ -109,18 +137,26 @@ export default function RegisterScreen() {
                                 ) : (
                                     <>
                                         <Text style={styles.continueButtonText}>Recevoir le code</Text>
-                                        <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+                                        <View style={styles.continueIconWrap}>
+                                            <Ionicons name="arrow-forward" size={18} color={Colors.primary} />
+                                        </View>
                                     </>
                                 )}
                             </LinearGradient>
                         </TouchableOpacity>
 
-                        {/* Info Box */}
-                        <View style={styles.infoBox}>
-                            <Ionicons name="information-circle-outline" size={20} color={Colors.accent} />
-                            <Text style={styles.infoText}>
-                                Un code de vérification sera envoyé à ce numéro
-                            </Text>
+                        <View style={styles.helperRow}>
+                            <Ionicons name="flash-outline" size={16} color={Colors.accentDark} />
+                            <Text style={styles.helperText}>Le code OTP est envoye en quelques secondes.</Text>
+                        </View>
+
+                        <View style={styles.footer}>
+                            <Text style={styles.footerText}>Deja un compte ?</Text>
+                            <Link href="/(auth)/login" asChild>
+                                <TouchableOpacity>
+                                    <Text style={styles.footerLink}>Se connecter</Text>
+                                </TouchableOpacity>
+                            </Link>
                         </View>
                     </View>
                 </ScrollView>
@@ -133,81 +169,146 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.white,
+        backgroundColor: '#F7FAFF',
     },
     scrollContent: {
         flexGrow: 1,
         paddingHorizontal: Spacing.xl,
+        paddingBottom: Spacing.xxxl,
+        position: 'relative',
+    },
+    colorOrbCool: {
+        position: 'absolute',
+        top: 84,
+        right: -22,
+        width: 102,
+        height: 102,
+        borderRadius: 51,
+        backgroundColor: Colors.info + '26',
+    },
+    colorOrbWarm: {
+        position: 'absolute',
+        top: 170,
+        left: -34,
+        width: 126,
+        height: 126,
+        borderRadius: 63,
+        backgroundColor: Colors.accent + '22',
     },
     header: {
-        paddingVertical: Spacing.md,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.md + 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 42,
+        height: 42,
         alignItems: 'center',
         justifyContent: 'center',
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        ...Shadows.sm,
     },
-    illustrationContainer: {
+    brandBadge: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginVertical: Spacing.xxxl,
+        gap: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
     },
-    iconCircle: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
+    brandBadgeText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    modeCard: {
+        marginBottom: Spacing.lg,
+    },
+    modeCardGradient: {
+        borderRadius: BorderRadius.xxl,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: Spacing.md,
         ...Shadows.lg,
     },
-    titleContainer: {
-        marginBottom: Spacing.xxxl,
+    modeIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF33',
+        borderWidth: 1,
+        borderColor: '#FFFFFF55',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    title: {
-        fontSize: Typography.fontSize.xxxl,
+    modeTextWrap: {
+        flex: 1,
+    },
+    modeStep: {
+        color: Colors.white + 'D9',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    modeTitle: {
+        color: Colors.white,
+        marginTop: 2,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
     },
-    subtitle: {
-        fontSize: Typography.fontSize.base,
-        color: Colors.textSecondary,
-        lineHeight: 24,
+    modeSubtitle: {
+        color: Colors.white + 'E0',
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
     },
     form: {
-        gap: Spacing.lg,
+        gap: Spacing.md,
     },
     inputGroup: {
         gap: Spacing.sm,
     },
     label: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.semibold,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
-        paddingHorizontal: Spacing.lg,
-        gap: Spacing.md,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
+        paddingHorizontal: Spacing.md,
+        gap: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         ...Shadows.sm,
+    },
+    inputContainerFocused: {
+        borderColor: Colors.primary,
+        backgroundColor: Colors.primary + '0A',
     },
     input: {
         flex: 1,
-        height: 50,
+        height: 52,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
     },
     continueButton: {
-        marginTop: Spacing.lg,
-        borderRadius: BorderRadius.xl,
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.xxl,
         overflow: 'hidden',
-        ...Shadows.md,
+        ...Shadows.lg,
     },
     continueGradient: {
         flexDirection: 'row',
@@ -221,22 +322,46 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
-    disabledButton: {
-        opacity: 0.5,
+    continueIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '66',
+        backgroundColor: Colors.white,
     },
-    infoBox: {
+    disabledButton: {
+        opacity: 0.6,
+    },
+    helperRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        padding: Spacing.md,
-        backgroundColor: Colors.accent + '10',
-        borderRadius: BorderRadius.md,
-        borderLeftWidth: 3,
-        borderLeftColor: Colors.accent,
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
     },
-    infoText: {
+    helperText: {
         flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    footer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+        marginTop: Spacing.md,
+    },
+    footerText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
+    },
+    footerLink: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
     },
 });

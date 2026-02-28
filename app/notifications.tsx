@@ -8,6 +8,7 @@ import {
     useMarkNotificationReadMutation,
 } from '@/store/api/notificationsApi';
 import { AppNotification } from '@/types/notification';
+import { resolveNotificationRoute } from '@/utils/notificationRoute';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -37,61 +38,6 @@ const formatRelativeDate = (value?: string) => {
     const diffDay = Math.floor(diffHour / 24);
     if (diffDay < 7) return `Il y a ${diffDay} j`;
     return date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
-};
-
-const resolveNotificationRoute = (
-    notification: AppNotification,
-    userRoles?: string[],
-): string | null => {
-    if (notification.url && notification.url.startsWith('/')) {
-        return notification.url;
-    }
-
-    const data = notification.data || {};
-    if (data.deliveryId) {
-        const roleCandidate =
-            (typeof data.viewerRole === 'string' && data.viewerRole) ||
-            (typeof data.recipientRole === 'string' && data.recipientRole) ||
-            (typeof data.role === 'string' && data.role) ||
-            '';
-        const normalizedRole = roleCandidate.trim().toLowerCase();
-
-        if (['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(normalizedRole)) {
-            return `/delivery/deliver-persons/${data.deliveryId}`;
-        }
-        if (normalizedRole === 'seller') {
-            return `/delivery/seller/${data.deliveryId}`;
-        }
-        if (normalizedRole === 'buyer' || normalizedRole === 'customer') {
-            return `/delivery/buyer/${data.deliveryId}`;
-        }
-
-        const hasDeliveryRole = Boolean(
-            userRoles?.some((role) =>
-                ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(
-                    (role || '').toLowerCase(),
-                ),
-            ),
-        );
-        if (hasDeliveryRole) {
-            return `/delivery/deliver-persons/${data.deliveryId}`;
-        }
-
-        return `/delivery/${data.deliveryId}`;
-    }
-    if (data.orderId) {
-        return `/order/${data.orderId}`;
-    }
-    if ((data.type || '').startsWith('delivery_')) {
-        return '/orders';
-    }
-    if ((data.type || '').startsWith('order_')) {
-        return '/orders';
-    }
-    if ((data.type || '').includes('announcement')) {
-        return '/my-announcements';
-    }
-    return null;
 };
 
 export default function NotificationsScreen() {
@@ -133,7 +79,14 @@ export default function NotificationsScreen() {
             if (!item.isReaded) {
                 await markNotificationRead(item._id).unwrap();
             }
-            const route = resolveNotificationRoute(item, user?.roles);
+            const route = resolveNotificationRoute({
+                url: item.url,
+                screen: item.screen,
+                title: item.title,
+                body: item.body,
+                data: item.data,
+                userRoles: user?.roles,
+            });
             if (route) {
                 router.push(route as any);
             }
@@ -332,8 +285,6 @@ const styles = StyleSheet.create({
     card: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.lg,
-        borderWidth: 1,
-        borderColor: Colors.borderLight,
         padding: Spacing.md,
         flexDirection: 'row',
         alignItems: 'center',
@@ -341,7 +292,6 @@ const styles = StyleSheet.create({
         ...Shadows.sm,
     },
     cardUnread: {
-        borderColor: Colors.primary + '44',
         backgroundColor: Colors.primary + '08',
     },
     cardMain: {

@@ -10,6 +10,7 @@ import {
     subscribeToNotificationOpen,
     subscribeToFcmTokenRefresh,
 } from '@/services/notifications/pushNotifications';
+import { resolveNotificationRoute } from '@/utils/notificationRoute';
 import { useRouter } from 'expo-router';
 
 export const usePushNotifications = () => {
@@ -26,70 +27,17 @@ export const usePushNotifications = () => {
     }, []);
 
     useEffect(() => {
-        const resolveDeliveryRoute = (deliveryId: string, data: Record<string, string>) => {
-            const roleCandidate =
-                (typeof data.viewerRole === 'string' && data.viewerRole) ||
-                (typeof data.recipientRole === 'string' && data.recipientRole) ||
-                (typeof data.role === 'string' && data.role) ||
-                '';
-            const normalizedRole = roleCandidate.trim().toLowerCase();
-            if (['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(normalizedRole)) {
-                return `/delivery/deliver-persons/${deliveryId}`;
-            }
-            if (normalizedRole === 'seller') {
-                return `/delivery/seller/${deliveryId}`;
-            }
-            if (normalizedRole === 'buyer' || normalizedRole === 'customer') {
-                return `/delivery/buyer/${deliveryId}`;
-            }
-
-            const hasDeliveryRole = Boolean(
-                user?.roles?.some((role) =>
-                    ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'].includes(
-                        (role || '').toLowerCase(),
-                    ),
-                ),
-            );
-            if (hasDeliveryRole) {
-                return `/delivery/deliver-persons/${deliveryId}`;
-            }
-
-            return `/delivery/${deliveryId}`;
-        };
-
         const unsubscribe = subscribeToNotificationOpen((message: FirebaseRemoteMessage) => {
             const data: Record<string, string> = message?.data || {};
-            const deliveryId = data.deliveryId;
-            const orderId = data.orderId;
-            const targetUrl = data.url;
-
-            if (targetUrl && targetUrl.startsWith('/')) {
-                router.push(targetUrl as any);
-                return;
-            }
-
-            if (deliveryId) {
-                router.push(resolveDeliveryRoute(deliveryId, data) as any);
-                return;
-            }
-
-            if (orderId) {
-                router.push(`/order/${orderId}` as any);
-                return;
-            }
-
-            const type = data.type || '';
-            if (type.startsWith('delivery_') || type.includes('pickup') || type.includes('dropoff')) {
-                router.push('/orders' as any);
-                return;
-            }
-            if (type.startsWith('order_') || type.includes('rated')) {
-                router.push('/orders' as any);
-                return;
-            }
-            if (type.includes('announcement')) {
-                router.push('/my-announcements' as any);
-            }
+            const route = resolveNotificationRoute({
+                url: data.url,
+                screen: data.screen,
+                title: message?.notification?.title || data.title,
+                body: message?.notification?.body || data.body,
+                data,
+                userRoles: user?.roles,
+            });
+            router.push((route || '/notifications') as any);
         });
 
         return () => {
