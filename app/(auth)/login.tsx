@@ -1,15 +1,15 @@
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useAppDispatch } from '@/store/hooks';
-import { useLoginMutation } from '@/store/api/authApi';
-import { setCredentials } from '@/store/slices/authSlice';
 import { tokenService } from '@/services/tokenService';
+import { useLoginMutation } from '@/store/api/authApi';
+import { useAppDispatch } from '@/store/hooks';
+import { setCredentials } from '@/store/slices/authSlice';
 import { storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Link, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -19,36 +19,52 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function LoginScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const dispatch = useAppDispatch();
     const params = useLocalSearchParams<{ returnUrl?: string; message?: string }>();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
+    const [isPhoneFocused, setIsPhoneFocused] = useState(false);
+    const [isPinFocused, setIsPinFocused] = useState(false);
+    const scrollRef = React.useRef<ScrollView | null>(null);
 
     const [login, { isLoading }] = useLoginMutation();
+    const keyboardVerticalOffset = Platform.select({
+        ios: 0,
+        android: Math.max(insets.bottom, 10),
+        default: 0,
+    });
+
+    const scrollToForm = () => {
+        setTimeout(() => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+        }, 120);
+    };
 
     const handleLogin = async () => {
-        if (!phone.trim()) {
-            Alert.alert('Erreur', 'Veuillez entrer votre numéro de téléphone');
+        const trimmedPhone = phone.trim();
+
+        if (!trimmedPhone) {
+            showStyledAlert('Erreur', 'Veuillez entrer votre numero de telephone');
             return;
         }
         if (!pin.trim() || pin.length !== 4) {
-            Alert.alert('Erreur', 'Le code PIN doit contenir 4 chiffres');
+            showStyledAlert('Erreur', 'Le code PIN doit contenir 4 chiffres');
             return;
         }
 
         try {
-            const response = await login({ phone, pin }).unwrap();
+            const response = await login({ phone: trimmedPhone, pin }).unwrap();
 
-            // Sauvegarder les tokens
             await tokenService.saveTokens(response.access_token, response.refresh_token);
 
-            // Récupérer le profil utilisateur
             const profileResponse = await fetch(
                 `${process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200'}/users/profile`,
                 {
@@ -59,7 +75,6 @@ export default function LoginScreen() {
             );
             const user = await profileResponse.json();
 
-            // Sauvegarder dans storage et Redux
             await storage.setUser(user);
             dispatch(
                 setCredentials({
@@ -69,7 +84,7 @@ export default function LoginScreen() {
                 })
             );
 
-            Alert.alert('Succès', 'Connexion réussie !', [
+            showStyledAlert('Succes', 'Connexion reussie !', [
                 {
                     text: 'OK',
                     onPress: () => {
@@ -83,9 +98,9 @@ export default function LoginScreen() {
             ]);
         } catch (error: any) {
             console.error('Login error:', error);
-            Alert.alert(
+            showStyledAlert(
                 'Erreur',
-                error?.data?.message || 'Numéro de téléphone ou code PIN incorrect'
+                error?.data?.message || 'Numero de telephone ou code PIN incorrect'
             );
         }
     };
@@ -94,13 +109,19 @@ export default function LoginScreen() {
         <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={keyboardVerticalOffset}
             >
                 <ScrollView
+                    ref={scrollRef}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
-                    {/* Header */}
+                    <View pointerEvents="none" style={styles.colorOrbPrimary} />
+                    <View pointerEvents="none" style={styles.colorOrbWarm} />
+
                     <View style={styles.header}>
                         <TouchableOpacity
                             style={styles.backButton}
@@ -108,40 +129,46 @@ export default function LoginScreen() {
                         >
                             <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
                         </TouchableOpacity>
-                    </View>
-
-                    {/* Illustration */}
-                    <View style={styles.illustrationContainer}>
-                        <LinearGradient colors={Gradients.primary} style={styles.iconCircle}>
-                            <Ionicons name="log-in-outline" size={64} color={Colors.white} />
+                        <LinearGradient colors={Gradients.primary} style={styles.brandBadge}>
+                            <Ionicons name="shield-checkmark-outline" size={14} color={Colors.white} />
+                            <Text style={styles.brandBadgeText}>UTY Secure</Text>
                         </LinearGradient>
                     </View>
 
-                    {/* Title */}
-                    <View style={styles.titleContainer}>
-                        <Text style={styles.title}>Bon retour !</Text>
-                        <Text style={styles.subtitle}>
-                            Connectez-vous pour continuer
-                        </Text>
-                        {params.message && (
-                            <View style={styles.messageContainer}>
-                                <Ionicons name="information-circle" size={20} color={Colors.accent} />
-                                <Text style={styles.messageText}>{params.message}</Text>
+                    <View style={styles.modeCard}>
+                        <LinearGradient colors={Gradients.primary} style={styles.modeCardGradient}>
+                            <View style={styles.modeIconCircle}>
+                                <Ionicons name="log-in-outline" size={22} color={Colors.white} />
                             </View>
-                        )}
+                            <View style={styles.modeTextWrap}>
+                                <Text style={styles.modeStep}>Connexion</Text>
+                                <Text style={styles.modeTitle}>Bon retour</Text>
+                                <Text style={styles.modeSubtitle}>Accedez a votre compte en quelques secondes.</Text>
+                            </View>
+                        </LinearGradient>
                     </View>
 
-                    {/* Form */}
+                    {params.message ? (
+                        <View style={styles.noticeCard}>
+                            <Ionicons name="information-circle-outline" size={18} color={Colors.accentDark} />
+                            <Text style={styles.noticeText}>{params.message}</Text>
+                        </View>
+                    ) : null}
+
                     <View style={styles.form}>
-                        {/* Phone */}
                         <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Numéro de téléphone</Text>
-                            <View style={styles.inputContainer}>
+                            <Text style={styles.label}>Numero de telephone</Text>
+                            <View style={[styles.inputContainer, isPhoneFocused && styles.inputContainerFocused]}>
                                 <Ionicons name="call-outline" size={20} color={Colors.gray400} />
                                 <TextInput
                                     style={styles.input}
                                     value={phone}
                                     onChangeText={setPhone}
+                                    onFocus={() => {
+                                        setIsPhoneFocused(true);
+                                        scrollToForm();
+                                    }}
+                                    onBlur={() => setIsPhoneFocused(false)}
                                     placeholder="Ex: 0812345678"
                                     placeholderTextColor={Colors.gray400}
                                     keyboardType="phone-pad"
@@ -150,32 +177,35 @@ export default function LoginScreen() {
                             </View>
                         </View>
 
-                        {/* PIN */}
                         <View style={styles.inputGroup}>
                             <Text style={styles.label}>Code PIN</Text>
-                            <View style={styles.inputContainer}>
+                            <View style={[styles.inputContainer, isPinFocused && styles.inputContainerFocused]}>
                                 <Ionicons name="lock-closed-outline" size={20} color={Colors.gray400} />
                                 <TextInput
                                     style={styles.input}
                                     value={pin}
                                     onChangeText={setPin}
+                                    onFocus={() => {
+                                        setIsPinFocused(true);
+                                        scrollToForm();
+                                    }}
+                                    onBlur={() => setIsPinFocused(false)}
                                     placeholder="4 chiffres"
                                     placeholderTextColor={Colors.gray400}
                                     secureTextEntry={!showPin}
                                     keyboardType="number-pad"
                                     maxLength={4}
                                 />
-                                <TouchableOpacity onPress={() => setShowPin(!showPin)}>
+                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPin(!showPin)}>
                                     <Ionicons
                                         name={showPin ? 'eye-off-outline' : 'eye-outline'}
-                                        size={20}
+                                        size={18}
                                         color={Colors.gray400}
                                     />
                                 </TouchableOpacity>
                             </View>
                         </View>
 
-                        {/* Login Button */}
                         <TouchableOpacity
                             style={[styles.loginButton, isLoading && styles.disabledButton]}
                             onPress={handleLogin}
@@ -187,24 +217,31 @@ export default function LoginScreen() {
                                 ) : (
                                     <>
                                         <Text style={styles.loginButtonText}>Se connecter</Text>
-                                        <Ionicons name="arrow-forward" size={20} color={Colors.white} />
+                                        <View style={styles.loginIconWrap}>
+                                            <Ionicons name="arrow-forward" size={18} color={Colors.primary} />
+                                        </View>
                                     </>
                                 )}
                             </LinearGradient>
                         </TouchableOpacity>
 
-                        {/* Register Link */}
+                        <View style={styles.helperRow}>
+                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
+                            <Text style={styles.helperText}>Connexion securisee avec votre PIN a 4 chiffres.</Text>
+                        </View>
+
                         <View style={styles.footer}>
-                            <Text style={styles.footerText}>Vous n'avez pas de compte ?</Text>
+                            <Text style={styles.footerText}>Vous n&apos;avez pas de compte ?</Text>
                             <Link href="/(auth)/register" asChild>
                                 <TouchableOpacity>
-                                    <Text style={styles.footerLink}>Créer un compte</Text>
+                                    <Text style={styles.footerLink}>Creer un compte</Text>
                                 </TouchableOpacity>
                             </Link>
                         </View>
                     </View>
                 </ScrollView>
             </KeyboardAvoidingView>
+            {alertNode}
         </SafeAreaView>
     );
 }
@@ -212,95 +249,172 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.white,
+        backgroundColor: '#F7FAFF',
     },
     scrollContent: {
         flexGrow: 1,
         paddingHorizontal: Spacing.xl,
+        paddingBottom: Spacing.xxxl,
+        position: 'relative',
+    },
+    colorOrbPrimary: {
+        position: 'absolute',
+        top: 84,
+        right: -22,
+        width: 102,
+        height: 102,
+        borderRadius: 51,
+        backgroundColor: Colors.primary + '26',
+    },
+    colorOrbWarm: {
+        position: 'absolute',
+        top: 168,
+        left: -36,
+        width: 126,
+        height: 126,
+        borderRadius: 63,
+        backgroundColor: Colors.accent + '26',
     },
     header: {
-        paddingVertical: Spacing.md,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.md + 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 42,
+        height: 42,
         alignItems: 'center',
         justifyContent: 'center',
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        ...Shadows.sm,
     },
-    illustrationContainer: {
+    brandBadge: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginVertical: Spacing.xxxl,
+        gap: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
     },
-    iconCircle: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
+    brandBadgeText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    modeCard: {
+        marginBottom: Spacing.lg,
+    },
+    modeCardGradient: {
+        borderRadius: BorderRadius.xxl,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: Spacing.md,
         ...Shadows.lg,
     },
-    titleContainer: {
-        marginBottom: Spacing.xxxl,
+    modeIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF33',
+        borderWidth: 1,
+        borderColor: '#FFFFFF55',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    title: {
-        fontSize: Typography.fontSize.xxxl,
+    modeTextWrap: {
+        flex: 1,
+    },
+    modeStep: {
+        color: Colors.white + 'D9',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    modeTitle: {
+        color: Colors.white,
+        marginTop: 2,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
     },
-    subtitle: {
-        fontSize: Typography.fontSize.base,
-        color: Colors.textSecondary,
-        lineHeight: 24,
+    modeSubtitle: {
+        color: Colors.white + 'E0',
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
     },
-    messageContainer: {
+    noticeCard: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
-        marginTop: Spacing.md,
-        padding: Spacing.md,
-        backgroundColor: Colors.accent + '20',
-        borderRadius: BorderRadius.md,
+        marginBottom: Spacing.lg,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm + 2,
+        backgroundColor: Colors.accent + '14',
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.accent + '44',
+        ...Shadows.sm,
     },
-    messageText: {
+    noticeText: {
         flex: 1,
         fontSize: Typography.fontSize.sm,
-        color: Colors.accent,
+        color: Colors.gray700,
     },
     form: {
-        gap: Spacing.lg,
+        gap: Spacing.md,
     },
     inputGroup: {
         gap: Spacing.sm,
     },
     label: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.semibold,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
-        paddingHorizontal: Spacing.lg,
-        gap: Spacing.md,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
+        paddingHorizontal: Spacing.md,
+        gap: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         ...Shadows.sm,
+    },
+    inputContainerFocused: {
+        borderColor: Colors.primary,
+        backgroundColor: Colors.primary + '0A',
     },
     input: {
         flex: 1,
-        height: 50,
+        height: 52,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
     },
+    eyeButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.gray100,
+    },
     loginButton: {
-        marginTop: Spacing.lg,
-        borderRadius: BorderRadius.xl,
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.xxl,
         overflow: 'hidden',
-        ...Shadows.md,
+        ...Shadows.lg,
     },
     loginGradient: {
         flexDirection: 'row',
@@ -314,15 +428,38 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
+    loginIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '66',
+        backgroundColor: Colors.white,
+    },
     disabledButton: {
-        opacity: 0.5,
+        opacity: 0.6,
+    },
+    helperRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
+    },
+    helperText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.medium,
     },
     footer: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.xs,
-        marginTop: Spacing.lg,
+        marginTop: Spacing.md,
     },
     footerText: {
         fontSize: Typography.fontSize.sm,

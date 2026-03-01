@@ -5,7 +5,7 @@ import { ProductCard } from '@/components/ProductCard';
 import { ProductCardSkeleton, QuickActionSkeleton } from '@/components/SkeletonLoader';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,13 +48,14 @@ const getRecommendedAnnouncements = (allAnnouncements: any[]) => {
 };
 
 // Component to render announcement pairs horizontally
-const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
+const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist, isInWishlist }: any) => (
     <View style={styles.pairContainer}>
         <View style={styles.pairItem}>
             <ProductCard
                 product={pair[0]}
                 onAddToCart={onAddToCart}
                 onToggleWishlist={onToggleWishlist}
+                isInWishlist={isInWishlist?.(pair[0])}
             />
         </View>
         {pair[1] && (
@@ -63,6 +64,7 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist }: any) => (
                     product={pair[1]}
                     onAddToCart={onAddToCart}
                     onToggleWishlist={onToggleWishlist}
+                    isInWishlist={isInWishlist?.(pair[1])}
                 />
             </View>
         )}
@@ -120,7 +122,7 @@ const getAnnouncementCategoryCandidates = (announcement: any): string[] => {
     const ancestors = Array.isArray(announcement?.categoryAncestors)
         ? announcement.categoryAncestors
         : [];
-    ancestors.forEach((ancestor) => {
+    ancestors.forEach((ancestor: any) => {
         const ancestorId = toIdString(ancestor);
         if (ancestorId) {
             ids.add(ancestorId);
@@ -135,8 +137,8 @@ const getUserPreferredCategoryIds = (user: any): string[] => {
     return Array.from(
         new Set(
             values
-                .map((value) => toIdString(value))
-                .filter((value): value is string => Boolean(value)),
+                .map((value: any) => toIdString(value))
+                .filter((value: any): value is string => Boolean(value)),
         ),
     );
 };
@@ -184,6 +186,7 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const router = useRouter();
     const { user, isAuthenticated, requireAuth } = useAuth();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
 
@@ -229,6 +232,40 @@ export default function HomeScreen() {
         }
         requireAuth('Connectez-vous pour acceder aux notifications.');
     }, [isAuthenticated, requireAuth, router]);
+    const currentUserId = useMemo(
+        () => toIdString((user as any)?._id || (user as any)?.id),
+        [user],
+    );
+    const isInWishlist = React.useCallback(
+        (announcement: any) => {
+            if (!currentUserId) {
+                return false;
+            }
+            const likes = Array.isArray(announcement?.likes) ? announcement.likes : [];
+            return likes.some((entry: any) => toIdString(entry) === currentUserId);
+        },
+        [currentUserId],
+    );
+    const handleToggleWishlist = React.useCallback(
+        async (announcement: any) => {
+            if (isTogglingLike) {
+                return;
+            }
+            if (!requireAuth('Vous devez etre connecte pour liker une annonce.')) {
+                return;
+            }
+            const announcementId = toIdString(announcement?._id);
+            if (!announcementId) {
+                return;
+            }
+            try {
+                await toggleLike(announcementId).unwrap();
+            } catch (error) {
+                console.error('Like error:', error);
+            }
+        },
+        [isTogglingLike, requireAuth, toggleLike],
+    );
 
     const personalizedAnnouncementBuckets = useMemo(() => {
         const allAnnouncements = announcements || [];
@@ -389,7 +426,7 @@ export default function HomeScreen() {
                     <View style={styles.headerContent}>
                         {/* Section utilisateur avec avatar */}
                         <View style={styles.userSection}>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={styles.avatarButton}
                                 onPress={openProfile}
                                 activeOpacity={0.8}
@@ -403,8 +440,8 @@ export default function HomeScreen() {
                                     <Ionicons name="person" size={24} color={Colors.primary} />
                                 </LinearGradient>
                             </TouchableOpacity>
-                            
-                            <Animated.View 
+
+                            <Animated.View
                                 style={[
                                     styles.greetingContainer,
                                     {
@@ -434,7 +471,7 @@ export default function HomeScreen() {
                                     <Ionicons name="cart-outline" size={22} color={Colors.white} />
                                 </View>
                             </TouchableOpacity>
-                            
+
                             <TouchableOpacity
                                 style={styles.modernHeaderButton}
                                 onPress={openNotifications}
@@ -454,7 +491,7 @@ export default function HomeScreen() {
                     </View>
 
                     {/* Barre de recherche moderne */}
-                    <Animated.View 
+                    <Animated.View
                         style={[
                             styles.searchContainer,
                             {
@@ -462,7 +499,7 @@ export default function HomeScreen() {
                             }
                         ]}
                     >
-                        <TouchableOpacity 
+                        <TouchableOpacity
                             style={styles.modernSearchBar}
                             onPress={handleSearchPress}
                             activeOpacity={1}
@@ -482,7 +519,7 @@ export default function HomeScreen() {
                                         <Ionicons name="search" size={20} color={Colors.primary} />
                                     </LinearGradient>
                                 </View>
-                                
+
                                 {/* Texte de recherche */}
                                 <View style={styles.searchTextContainer}>
                                     <Text style={styles.modernSearchPlaceholder}>
@@ -492,9 +529,9 @@ export default function HomeScreen() {
                                         Electronics, Mode, etc.
                                     </Text>
                                 </View>
-                                
+
                                 {/* Bouton filtres */}
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     style={styles.filterButton}
                                     onPress={() => router.push('/search')}
                                 >
@@ -571,23 +608,23 @@ export default function HomeScreen() {
                     >
                         {isCategoriesLoading && homeCategories.length === 0
                             ? [1, 2, 3, 4, 5].map((item) => (
-                                  <View key={item} style={styles.categoryLoadingPill} />
-                              ))
+                                <View key={item} style={styles.categoryLoadingPill} />
+                            ))
                             : homeCategories.map((category) => (
-                                  <CategoryCard
-                                      key={category.id}
-                                      name={category.name}
-                                      icon={category.icon}
-                                      gradient={category.gradient}
-                                      count={category.count}
-                                      onPress={() =>
-                                          router.push({
-                                              pathname: '/search',
-                                              params: { categoryId: category.id },
-                                          })
-                                      }
-                                  />
-                              ))}
+                                <CategoryCard
+                                    key={category.id}
+                                    name={category.name}
+                                    icon={category.icon}
+                                    gradient={category.gradient}
+                                    count={category.count}
+                                    onPress={() =>
+                                        router.push({
+                                            pathname: '/search',
+                                            params: { categoryId: category.id },
+                                        })
+                                    }
+                                />
+                            ))}
                         {!isCategoriesLoading && homeCategories.length === 0 ? (
                             <Text style={styles.emptyCategoriesText}>
                                 Aucune categorie disponible pour le moment.
@@ -678,7 +715,8 @@ export default function HomeScreen() {
                                         key={`recommended-pair-${index}`}
                                         pair={pair}
                                         onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                        onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                        onToggleWishlist={handleToggleWishlist}
+                                        isInWishlist={isInWishlist}
                                     />
                                 ))}
                             </>
@@ -744,7 +782,8 @@ export default function HomeScreen() {
                                     key={`recent-pair-${index}`}
                                     pair={pair}
                                     onAddToCart={(product: any) => console.log('Ajouté au panier', product._id)}
-                                    onToggleWishlist={(product: any) => console.log('Favori', product._id)}
+                                    onToggleWishlist={handleToggleWishlist}
+                                    isInWishlist={isInWishlist}
                                 />
                             ))}
                         </>

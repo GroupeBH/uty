@@ -7,8 +7,13 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetAnnouncementByIdQuery } from '@/store/api/announcementsApi';
+import { useGetAnnouncementByIdQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
+import {
+    AnnouncementComment,
+    useCreateCommentMutation,
+    useGetCommentsForAnnouncementQuery,
+} from '@/store/api/commentsApi';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -28,14 +33,16 @@ import {
     TouchableOpacity,
     View
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function ProductDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
+    const announcementId = id || '';
     const router = useRouter();
-    const { requireAuth, isAuthenticated } = useAuth();
+    const insets = useSafeAreaInsets();
+    const { requireAuth, isAuthenticated, user } = useAuth();
     const safeBack = () => {
         if (router.canGoBack()) {
             router.back();
@@ -44,7 +51,18 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const { data: product, isLoading } = useGetAnnouncementByIdQuery(id!);
+    const { data: product, isLoading } = useGetAnnouncementByIdQuery(announcementId, {
+        skip: !announcementId,
+    });
+    const {
+        data: comments = [],
+        isLoading: isLoadingComments,
+        isFetching: isFetchingComments,
+    } = useGetCommentsForAnnouncementQuery(announcementId, {
+        skip: !announcementId,
+    });
+    const [createComment, { isLoading: isSubmittingReview }] = useCreateCommentMutation();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
@@ -54,7 +72,6 @@ export default function ProductDetailScreen() {
     const [showImageModal, setShowImageModal] = useState(false);
     const [showContactModal, setShowContactModal] = useState(false);
     const [showReviewModal, setShowReviewModal] = useState(false);
-    const [isFavorite, setIsFavorite] = useState(false);
     const [quantity, setQuantity] = useState(1);
     
     // Review form states
@@ -97,6 +114,68 @@ export default function ProductDetailScreen() {
             type,
         });
     };
+    const parseError = (error: any, fallback: string) => {
+        const nestedMessage = error?.data?.message;
+        if (typeof nestedMessage === 'string' && nestedMessage.trim().length > 0) {
+            return nestedMessage;
+        }
+        if (Array.isArray(nestedMessage) && nestedMessage.length > 0) {
+            return nestedMessage.join(', ');
+        }
+        if (typeof error?.message === 'string' && error.message.trim().length > 0) {
+            return error.message;
+        }
+        return fallback;
+    };
+    const resolveCommentAuthor = (comment: AnnouncementComment) => {
+        if (!comment.user || typeof comment.user === 'string') {
+            return 'Utilisateur';
+        }
+        const fullName = [comment.user.firstName, comment.user.lastName]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
+        return fullName || comment.user.username || 'Utilisateur';
+    };
+    const formatCommentDate = (value?: string) => {
+        if (!value) return '';
+        try {
+            return new Date(value).toLocaleDateString('fr-FR', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+            });
+        } catch {
+            return '';
+        }
+    };
+    const averageRating = React.useMemo(() => {
+        const ratedValues = comments
+            .map((comment) => comment.rating)
+            .filter((commentRating): commentRating is number => typeof commentRating === 'number');
+        if (ratedValues.length === 0) {
+            return null;
+        }
+        const total = ratedValues.reduce((sum, value) => sum + value, 0);
+        return total / ratedValues.length;
+    }, [comments]);
+    const currentUserId = user?._id;
+    const likeCount = Array.isArray(product?.likes) ? product.likes.length : 0;
+    const isFavorite = React.useMemo(() => {
+        if (!currentUserId || !Array.isArray(product?.likes)) {
+            return false;
+        }
+
+        return product.likes.some((entry: any) => {
+            if (typeof entry === 'string') {
+                return entry === currentUserId;
+            }
+            if (entry && typeof entry === 'object') {
+                return entry._id === currentUserId || entry.id === currentUserId;
+            }
+            return false;
+        });
+    }, [currentUserId, product?.likes]);
     const infoChips = [
         product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
         product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
@@ -239,9 +318,14 @@ export default function ProductDetailScreen() {
         setMessage('');
     };
 
-    const handleSubmitReview = () => {
+    const handleSubmitReview = async () => {
         if (!requireAuth('Vous devez être connecté pour laisser un avis')) {
             setShowReviewModal(false);
+            return;
+        }
+
+        if (!product?._id) {
+            showAlert('Erreur', 'Annonce introuvable.', 'error');
             return;
         }
 
@@ -249,15 +333,46 @@ export default function ProductDetailScreen() {
             showAlert('Erreur', 'Veuillez entrer un commentaire', 'warning');
             return;
         }
-        // TODO: Implémenter l'envoi de l'avis
-        showAlert('Avis envoye', 'Merci pour votre avis !', 'success');
-        setShowReviewModal(false);
-        setReviewText('');
-        setRating(5);
+
+        try {
+            await createComment({
+                announcementId: product._id,
+                data: {
+                    text: reviewText.trim(),
+                    rating,
+                },
+            }).unwrap();
+
+            showAlert('Avis envoye', 'Merci pour votre avis !', 'success');
+            setShowReviewModal(false);
+            setReviewText('');
+            setRating(5);
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(error, "Impossible d'envoyer votre avis."),
+                'error',
+            );
+        }
     };
 
-    const toggleFavorite = () => {
-        setIsFavorite(!isFavorite);
+    const handleToggleFavorite = async () => {
+        if (!product?._id) {
+            return;
+        }
+        if (!requireAuth('Vous devez etre connecte pour liker une annonce')) {
+            return;
+        }
+
+        try {
+            await toggleLike(product._id).unwrap();
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(error, 'Impossible de mettre a jour le like.'),
+                'error',
+            );
+        }
     };
 
     if (isLoading) {
@@ -300,7 +415,11 @@ export default function ProductDetailScreen() {
                             <Ionicons name="arrow-back" size={24} color={Colors.white} />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle} numberOfLines={1}>{product.name}</Text>
-                        <TouchableOpacity onPress={toggleFavorite} style={styles.headerButton}>
+                        <TouchableOpacity
+                            onPress={handleToggleFavorite}
+                            style={styles.headerButton}
+                            disabled={isTogglingLike}
+                        >
                             <Ionicons 
                                 name={isFavorite ? "heart" : "heart-outline"} 
                                 size={24} 
@@ -316,7 +435,11 @@ export default function ProductDetailScreen() {
                 <TouchableOpacity onPress={() => safeBack()} style={styles.floatingButton}>
                     <Ionicons name="arrow-back" size={24} color={Colors.white} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={toggleFavorite} style={styles.floatingButton}>
+                <TouchableOpacity
+                    onPress={handleToggleFavorite}
+                    style={styles.floatingButton}
+                    disabled={isTogglingLike}
+                >
                     <Ionicons 
                         name={isFavorite ? "heart" : "heart-outline"} 
                         size={24} 
@@ -394,7 +517,18 @@ export default function ProductDetailScreen() {
                             <Text style={styles.price}>{formatCurrencyAmount(product.price, product.currency)}</Text>
                             <View style={styles.ratingContainer}>
                                 <Ionicons name="star" size={18} color={Colors.accent} />
-                                <Text style={styles.ratingText}>4.5 (12)</Text>
+                                <Text style={styles.ratingText}>
+                                    {averageRating !== null
+                                        ? `${averageRating.toFixed(1)} (${comments.length})`
+                                        : 'Aucun avis'}
+                                </Text>
+                                <Text style={styles.ratingDivider}>•</Text>
+                                <Ionicons
+                                    name={isFavorite ? 'heart' : 'heart-outline'}
+                                    size={16}
+                                    color={isFavorite ? Colors.error : Colors.textSecondary}
+                                />
+                                <Text style={styles.ratingLikeText}>{likeCount}</Text>
                             </View>
                         </View>
                     </View>
@@ -512,7 +646,7 @@ export default function ProductDetailScreen() {
 
                     
                     <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Caract\u00e9ristiques</Text>
+                        <Text style={styles.sectionTitle}>Caractéristiques</Text>
                         {attributeEntries.length > 0 ? (
                             <View style={styles.attributesGrid}>
                                 {attributeEntries.map((item) => (
@@ -530,7 +664,7 @@ export default function ProductDetailScreen() {
                                     color={Colors.gray400}
                                 />
                                 <Text style={styles.emptyAttributesText}>
-                                    Aucune caract\u00e9ristique disponible
+                                    Aucune caractéristique disponible
                                 </Text>
                             </View>
                         )}
@@ -570,7 +704,17 @@ export default function ProductDetailScreen() {
                     {/* Avis clients */}
                     <View style={styles.section}>
                         <View style={styles.reviewsHeader}>
-                            <Text style={styles.sectionTitle}>⭐ Avis clients</Text>
+                            <View style={styles.reviewsHeaderLeft}>
+                                <Text style={styles.sectionTitle}>⭐ Avis clients</Text>
+                                {averageRating !== null && (
+                                    <View style={styles.reviewsSummaryPill}>
+                                        <Ionicons name="star" size={12} color={Colors.accent} />
+                                        <Text style={styles.reviewsSummaryText}>
+                                            {averageRating.toFixed(1)} / 5
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
                             <TouchableOpacity 
                                 onPress={() => {
                                     if (requireAuth('Vous devez être connecté pour laisser un avis')) {
@@ -581,9 +725,70 @@ export default function ProductDetailScreen() {
                                 <Text style={styles.addReviewLink}>Donner un avis</Text>
                             </TouchableOpacity>
                         </View>
-                        <Text style={styles.emptyReviews}>
-                            Aucun avis pour le moment. Soyez le premier à donner votre avis !
-                        </Text>
+                        {isLoadingComments || isFetchingComments ? (
+                            <View style={styles.reviewsLoadingCard}>
+                                <LoadingSpinner size="small" />
+                                <Text style={styles.reviewsLoadingText}>Chargement des avis...</Text>
+                            </View>
+                        ) : comments.length > 0 ? (
+                            <View style={styles.reviewsList}>
+                                {comments.map((comment) => {
+                                    const commentUser =
+                                        typeof comment.user === 'object' ? comment.user : undefined;
+                                    return (
+                                        <View key={comment._id} style={styles.reviewCard}>
+                                            <View style={styles.reviewCardTop}>
+                                                <View style={styles.reviewAuthorRow}>
+                                                    <View style={styles.reviewAvatar}>
+                                                        {commentUser?.image ? (
+                                                            <Image
+                                                                source={{ uri: commentUser.image }}
+                                                                style={styles.reviewAvatarImage}
+                                                            />
+                                                        ) : (
+                                                            <Ionicons
+                                                                name="person"
+                                                                size={16}
+                                                                color={Colors.primary}
+                                                            />
+                                                        )}
+                                                    </View>
+                                                    <View>
+                                                        <Text style={styles.reviewAuthorName}>
+                                                            {resolveCommentAuthor(comment)}
+                                                        </Text>
+                                                        <Text style={styles.reviewDateText}>
+                                                            {formatCommentDate(comment.createdAt)}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                                {typeof comment.rating === 'number' && (
+                                                    <View style={styles.reviewStarsInline}>
+                                                        {[1, 2, 3, 4, 5].map((star) => (
+                                                            <Ionicons
+                                                                key={`${comment._id}-${star}`}
+                                                                name={
+                                                                    star <= comment.rating
+                                                                        ? 'star'
+                                                                        : 'star-outline'
+                                                                }
+                                                                size={13}
+                                                                color={Colors.accent}
+                                                            />
+                                                        ))}
+                                                    </View>
+                                                )}
+                                            </View>
+                                            <Text style={styles.reviewCommentText}>{comment.text}</Text>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        ) : (
+                            <Text style={styles.emptyReviews}>
+                                Aucun avis pour le moment. Soyez le premier à donner votre avis !
+                            </Text>
+                        )}
                     </View>
 
                     {/* Espace pour le bottom bar */}
@@ -598,43 +803,54 @@ export default function ProductDetailScreen() {
                         <Text style={styles.bottomBarLabel}>Dans le panier</Text>
                         <Text style={styles.bottomBarValue}>{inCartQuantity} article(s)</Text>
                         <Text style={styles.bottomBarState}>
-                            {hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
+                            {inCartQuantity > 0 ? 'Deja au panier' : hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
                         </Text>
                     </View>
 
                     <View style={styles.bottomBarButtons}>
-                        <TouchableOpacity
-                            style={[styles.addToCartButton, !hasStockLeft && styles.addToCartButtonDisabled]}
-                            onPress={handleAddToCart}
-                            activeOpacity={0.8}
-                            disabled={!hasStockLeft}
-                        >
-                            {hasStockLeft ? (
+                        {inCartQuantity > 0 ? (
+                            <TouchableOpacity
+                                style={styles.addToCartButton}
+                                onPress={() => router.push('/(tabs)/cart')}
+                                activeOpacity={0.8}
+                            >
                                 <LinearGradient
-                                    colors={Gradients.accent}
+                                    colors={Gradients.primary}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 1 }}
-                                    style={styles.addToCartGradient}
+                                    style={styles.viewCartGradient}
                                 >
-                                    <Ionicons name="cart" size={20} color={Colors.primary} />
-                                    <Text style={styles.addToCartText}>Ajouter {quantity}</Text>
+                                    <Ionicons name="cart-outline" size={20} color={Colors.white} />
+                                    <Text style={styles.viewCartText}>Voir dans le panier</Text>
                                 </LinearGradient>
-                            ) : (
-                                <View style={[styles.addToCartGradient, styles.addToCartGradientDisabled]}>
-                                    <Ionicons name="alert-circle-outline" size={20} color={Colors.gray500} />
-                                    <Text style={[styles.addToCartText, styles.addToCartTextDisabled]}>
-                                        Stock atteint
-                                    </Text>
-                                </View>
-                            )}
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                            style={styles.buyNowButton}
-                            onPress={() => showAlert('Acheter', 'Fonctionnalite a venir', 'info')}
-                        >
-                            <Text style={styles.buyNowText} numberOfLines={2}>Acheter maintenant</Text>
-                        </TouchableOpacity>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={[styles.addToCartButton, !hasStockLeft && styles.addToCartButtonDisabled]}
+                                onPress={handleAddToCart}
+                                activeOpacity={0.8}
+                                disabled={!hasStockLeft}
+                            >
+                                {hasStockLeft ? (
+                                    <LinearGradient
+                                        colors={Gradients.accent}
+                                        start={{ x: 0, y: 0 }}
+                                        end={{ x: 1, y: 1 }}
+                                        style={styles.addToCartGradient}
+                                    >
+                                        <Ionicons name="cart" size={20} color={Colors.primary} />
+                                        <Text style={styles.addToCartText}>Ajouter {quantity}</Text>
+                                    </LinearGradient>
+                                ) : (
+                                    <View style={[styles.addToCartGradient, styles.addToCartGradientDisabled]}>
+                                        <Ionicons name="alert-circle-outline" size={20} color={Colors.gray500} />
+                                        <Text style={[styles.addToCartText, styles.addToCartTextDisabled]}>
+                                            Stock atteint
+                                        </Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </SafeAreaView>
             </View>
@@ -693,9 +909,14 @@ export default function ProductDetailScreen() {
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView
                         style={styles.sheetKeyboardWrap}
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                     >
-                        <View style={styles.contactModal}>
+                        <View
+                            style={[
+                                styles.contactModal,
+                                { paddingBottom: Spacing.xl + Math.max(insets.bottom, Spacing.xs) },
+                            ]}
+                        >
                             <View style={styles.contactModalHeader}>
                                 <Text style={styles.contactModalTitle}>Contacter le vendeur</Text>
                                 <TouchableOpacity
@@ -745,25 +966,25 @@ export default function ProductDetailScreen() {
                 <View style={styles.modalOverlay}>
                     <KeyboardAvoidingView
                         style={styles.sheetKeyboardWrap}
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                     >
-                        <ScrollView
-                            style={styles.sheetScroll}
-                            contentContainerStyle={styles.sheetScrollContent}
-                            keyboardShouldPersistTaps="handled"
-                            showsVerticalScrollIndicator={false}
-                        >
-                            <View style={styles.reviewModal}>
-                                <View style={styles.reviewModalHeader}>
-                                    <Text style={styles.reviewModalTitle}>Donner votre avis</Text>
-                                    <TouchableOpacity
-                                        style={styles.sheetCloseButton}
-                                        onPress={() => setShowReviewModal(false)}
-                                    >
-                                        <Ionicons name="close" size={20} color={Colors.textPrimary} />
-                                    </TouchableOpacity>
-                                </View>
-                                
+                        <View style={styles.reviewModal}>
+                            <View style={styles.reviewModalHeader}>
+                                <Text style={styles.reviewModalTitle}>Donner votre avis</Text>
+                                <TouchableOpacity
+                                    style={styles.sheetCloseButton}
+                                    onPress={() => setShowReviewModal(false)}
+                                >
+                                    <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                                </TouchableOpacity>
+                            </View>
+
+                            <ScrollView
+                                style={styles.reviewBodyScroll}
+                                contentContainerStyle={styles.reviewBodyContent}
+                                keyboardShouldPersistTaps="handled"
+                                showsVerticalScrollIndicator={false}
+                            >
                                 <Text style={styles.ratingLabel}>Note</Text>
                                 <View style={styles.starsContainer}>
                                     {[1, 2, 3, 4, 5].map((star) => (
@@ -780,7 +1001,7 @@ export default function ProductDetailScreen() {
                                         </TouchableOpacity>
                                     ))}
                                 </View>
-                                
+
                                 <Text style={styles.reviewLabel}>Votre commentaire</Text>
                                 <TextInput
                                     style={styles.reviewInput}
@@ -792,21 +1013,38 @@ export default function ProductDetailScreen() {
                                     onChangeText={setReviewText}
                                     textAlignVertical="top"
                                 />
-                                
-                                <TouchableOpacity 
-                                    style={styles.submitReviewButton}
+                            </ScrollView>
+
+                            <View
+                                style={[
+                                    styles.reviewFooter,
+                                    { paddingBottom: Math.max(insets.bottom, Spacing.md) },
+                                ]}
+                            >
+                                <TouchableOpacity
+                                    style={[
+                                        styles.submitReviewButton,
+                                        isSubmittingReview && styles.submitReviewButtonDisabled,
+                                    ]}
                                     onPress={handleSubmitReview}
+                                    disabled={isSubmittingReview}
                                 >
                                     <LinearGradient
                                         colors={Gradients.accent}
                                         style={styles.submitReviewGradient}
                                     >
-                                        <Ionicons name="checkmark" size={20} color={Colors.primary} />
-                                        <Text style={styles.submitReviewText}>Publier l&apos;avis</Text>
+                                        {isSubmittingReview ? (
+                                            <LoadingSpinner size="small" color={Colors.primary} />
+                                        ) : (
+                                            <>
+                                                <Ionicons name="checkmark" size={20} color={Colors.primary} />
+                                                <Text style={styles.submitReviewText}>Publier l&apos;avis</Text>
+                                            </>
+                                        )}
                                     </LinearGradient>
                                 </TouchableOpacity>
                             </View>
-                        </ScrollView>
+                        </View>
                     </KeyboardAvoidingView>
                 </View>
             </Modal>
@@ -963,6 +1201,15 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
+    },
+    ratingDivider: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray400,
+    },
+    ratingLikeText: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textSecondary,
     },
     infoChips: {
         flexDirection: 'row',
@@ -1207,10 +1454,102 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: Spacing.md,
     },
+    reviewsHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        flex: 1,
+    },
+    reviewsSummaryPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        backgroundColor: Colors.accent + '1A',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+    },
+    reviewsSummaryText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+    },
     addReviewLink: {
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.accent,
+    },
+    reviewsLoadingCard: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.lg,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+    },
+    reviewsLoadingText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+    },
+    reviewsList: {
+        gap: Spacing.sm,
+    },
+    reviewCard: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+    },
+    reviewCardTop: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.sm,
+        gap: Spacing.md,
+    },
+    reviewAuthorRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        gap: Spacing.sm,
+    },
+    reviewAvatar: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    reviewAvatarImage: {
+        width: '100%',
+        height: '100%',
+    },
+    reviewAuthorName: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    reviewDateText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        marginTop: 2,
+    },
+    reviewStarsInline: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    reviewCommentText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        lineHeight: 20,
     },
     emptyReviews: {
         fontSize: Typography.fontSize.base,
@@ -1293,30 +1632,25 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: Colors.gray200,
     },
+    viewCartGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.md + 2,
+        gap: Spacing.sm,
+    },
     addToCartText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
     },
+    viewCartText: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
+    },
     addToCartTextDisabled: {
         color: Colors.gray500,
-    },
-    buyNowButton: {
-        flex: 1,
-        minWidth: 148,
-        backgroundColor: Colors.primary,
-        borderRadius: BorderRadius.xl,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: Spacing.md + 2,
-    },
-    buyNowText: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
-        textAlign: 'center',
-        lineHeight: 20,
-        includeFontPadding: false,
     },
     errorContainer: {
         flex: 1,
@@ -1374,13 +1708,14 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         justifyContent: 'flex-end',
-        paddingHorizontal: Spacing.sm,
-        paddingBottom: Spacing.sm,
+        paddingHorizontal: 0,
+        paddingBottom: 0,
     },
     sheetKeyboardWrap: {
         width: '100%',
+        maxHeight: '94%',
     },
     sheetScroll: {
         width: '100%',
@@ -1402,6 +1737,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
         padding: Spacing.xl,
         maxHeight: '88%',
     },
@@ -1448,19 +1785,34 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
-        padding: Spacing.xl,
-        maxHeight: '88%',
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
+        maxHeight: '92%',
+        overflow: 'hidden',
     },
     reviewModalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: Spacing.xl,
+        paddingHorizontal: Spacing.xl,
+        paddingTop: Spacing.xl,
+        paddingBottom: Spacing.lg,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
     },
     reviewModalTitle: {
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
+    },
+    reviewBodyScroll: {
+        width: '100%',
+        flexShrink: 1,
+    },
+    reviewBodyContent: {
+        paddingHorizontal: Spacing.xl,
+        paddingTop: Spacing.lg,
+        paddingBottom: Spacing.md,
     },
     ratingLabel: {
         fontSize: Typography.fontSize.md,
@@ -1489,15 +1841,24 @@ const styles = StyleSheet.create({
         padding: Spacing.lg,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
-        minHeight: 150,
-        marginBottom: Spacing.lg,
+        minHeight: 120,
         borderWidth: 1,
         borderColor: Colors.gray200,
+    },
+    reviewFooter: {
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+        paddingTop: Spacing.md,
+        paddingHorizontal: Spacing.xl,
+        backgroundColor: Colors.white,
     },
     submitReviewButton: {
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
+    },
+    submitReviewButtonDisabled: {
+        opacity: 0.7,
     },
     submitReviewGradient: {
         flexDirection: 'row',

@@ -5,7 +5,8 @@
 import { ProductCard } from '@/components/ProductCard';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useGetAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useAuth } from '@/hooks/useAuth';
+import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { Announcement } from '@/types/announcement';
 import { Ionicons } from '@expo/vector-icons';
@@ -63,6 +64,8 @@ export default function SearchScreen() {
         [categoryIdFromParams],
     );
     const [category, setCategory] = useState<string | undefined>(normalizedCategoryFromParams);
+    const { user, requireAuth } = useAuth();
+    const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
 
     const { data: announcements, isLoading } = useGetAnnouncementsQuery();
     const { data: categoriesData = [] } = useGetCategoriesQuery();
@@ -110,21 +113,72 @@ export default function SearchScreen() {
         });
     }, [announcements, category, searchQuery]);
 
+    const activeCategoryLabel = useMemo(() => {
+        if (!category) return 'Toutes les categories';
+        return categories.find((entry) => entry.id === category)?.label || 'Categorie';
+    }, [categories, category]);
+
     const handleAddToCart = (product: Announcement) => {
         console.log('Add to cart:', product._id);
     };
 
-    const handleToggleWishlist = (product: Announcement) => {
-        console.log('Toggle wishlist:', product._id);
-    };
+    const currentUserId = useMemo(
+        () => normalizeId((user as any)?._id || (user as any)?.id),
+        [user],
+    );
+    const isInWishlist = React.useCallback(
+        (announcement: Announcement) => {
+            if (!currentUserId) {
+                return false;
+            }
+            const likes = Array.isArray((announcement as any)?.likes)
+                ? (announcement as any).likes
+                : [];
+            return likes.some((entry: any) => normalizeId(entry) === currentUserId);
+        },
+        [currentUserId],
+    );
+    const handleToggleWishlist = React.useCallback(
+        async (product: Announcement) => {
+            if (isTogglingLike) {
+                return;
+            }
+            if (!requireAuth('Vous devez etre connecte pour liker une annonce.')) {
+                return;
+            }
+            if (!product?._id) {
+                return;
+            }
+            try {
+                await toggleLike(product._id).unwrap();
+            } catch (error) {
+                console.error('Toggle like error:', error);
+            }
+        },
+        [isTogglingLike, requireAuth, toggleLike],
+    );
 
     return (
-        <SafeAreaView style={styles.container} edges={['bottom']}>
+        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
             <LinearGradient colors={Gradients.primary} style={styles.header}>
-                <Text style={styles.headerTitle}>Recherche produits</Text>
+                <View pointerEvents="none" style={styles.headerGlowOne} />
+                <View pointerEvents="none" style={styles.headerGlowTwo} />
+
+                <View style={styles.headerTopRow}>
+                    <View>
+                        <Text style={styles.headerEyebrow}>EXPLORER</Text>
+                        <Text style={styles.headerTitle}>Recherche produits</Text>
+                    </View>
+                    <View style={styles.headerBadge}>
+                        <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
+                        <Text style={styles.headerBadgeText}>Smart</Text>
+                    </View>
+                </View>
+
                 <Text style={styles.headerSubtitle}>
                     Trouvez rapidement ce dont vous avez besoin
                 </Text>
+
                 <View style={styles.searchContainer}>
                     <View style={styles.searchBar}>
                         <View style={styles.searchIconWrap}>
@@ -136,6 +190,7 @@ export default function SearchScreen() {
                             placeholderTextColor={Colors.gray400}
                             value={searchQuery}
                             onChangeText={setSearchQuery}
+                            returnKeyType="search"
                         />
                         {searchQuery.length > 0 ? (
                             <TouchableOpacity style={styles.clearSearchBtn} onPress={() => setSearchQuery('')}>
@@ -143,47 +198,50 @@ export default function SearchScreen() {
                             </TouchableOpacity>
                         ) : null}
                     </View>
-                    <View style={styles.resultsMetaRow}>
-                        <Text style={styles.resultsMetaText}>
-                            {filteredData.length} resultat(s)
-                        </Text>
-                        {category ? (
-                            <TouchableOpacity
-                                style={styles.resetCategoryBtn}
-                                onPress={() => setCategory(undefined)}
-                            >
-                                <Text style={styles.resetCategoryText}>Tout afficher</Text>
-                            </TouchableOpacity>
-                        ) : null}
+                </View>
+
+                <View style={styles.resultsMetaRow}>
+                    <View style={styles.metaPill}>
+                        <Ionicons name="pricetag-outline" size={14} color={Colors.primary} />
+                        <Text style={styles.metaPillText}>{filteredData.length} resultat(s)</Text>
                     </View>
+                    <View style={[styles.metaPill, styles.metaPillSoft]}>
+                        <Ionicons name="funnel-outline" size={14} color={Colors.gray700} />
+                        <Text style={styles.metaPillSoftText} numberOfLines={1}>
+                            {activeCategoryLabel}
+                        </Text>
+                    </View>
+                    {category ? (
+                        <TouchableOpacity style={styles.resetCategoryBtn} onPress={() => setCategory(undefined)}>
+                            <Ionicons name="refresh-outline" size={13} color={Colors.primary} />
+                            <Text style={styles.resetCategoryText}>Reset</Text>
+                        </TouchableOpacity>
+                    ) : null}
                 </View>
             </LinearGradient>
 
-            {/* Catégories */}
             <View style={styles.categoriesContainer}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.categoriesScrollContent}
+                >
                     {categories.map((cat) => {
                         const isSelected = cat.id === 'all' ? !category : category === cat.id;
                         return (
                             <TouchableOpacity
                                 key={cat.id}
-                                style={[
-                                    styles.categoryChip,
-                                    isSelected && styles.categoryChipActive,
-                                ]}
+                                style={[styles.categoryChip, isSelected && styles.categoryChipActive]}
                                 onPress={() => setCategory(cat.id === 'all' ? undefined : cat.id)}
                             >
-                                <Ionicons
-                                    name={cat.icon as any}
-                                    size={18}
-                                    color={isSelected ? Colors.primary : Colors.gray600}
-                                />
-                                <Text
-                                    style={[
-                                        styles.categoryText,
-                                        isSelected && styles.categoryTextActive,
-                                    ]}
-                                >
+                                <View style={[styles.categoryIconWrap, isSelected && styles.categoryIconWrapActive]}>
+                                    <Ionicons
+                                        name={cat.icon as any}
+                                        size={15}
+                                        color={isSelected ? Colors.white : Colors.primary}
+                                    />
+                                </View>
+                                <Text style={[styles.categoryText, isSelected && styles.categoryTextActive]}>
                                     {cat.label}
                                 </Text>
                             </TouchableOpacity>
@@ -192,7 +250,6 @@ export default function SearchScreen() {
                 </ScrollView>
             </View>
 
-            {/* Résultats */}
             {isLoading ? (
                 <LoadingSpinner />
             ) : (
@@ -204,17 +261,24 @@ export default function SearchScreen() {
                                 product={item}
                                 onAddToCart={handleAddToCart}
                                 onToggleWishlist={handleToggleWishlist}
+                                isInWishlist={isInWishlist(item)}
                             />
                         </View>
                     )}
                     keyExtractor={(item) => item._id}
                     numColumns={2}
                     columnWrapperStyle={styles.row}
-                    contentContainerStyle={styles.listContent}
+                    contentContainerStyle={[
+                        styles.listContent,
+                        (filteredData || []).length === 0 && styles.listContentEmpty,
+                    ]}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
-                            <Ionicons name="search" size={64} color={Colors.gray300} />
-                            <Text style={styles.emptyText}>Aucun produit trouvé</Text>
+                            <View style={styles.emptyIconWrap}>
+                                <Ionicons name="search-outline" size={34} color={Colors.primary} />
+                            </View>
+                            <Text style={styles.emptyText}>Aucun produit trouve</Text>
+                            <Text style={styles.emptySubtext}>Essayez un autre mot-cle ou une autre categorie.</Text>
                         </View>
                     }
                 />
@@ -226,55 +290,102 @@ export default function SearchScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F2F6FF',
-        paddingTop: Spacing.sm,
+        backgroundColor: '#EEF3FF',
     },
     header: {
+        position: 'relative',
+        overflow: 'hidden',
         paddingHorizontal: Spacing.lg,
         paddingTop: Spacing.lg,
-        paddingBottom: Spacing.md,
+        paddingBottom: Spacing.lg,
         borderBottomLeftRadius: BorderRadius.xxl,
         borderBottomRightRadius: BorderRadius.xxl,
         ...Shadows.md,
     },
+    headerGlowOne: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        top: -56,
+        right: -48,
+        backgroundColor: '#FFFFFF24',
+    },
+    headerGlowTwo: {
+        position: 'absolute',
+        width: 130,
+        height: 130,
+        borderRadius: 65,
+        bottom: -48,
+        left: -36,
+        backgroundColor: '#FFD7002B',
+    },
+    headerTopRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    headerEyebrow: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.white + 'D4',
+        letterSpacing: 1,
+    },
     headerTitle: {
+        marginTop: 2,
         fontSize: Typography.fontSize.xl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
     headerSubtitle: {
-        marginTop: 3,
+        marginTop: 4,
         fontSize: Typography.fontSize.sm,
-        color: Colors.white + 'DD',
+        color: Colors.white + 'E6',
         fontWeight: Typography.fontWeight.medium,
+    },
+    headerBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white + 'F5',
+        ...Shadows.sm,
+    },
+    headerBadgeText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     searchContainer: {
         marginTop: Spacing.md,
-        padding: Spacing.md,
-        backgroundColor: Colors.white,
+        padding: Spacing.sm,
+        backgroundColor: Colors.white + 'F2',
         borderRadius: BorderRadius.xl,
         borderWidth: 1,
-        borderColor: Colors.white + '7A',
+        borderColor: Colors.white + '70',
         ...Shadows.sm,
     },
     searchBar: {
         flexDirection: 'row',
         alignItems: 'center',
-        height: 50,
-        backgroundColor: Colors.gray50,
+        minHeight: 52,
+        backgroundColor: Colors.white,
         borderRadius: BorderRadius.lg,
         paddingHorizontal: Spacing.sm,
         gap: Spacing.sm,
         borderWidth: 1,
-        borderColor: Colors.gray200,
+        borderColor: Colors.gray100,
     },
     searchIconWrap: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
+        width: 32,
+        height: 32,
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.accent + '30',
+        backgroundColor: Colors.primary + '15',
     },
     clearSearchBtn: {
         width: 26,
@@ -287,28 +398,52 @@ const styles = StyleSheet.create({
     searchInput: {
         flex: 1,
         fontSize: Typography.fontSize.base,
-        color: Colors.primary,
+        color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
     },
     resultsMetaRow: {
-        marginTop: Spacing.sm,
+        marginTop: Spacing.md,
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: Spacing.sm,
+        flexWrap: 'wrap',
+        gap: Spacing.xs,
     },
-    resultsMetaText: {
+    metaPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.white,
+        backgroundColor: Colors.white + 'EE',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    metaPillSoft: {
+        backgroundColor: Colors.white + 'CC',
+        borderColor: Colors.white + 'CC',
+        maxWidth: '48%',
+    },
+    metaPillText: {
+        color: Colors.primary,
         fontSize: Typography.fontSize.xs,
-        color: Colors.gray600,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    metaPillSoftText: {
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
     },
     resetCategoryBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
         paddingHorizontal: Spacing.sm,
-        paddingVertical: 5,
+        paddingVertical: 6,
         borderRadius: BorderRadius.full,
         borderWidth: 1,
-        borderColor: Colors.primary + '30',
-        backgroundColor: Colors.primary + '10',
+        borderColor: Colors.primary + '35',
+        backgroundColor: Colors.white,
     },
     resetCategoryText: {
         color: Colors.primary,
@@ -316,64 +451,98 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
     },
     categoriesContainer: {
-        backgroundColor: Colors.white,
-        marginTop: Spacing.md,
-        paddingVertical: Spacing.md,
+        marginTop: -Spacing.sm,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.sm,
+    },
+    categoriesScrollContent: {
         paddingHorizontal: Spacing.lg,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.gray100,
+        gap: Spacing.sm,
     },
     categoryChip: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-        marginRight: Spacing.sm,
-        gap: Spacing.sm,
+        paddingVertical: 8,
+        paddingHorizontal: Spacing.md,
+        gap: 8,
+        backgroundColor: Colors.white,
         borderWidth: 1,
         borderColor: Colors.gray200,
+        ...Shadows.sm,
     },
     categoryChipActive: {
-        backgroundColor: Colors.primary + '12',
-        borderColor: Colors.primary + '40',
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    categoryIconWrap: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '15',
+    },
+    categoryIconWrapActive: {
+        backgroundColor: Colors.white + '2B',
     },
     categoryText: {
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
-        color: Colors.gray500,
+        color: Colors.gray700,
     },
     categoryTextActive: {
-        color: Colors.primary,
+        color: Colors.white,
     },
     listContent: {
         paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.lg,
-        paddingBottom: 100,
+        paddingTop: Spacing.sm,
+        paddingBottom: 110,
+    },
+    listContentEmpty: {
+        flexGrow: 1,
+        justifyContent: 'center',
     },
     row: {
         justifyContent: 'space-between',
         marginBottom: Spacing.md,
     },
     productCard: {
-        width: '48%',
+        width: '48.5%',
     },
     emptyContainer: {
-        flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
-        paddingVertical: Spacing.xxxl,
         borderWidth: 1,
         borderColor: Colors.gray100,
+        paddingHorizontal: Spacing.xl,
+        paddingVertical: Spacing.xxxl,
         ...Shadows.sm,
     },
+    emptyIconWrap: {
+        width: 66,
+        height: 66,
+        borderRadius: 33,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '12',
+        borderWidth: 1,
+        borderColor: Colors.primary + '28',
+    },
     emptyText: {
-        fontSize: Typography.fontSize.md,
-        color: Colors.gray500,
         marginTop: Spacing.md,
-        fontWeight: Typography.fontWeight.semibold,
+        fontSize: Typography.fontSize.md,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+        textAlign: 'center',
+    },
+    emptySubtext: {
+        marginTop: 6,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        textAlign: 'center',
+        lineHeight: 20,
     },
 });

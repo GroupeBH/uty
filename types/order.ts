@@ -20,6 +20,27 @@ export interface OrderItem {
     productId: string | Announcement | null;
     quantity: number;
     price: number;
+    product?: Announcement | null;
+    announcement?: Announcement | null;
+    productSnapshot?: {
+        _id?: string;
+        id?: string;
+        name?: string;
+        title?: string;
+        image?: string;
+        imageUrl?: string;
+        images?: string[];
+        currency?: string;
+    } | null;
+    name?: string;
+    title?: string;
+    productName?: string;
+    productTitle?: string;
+    announcementName?: string;
+    image?: string;
+    imageUrl?: string;
+    productImage?: string;
+    currency?: string;
 }
 
 export interface OrderGeoPoint {
@@ -109,22 +130,83 @@ export const getOrderPartyName = (
 };
 
 export const getOrderItemProduct = (item: OrderItem): Announcement | null => {
-    if (!item?.productId || typeof item.productId === 'string') {
-        return null;
+    const candidates = [
+        item?.productId,
+        item?.product,
+        item?.announcement,
+        item?.productSnapshot,
+    ];
+
+    for (const candidate of candidates) {
+        if (!candidate || typeof candidate === 'string') continue;
+        return candidate as Announcement;
     }
-    return item.productId as Announcement;
+
+    return null;
 };
 
 export const getOrderItemName = (item: OrderItem): string => {
+    const directNames = [
+        item?.name,
+        item?.title,
+        item?.productName,
+        item?.productTitle,
+        item?.announcementName,
+        item?.productSnapshot?.name,
+        item?.productSnapshot?.title,
+    ];
+    for (const candidate of directNames) {
+        const normalized = (candidate || '').trim();
+        if (normalized) return normalized;
+    }
+
     const product = getOrderItemProduct(item);
     if (product?.name?.trim()) return product.name.trim();
-    return 'Produit indisponible';
+
+    if (typeof item?.productId === 'string' && item.productId.trim()) {
+        return `Article #${item.productId.slice(-6).toUpperCase()}`;
+    }
+
+    return 'Article';
 };
 
 export const getOrderItemImage = (item: OrderItem): string | undefined => {
     const product = getOrderItemProduct(item);
-    if (!product?.images?.length) return undefined;
-    return product.images[0];
+    if (product?.images?.length) return product.images[0];
+
+    const fallbackImageCandidates = [
+        item?.image,
+        item?.imageUrl,
+        item?.productImage,
+        item?.productSnapshot?.image,
+        item?.productSnapshot?.imageUrl,
+    ];
+    for (const candidate of fallbackImageCandidates) {
+        const normalized = (candidate || '').trim();
+        if (normalized) return normalized;
+    }
+
+    if (item?.productSnapshot?.images?.length) {
+        return item.productSnapshot.images[0];
+    }
+
+    return undefined;
+};
+
+export const getOrderItemCurrency = (item: OrderItem): string | undefined => {
+    const product = getOrderItemProduct(item);
+    const candidates = [
+        item?.currency,
+        item?.productSnapshot?.currency,
+        product?.currency,
+    ];
+
+    for (const candidate of candidates) {
+        const normalized = (candidate || '').toString().trim();
+        if (normalized) return normalized;
+    }
+
+    return undefined;
 };
 
 export const getNextSellerStatuses = (status: OrderStatusValue): OrderStatusValue[] => {

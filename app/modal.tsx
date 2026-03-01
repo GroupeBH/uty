@@ -1,6 +1,6 @@
 /**
  * Modal d'authentification - Register & Login
- * Affiche l'enregistrement par défaut
+ * Affiche l'enregistrement par dÃ©faut
  */
 
 import { CustomAlert } from '@/components/ui/CustomAlert';
@@ -25,12 +25,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type AuthMode = 'register' | 'login';
+type LoginStep = 'phone' | 'pin';
 
 export default function AuthModal() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{
         mode?: string;
         title?: string;
@@ -41,6 +43,7 @@ export default function AuthModal() {
     
     const initialMode: AuthMode = params.mode === 'login' ? 'login' : 'register';
     const [mode, setMode] = useState<AuthMode>(initialMode);
+    const [loginStep, setLoginStep] = useState<LoginStep>('phone');
     const [phone, setPhone] = useState('');
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
@@ -64,9 +67,13 @@ export default function AuthModal() {
     // Animations
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
+    const scrollRef = useRef<ScrollView | null>(null);
 
     const [requestOtp, { isLoading: isRequestingOtp }] = useRequestOtpMutation();
     const [login, { isLoading: isLoggingIn }] = useLoginMutation();
+    const isLoginMode = mode === 'login';
+    const isLoginPhoneStep = isLoginMode && loginStep === 'phone';
+    const isLoginPinStep = isLoginMode && loginStep === 'pin';
 
     const authRequiredTitle = (params.title || '').toString().trim();
     const authRequiredMessage = (params.reason || '').toString().trim();
@@ -75,8 +82,13 @@ export default function AuthModal() {
     useEffect(() => {
         if (params.mode === 'login') {
             setMode('login');
+            setLoginStep('phone');
         } else if (params.mode === 'register') {
             setMode('register');
+            setLoginStep('phone');
+            setPin('');
+            setShowPin(false);
+            setIsPinFocused(false);
         }
     }, [params.mode]);
 
@@ -110,22 +122,23 @@ export default function AuthModal() {
     };
 
     const handleRegister = async () => {
-        if (!phone.trim()) {
-            showAlert('Erreur', 'Veuillez entrer votre numéro de téléphone', 'error');
+        const trimmedPhone = phone.trim();
+        if (!trimmedPhone) {
+            showAlert('Erreur', 'Veuillez entrer votre numÃ©ro de tÃ©lÃ©phone', 'error');
             return;
         }
 
         try {
-            const response = await requestOtp({ phone }).unwrap();
+            const response = await requestOtp({ phone: trimmedPhone }).unwrap();
             showAlert(
-                'Succès',
-                response.message || 'Code OTP envoyé à votre numéro !',
+                'SuccÃ¨s',
+                response.message || 'Code OTP envoyÃ© Ã  votre numÃ©ro !',
                 'success',
                 () => {
                     hideAlert();
                     router.push({
                         pathname: '/(auth)/otp',
-                        params: { phone, mode: 'register' },
+                        params: { phone: trimmedPhone, mode: 'register' },
                     });
                 }
             );
@@ -139,9 +152,18 @@ export default function AuthModal() {
         }
     };
 
-    const handleLogin = async () => {
+    const handleContinueToPin = () => {
         if (!phone.trim()) {
-            showAlert('Erreur', 'Veuillez entrer votre numéro de téléphone', 'error');
+            showAlert('Erreur', 'Veuillez entrer votre numero de telephone', 'error');
+            return;
+        }
+        setLoginStep('pin');
+    };
+
+    const handleLogin = async () => {
+        const trimmedPhone = phone.trim();
+        if (!trimmedPhone) {
+            showAlert('Erreur', 'Veuillez entrer votre numÃ©ro de tÃ©lÃ©phone', 'error');
             return;
         }
         if (!pin.trim() || pin.length !== 4) {
@@ -150,7 +172,7 @@ export default function AuthModal() {
         }
 
         try {
-            const response = await login({ phone, pin }).unwrap();
+            const response = await login({ phone: trimmedPhone, pin }).unwrap();
 
             await tokenService.saveTokens(response.access_token, response.refresh_token);
 
@@ -181,13 +203,66 @@ export default function AuthModal() {
             console.error('Login error:', error);
             showAlert(
                 'Erreur',
-                error?.data?.message || 'Numéro de téléphone ou code PIN incorrect',
+                error?.data?.message || 'NumÃ©ro de tÃ©lÃ©phone ou code PIN incorrect',
                 'error'
             );
         }
     };
 
-    const isLoading = isRequestingOtp || isLoggingIn;
+    const handleModeChange = (nextMode: AuthMode) => {
+        setMode(nextMode);
+        setLoginStep('phone');
+        setIsPhoneFocused(false);
+        setPin('');
+        setShowPin(false);
+        setIsPinFocused(false);
+    };
+
+    const handlePrimaryAction = () => {
+        if (mode === 'register') {
+            void handleRegister();
+            return;
+        }
+
+        if (isLoginPhoneStep) {
+            handleContinueToPin();
+            return;
+        }
+
+        void handleLogin();
+    };
+
+    const isSubmitting = mode === 'register' ? isRequestingOtp : isLoggingIn;
+
+    const keyboardVerticalOffset = Platform.select({
+        ios: 0,
+        android: Math.max(insets.bottom, 10),
+        default: 0,
+    });
+
+    const scrollToForm = () => {
+        setTimeout(() => {
+            scrollRef.current?.scrollToEnd({ animated: true });
+        }, 120);
+    };
+
+    const modeTitle = mode === 'register'
+        ? 'Creer un compte'
+        : isLoginPhoneStep
+            ? 'Connexion rapide'
+            : 'Verification PIN';
+
+    const modeSubtitle = mode === 'register'
+        ? 'Entrez votre numero pour recevoir un code OTP.'
+        : isLoginPhoneStep
+            ? 'Etape 1/2: saisissez votre numero de telephone.'
+            : `Etape 2/2: saisissez votre PIN${phone.trim() ? ` pour ${phone.trim()}` : ''}.`;
+
+    const helperMessage = mode === 'register'
+        ? 'Code OTP envoye en quelques secondes.'
+        : isLoginPhoneStep
+            ? 'Vous passerez ensuite a la verification PIN.'
+            : 'Le PIN contient exactement 4 chiffres.';
 
     return (
         <View style={styles.modalOverlay}>
@@ -204,12 +279,15 @@ export default function AuthModal() {
                 >
                     <KeyboardAvoidingView
                         style={styles.container}
-                        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        keyboardVerticalOffset={keyboardVerticalOffset}
                     >
                         <ScrollView
+                            ref={scrollRef}
                             contentContainerStyle={styles.scrollContent}
                             showsVerticalScrollIndicator={false}
                             keyboardShouldPersistTaps="handled"
+                            keyboardDismissMode="on-drag"
                         >
                             <View pointerEvents="none" style={styles.colorOrbWarm} />
                             <View pointerEvents="none" style={styles.colorOrbCool} />
@@ -231,35 +309,41 @@ export default function AuthModal() {
                                 </TouchableOpacity>
                             </View>
 
-                            <LinearGradient
-                                colors={mode === 'register' ? Gradients.cool : Gradients.primary}
-                                style={styles.heroCard}
-                            >
-                                <View style={styles.heroIconCircle}>
-                                    <Ionicons
-                                        name={mode === 'register' ? 'person-add-outline' : 'log-in-outline'}
-                                        size={36}
-                                        color={Colors.white}
-                                    />
-                                </View>
-                                <View style={styles.heroTextWrap}>
-                                    <Text style={styles.heroTitle}>
-                                        {mode === 'register' ? 'Creer un compte' : 'Connexion rapide'}
-                                    </Text>
-                                    <Text style={styles.heroSubtitle}>
-                                        {mode === 'register'
-                                            ? 'Inscrivez-vous en 1 minute via OTP'
-                                            : 'Retrouvez votre compte en toute securite'}
-                                    </Text>
-                                </View>
-                            </LinearGradient>
+                            <View style={styles.modeCard}>
+                                <LinearGradient
+                                    colors={mode === 'register' ? Gradients.cool : Gradients.primary}
+                                    style={styles.modeCardGradient}
+                                >
+                                    <View style={styles.modeIconCircle}>
+                                        <Ionicons
+                                            name={
+                                                mode === 'register'
+                                                    ? 'person-add-outline'
+                                                    : isLoginPhoneStep
+                                                        ? 'call-outline'
+                                                        : 'lock-closed-outline'
+                                            }
+                                            size={22}
+                                            color={Colors.white}
+                                        />
+                                    </View>
+                                    <View style={styles.authRequiredTextWrap}>
+                                        <Text style={styles.modeStep}>
+                                            {mode === 'register'
+                                                ? 'Inscription'
+                                                : isLoginPhoneStep
+                                                    ? 'Connexion - Etape 1/2'
+                                                    : 'Connexion - Etape 2/2'}
+                                        </Text>
+                                        <Text style={styles.heroTitle}>{modeTitle}</Text>
+                                        <Text style={styles.heroSubtitle}>{modeSubtitle}</Text>
+                                    </View>
+                                </LinearGradient>
+                            </View>
 
                             {showAuthRequiredNotice ? (
                                 <View style={styles.authRequiredCard}>
-                                    <LinearGradient
-                                        colors={['#FFF4E6', '#FFE9CC']}
-                                        style={styles.authRequiredTop}
-                                    >
+                                    <View style={styles.authRequiredTop}>
                                         <View style={styles.authRequiredIconWrap}>
                                             <Ionicons name="lock-closed-outline" size={18} color={Colors.accentDark} />
                                         </View>
@@ -271,12 +355,6 @@ export default function AuthModal() {
                                                 {authRequiredMessage || 'Connectez-vous pour continuer.'}
                                             </Text>
                                         </View>
-                                    </LinearGradient>
-                                    <View style={styles.authRequiredFooter}>
-                                        <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
-                                        <Text style={styles.authRequiredFooterText}>
-                                            Connexion rapide et securisee en quelques secondes.
-                                        </Text>
                                     </View>
                                 </View>
                             ) : null}
@@ -287,7 +365,7 @@ export default function AuthModal() {
                                         styles.tab,
                                         mode === 'register' && styles.tabActiveRegister,
                                     ]}
-                                    onPress={() => setMode('register')}
+                                    onPress={() => handleModeChange('register')}
                                 >
                                     <Text
                                         style={[
@@ -303,7 +381,7 @@ export default function AuthModal() {
                                         styles.tab,
                                         mode === 'login' && styles.tabActiveLogin,
                                     ]}
-                                    onPress={() => setMode('login')}
+                                    onPress={() => handleModeChange('login')}
                                 >
                                     <Text
                                         style={[
@@ -316,76 +394,73 @@ export default function AuthModal() {
                                 </TouchableOpacity>
                             </View>
 
-                            <View style={styles.titleContainer}>
-                                <Text style={styles.title}>
-                                    {mode === 'register' ? 'Bienvenue' : 'Bon retour'}
-                                </Text>
-                                <Text style={styles.subtitle}>
-                                    {mode === 'register'
-                                        ? 'Entrez votre numero pour recevoir un code de verification.'
-                                        : 'Entrez votre numero et votre PIN pour continuer.'}
-                                </Text>
-                            </View>
-
                             <View style={styles.form}>
-                                <View style={styles.inputGroup}>
-                                    <Text style={styles.label}>Numero de telephone</Text>
-                                    <View
-                                        style={[
-                                            styles.inputContainer,
-                                            isPhoneFocused &&
-                                                (mode === 'register'
-                                                    ? styles.inputContainerFocusedWarm
-                                                    : styles.inputContainerFocusedCool),
-                                        ]}
-                                    >
+                                {(mode === 'register' || isLoginPhoneStep) ? (
+                                    <View style={styles.inputGroup}>
+                                        <Text style={styles.label}>Numero de telephone</Text>
                                         <View
                                             style={[
-                                                styles.inputPrefixBadge,
-                                                mode === 'register'
-                                                    ? styles.inputPrefixBadgeWarm
-                                                    : styles.inputPrefixBadgeCool,
+                                                styles.inputContainer,
+                                                isPhoneFocused &&
+                                                    (mode === 'register'
+                                                        ? styles.inputContainerFocusedWarm
+                                                        : styles.inputContainerFocusedCool),
                                             ]}
                                         >
-                                            <Text style={styles.inputPrefixText}>TEL</Text>
+                                            <Ionicons name="call-outline" size={19} color={Colors.gray500} />
+                                            <TextInput
+                                                style={styles.input}
+                                                value={phone}
+                                                onChangeText={setPhone}
+                                                onFocus={() => {
+                                                    setIsPhoneFocused(true);
+                                                    scrollToForm();
+                                                }}
+                                                onBlur={() => setIsPhoneFocused(false)}
+                                                placeholder="Ex: 0812345678"
+                                                placeholderTextColor={Colors.gray400}
+                                                keyboardType="phone-pad"
+                                                autoCapitalize="none"
+                                                returnKeyType={mode === 'register' ? 'send' : 'next'}
+                                                onSubmitEditing={() => {
+                                                    if (mode === 'register') {
+                                                        void handleRegister();
+                                                        return;
+                                                    }
+                                                    handleContinueToPin();
+                                                }}
+                                            />
                                         </View>
-                                        <Ionicons name="call-outline" size={19} color={Colors.gray500} />
-                                        <TextInput
-                                            style={styles.input}
-                                            value={phone}
-                                            onChangeText={setPhone}
-                                            onFocus={() => setIsPhoneFocused(true)}
-                                            onBlur={() => setIsPhoneFocused(false)}
-                                            placeholder="Ex: 0812345678"
-                                            placeholderTextColor={Colors.gray400}
-                                            keyboardType="phone-pad"
-                                            autoCapitalize="none"
-                                        />
                                     </View>
-                                </View>
+                                ) : (
+                                    <View style={styles.phoneSummaryCard}>
+                                        <Text style={styles.phoneSummaryLabel}>Numero utilise</Text>
+                                        <View style={styles.phoneSummaryValueRow}>
+                                            <Text style={styles.phoneSummaryValue}>{phone.trim()}</Text>
+                                            <TouchableOpacity
+                                                style={styles.phoneSummaryEditButton}
+                                                onPress={() => {
+                                                    setLoginStep('phone');
+                                                    setShowPin(false);
+                                                    setIsPinFocused(false);
+                                                }}
+                                            >
+                                                <Text style={styles.phoneSummaryEditText}>Modifier</Text>
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
+                                )}
 
-                                {mode === 'login' && (
+                                {isLoginPinStep && (
                                     <View style={styles.inputGroup}>
                                         <Text style={styles.label}>Code PIN</Text>
                                         <View
                                             style={[
                                                 styles.inputContainer,
                                                 isPinFocused &&
-                                                    (mode === 'register'
-                                                        ? styles.inputContainerFocusedWarm
-                                                        : styles.inputContainerFocusedCool),
+                                                    styles.inputContainerFocusedCool,
                                             ]}
                                         >
-                                            <View
-                                                style={[
-                                                    styles.inputPrefixBadge,
-                                                    mode === 'register'
-                                                        ? styles.inputPrefixBadgeWarm
-                                                        : styles.inputPrefixBadgeCool,
-                                                ]}
-                                            >
-                                                <Text style={styles.inputPrefixText}>PIN</Text>
-                                            </View>
                                             <Ionicons
                                                 name="lock-closed-outline"
                                                 size={19}
@@ -395,7 +470,10 @@ export default function AuthModal() {
                                                 style={styles.input}
                                                 value={pin}
                                                 onChangeText={setPin}
-                                                onFocus={() => setIsPinFocused(true)}
+                                                onFocus={() => {
+                                                    setIsPinFocused(true);
+                                                    scrollToForm();
+                                                }}
                                                 onBlur={() => setIsPinFocused(false)}
                                                 placeholder="4 chiffres"
                                                 placeholderTextColor={Colors.gray400}
@@ -419,15 +497,15 @@ export default function AuthModal() {
                                 )}
 
                                 <TouchableOpacity
-                                    style={[styles.submitButton, isLoading && styles.disabledButton]}
-                                    onPress={mode === 'register' ? handleRegister : handleLogin}
-                                    disabled={isLoading}
+                                    style={[styles.submitButton, isSubmitting && styles.disabledButton]}
+                                    onPress={handlePrimaryAction}
+                                    disabled={isSubmitting}
                                 >
                                     <LinearGradient
                                         colors={mode === 'register' ? Gradients.cool : Gradients.primary}
                                         style={styles.submitGradient}
                                     >
-                                        {isLoading ? (
+                                        {isSubmitting ? (
                                             <Text style={styles.submitButtonText}>
                                                 {mode === 'register' ? 'Envoi...' : 'Connexion...'}
                                             </Text>
@@ -436,7 +514,9 @@ export default function AuthModal() {
                                                 <Text style={styles.submitButtonText}>
                                                     {mode === 'register'
                                                         ? 'Recevoir le code'
-                                                        : 'Se connecter'}
+                                                        : isLoginPhoneStep
+                                                            ? 'Continuer'
+                                                            : 'Se connecter'}
                                                 </Text>
                                                 <View
                                                     style={[
@@ -447,7 +527,7 @@ export default function AuthModal() {
                                                     ]}
                                                 >
                                                     <Ionicons
-                                                        name="arrow-forward"
+                                                        name={isLoginPhoneStep ? 'arrow-forward' : 'log-in-outline'}
                                                         size={18}
                                                         color={Colors.primary}
                                                     />
@@ -457,32 +537,28 @@ export default function AuthModal() {
                                     </LinearGradient>
                                 </TouchableOpacity>
 
-                                {mode === 'register' ? (
-                                    <View style={styles.infoBox}>
-                                        <Ionicons
-                                            name="information-circle-outline"
-                                            size={18}
-                                            color={Colors.accentDark}
-                                        />
-                                        <Text style={styles.infoText}>
-                                            Un code OTP vous sera envoye sur ce numero.
-                                        </Text>
-                                    </View>
+                                {isLoginPinStep ? (
+                                    <TouchableOpacity
+                                        style={styles.secondaryActionButton}
+                                        onPress={() => {
+                                            setLoginStep('phone');
+                                            setShowPin(false);
+                                            setIsPinFocused(false);
+                                        }}
+                                        disabled={isSubmitting}
+                                    >
+                                        <Ionicons name="arrow-back" size={16} color={Colors.primary} />
+                                        <Text style={styles.secondaryActionText}>Modifier le numero</Text>
+                                    </TouchableOpacity>
                                 ) : null}
 
-                                <View style={styles.trustRow}>
-                                    <View style={[styles.trustChip, styles.trustChipPrimary]}>
-                                        <Ionicons name="shield-outline" size={13} color={Colors.primaryDark} />
-                                        <Text style={[styles.trustChipText, styles.trustChipTextPrimary]}>Securise</Text>
-                                    </View>
-                                    <View style={[styles.trustChip, styles.trustChipWarning]}>
-                                        <Ionicons name="flash-outline" size={13} color={Colors.accentDark} />
-                                        <Text style={[styles.trustChipText, styles.trustChipTextWarning]}>Rapide</Text>
-                                    </View>
-                                    <View style={[styles.trustChip, styles.trustChipInfo]}>
-                                        <Ionicons name="lock-closed-outline" size={13} color={Colors.info} />
-                                        <Text style={[styles.trustChipText, styles.trustChipTextInfo]}>Prive</Text>
-                                    </View>
+                                <View style={styles.helperRow}>
+                                    <Ionicons
+                                        name={mode === 'register' ? 'flash-outline' : 'information-circle-outline'}
+                                        size={16}
+                                        color={mode === 'register' ? Colors.accentDark : Colors.primary}
+                                    />
+                                    <Text style={styles.helperText}>{helperMessage}</Text>
                                 </View>
                             </View>
                         </ScrollView>
@@ -524,7 +600,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#F7FAFF',
         borderTopLeftRadius: BorderRadius.xxxl,
         borderTopRightRadius: BorderRadius.xxxl,
-        marginTop: Spacing.massive,
+        marginTop: Platform.OS === 'ios' ? Spacing.xxxl : Spacing.xxl,
         ...Shadows.xl,
     },
     scrollContent: {
@@ -591,52 +667,58 @@ const styles = StyleSheet.create({
         borderColor: Colors.gray200,
         ...Shadows.sm,
     },
-    heroCard: {
+    modeCard: {
+        marginBottom: Spacing.lg,
+    },
+    modeCardGradient: {
         borderRadius: BorderRadius.xxl,
         paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.md,
-        marginBottom: Spacing.xl,
         ...Shadows.lg,
     },
-    heroIconCircle: {
-        width: 62,
-        height: 62,
-        borderRadius: 31,
-        backgroundColor: '#FFFFFF2D',
+    modeIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF33',
         borderWidth: 1,
-        borderColor: '#FFFFFF4D',
+        borderColor: '#FFFFFF55',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    heroTextWrap: {
-        flex: 1,
-        gap: 2,
+    modeStep: {
+        color: Colors.white + 'D9',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
     },
     heroTitle: {
         color: Colors.white,
-        fontSize: Typography.fontSize.lg,
+        marginTop: 2,
+        fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
     },
     heroSubtitle: {
-        color: Colors.white + 'E8',
-        fontSize: Typography.fontSize.sm,
-        lineHeight: 20,
+        color: Colors.white + 'E0',
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
     },
     authRequiredCard: {
         borderRadius: BorderRadius.xl,
         backgroundColor: Colors.white,
         borderWidth: 1,
         borderColor: Colors.accent + '55',
-        marginBottom: Spacing.lg,
-        overflow: 'hidden',
+        marginBottom: Spacing.md,
         ...Shadows.md,
     },
     authRequiredTop: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         gap: Spacing.sm,
         paddingHorizontal: Spacing.md,
         paddingVertical: Spacing.md,
@@ -647,9 +729,9 @@ const styles = StyleSheet.create({
         borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.accent + '1F',
         borderWidth: 1,
-        borderColor: Colors.accent + '50',
+        borderColor: Colors.accent + '60',
     },
     authRequiredTextWrap: {
         flex: 1,
@@ -665,28 +747,12 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         lineHeight: 19,
     },
-    authRequiredFooter: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
-        borderTopWidth: 1,
-        borderTopColor: Colors.gray100,
-        backgroundColor: Colors.primary + '08',
-    },
-    authRequiredFooterText: {
-        flex: 1,
-        color: Colors.primary,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-    },
     tabsContainer: {
         flexDirection: 'row',
         backgroundColor: Colors.primary + '0A',
         borderRadius: BorderRadius.xxl,
         padding: 5,
-        marginBottom: Spacing.xl,
+        marginBottom: Spacing.lg,
         borderWidth: 1,
         borderColor: Colors.primary + '18',
         ...Shadows.sm,
@@ -715,24 +781,8 @@ const styles = StyleSheet.create({
         color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
     },
-    titleContainer: {
-        marginBottom: Spacing.xl,
-        gap: Spacing.xs,
-    },
-    title: {
-        fontSize: Typography.fontSize.xxl,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        textAlign: 'center',
-    },
-    subtitle: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.textSecondary,
-        lineHeight: 22,
-        textAlign: 'center',
-    },
     form: {
-        gap: Spacing.lg,
+        gap: Spacing.md,
     },
     inputGroup: {
         gap: Spacing.sm,
@@ -750,7 +800,7 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         paddingHorizontal: Spacing.md,
         gap: Spacing.sm,
-        borderWidth: 1.5,
+        borderWidth: 1,
         borderColor: Colors.gray200,
         ...Shadows.sm,
     },
@@ -762,25 +812,9 @@ const styles = StyleSheet.create({
         borderColor: Colors.primary,
         backgroundColor: Colors.primary + '0A',
     },
-    inputPrefixBadge: {
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-    },
-    inputPrefixBadgeWarm: {
-        backgroundColor: Colors.accentDark,
-    },
-    inputPrefixBadgeCool: {
-        backgroundColor: Colors.primary,
-    },
-    inputPrefixText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
-    },
     input: {
         flex: 1,
-        height: 54,
+        height: 52,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
@@ -803,6 +837,46 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
         fontWeight: Typography.fontWeight.medium,
+    },
+    phoneSummaryCard: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '22',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+        gap: Spacing.xs,
+        ...Shadows.sm,
+    },
+    phoneSummaryLabel: {
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    phoneSummaryValueRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    phoneSummaryValue: {
+        flex: 1,
+        fontSize: Typography.fontSize.md,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    phoneSummaryEditButton: {
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '35',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        backgroundColor: Colors.primary + '10',
+    },
+    phoneSummaryEditText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     submitButton: {
         marginTop: Spacing.sm,
@@ -841,62 +915,30 @@ const styles = StyleSheet.create({
     disabledButton: {
         opacity: 0.6,
     },
-    infoBox: {
+    secondaryActionButton: {
+        alignSelf: 'center',
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.md,
-        backgroundColor: Colors.accent + '1F',
-        borderRadius: BorderRadius.xl,
-        borderWidth: 1,
-        borderColor: Colors.accent + '52',
-    },
-    infoText: {
-        flex: 1,
-        fontSize: Typography.fontSize.sm,
-        color: Colors.gray700,
-        lineHeight: 20,
-        fontWeight: Typography.fontWeight.medium,
-    },
-    trustRow: {
-        marginTop: Spacing.xs,
-        flexDirection: 'row',
         gap: Spacing.xs,
-        flexWrap: 'wrap',
+        paddingVertical: Spacing.xs,
     },
-    trustChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 6,
-    },
-    trustChipPrimary: {
-        borderColor: Colors.primary + '24',
-        backgroundColor: Colors.primary + '10',
-    },
-    trustChipWarning: {
-        borderColor: Colors.accentDark + '3D',
-        backgroundColor: Colors.accent + '1F',
-    },
-    trustChipInfo: {
-        borderColor: Colors.info + '35',
-        backgroundColor: Colors.info + '16',
-    },
-    trustChipText: {
-        fontSize: Typography.fontSize.xs,
+    secondaryActionText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.semibold,
     },
-    trustChipTextPrimary: {
-        color: Colors.primaryDark,
+    helperRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
     },
-    trustChipTextWarning: {
-        color: Colors.accentDark,
-    },
-    trustChipTextInfo: {
-        color: Colors.info,
+    helperText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.medium,
     },
 });
+

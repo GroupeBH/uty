@@ -5,6 +5,7 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { MapPickerModal } from '@/components/MapPickerModal';
+import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
@@ -25,7 +26,6 @@ import {
     Animated,
     Image,
     KeyboardAvoidingView,
-    Modal,
     Platform,
     ScrollView,
     Switch,
@@ -35,7 +35,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const BASE_STEPS = [
     { key: 'category', title: 'Catégorie', icon: 'grid-outline' as const },
@@ -86,6 +86,7 @@ const BASE_FORM_FIELDS = [
 
 export default function PublishScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const { requireAuth } = useAuth();
     const [createAnnouncement, { isLoading: isPublishing }] = useCreateAnnouncementMutation();
 
@@ -347,7 +348,7 @@ export default function PublishScreen() {
         }
 
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsMultipleSelection: true,
             quality: 0.8,
             selectionLimit: 10 - images.length,
@@ -581,8 +582,8 @@ export default function PublishScreen() {
             
             await createAnnouncement(formDataToSend as any).unwrap();
             showAlert({
-                title: 'Succ?s',
-                message: 'Votre annonce a ?t? publi?e avec succ?s!',
+                title: 'Succes',
+                message: 'Votre annonce a ete publiee avec succes !',
                 variant: 'success',
                 confirmText: 'OK',
                 onConfirm: () => router.push('/(tabs)'),
@@ -593,20 +594,6 @@ export default function PublishScreen() {
         }
     };
 
-    const alertBadgeText =
-        alertState.variant === 'success'
-            ? 'Mission reussie'
-            : alertState.variant === 'error'
-              ? 'Petite correction'
-              : 'Petit conseil';
-    const alertPointsText =
-        alertState.variant === 'success' ? '+20 XP' : 'Astuce';
-    const alertProgress =
-        alertState.variant === 'success'
-            ? 0.82
-            : alertState.variant === 'error'
-              ? 0.35
-              : 0.55;
     const initialLatitude = parseCoordinate(formData.pickupLatitude);
     const initialLongitude = parseCoordinate(formData.pickupLongitude);
     const initialMapLocation =
@@ -617,6 +604,10 @@ export default function PublishScreen() {
                   address: formData.pickupAddress,
               }
             : undefined;
+    const navigationBottomPadding =
+        currentStep === getStepId('delivery')
+            ? Math.max(insets.bottom, Spacing.xs)
+            : Spacing.lg;
 
     console.log('announcementData', formData);
 
@@ -1210,7 +1201,7 @@ export default function PublishScreen() {
                 </ScrollView>
 
                 {/* Navigation Buttons */}
-                <View style={styles.navigationBar}>
+                <View style={[styles.navigationBar, { paddingBottom: navigationBottomPadding }]}>
                     {currentStep > 1 && (
                         <TouchableOpacity style={styles.previousButton} onPress={handlePrevious}>
                             <Ionicons name="arrow-back" size={20} color={Colors.primary} />
@@ -1267,56 +1258,14 @@ export default function PublishScreen() {
                 onConfirm={handleMapConfirm}
             />
 
-            <Modal
+            <CustomAlert
                 visible={alertState.visible}
-                transparent
-                animationType="fade"
-                onRequestClose={closeAlert}
-            >
-                <View style={styles.alertOverlay}>
-                    <View style={styles.alertCard}>
-                        <View style={styles.alertTopRow}>
-                            <View style={[styles.alertIcon, styles[`alertIcon_${alertState.variant}`]]}>
-                                <Ionicons
-                                    name={
-                                        alertState.variant === 'success'
-                                            ? 'checkmark'
-                                            : alertState.variant === 'error'
-                                              ? 'close'
-                                              : 'information'
-                                    }
-                                    size={20}
-                                    color={Colors.white}
-                                />
-                            </View>
-                            <View style={styles.alertMeta}>
-                                <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
-                                    <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
-                                </View>
-                                <View style={styles.alertPoints}>
-                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
-                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
-                                </View>
-                            </View>
-                        </View>
-                        <Text style={styles.alertTitle}>{alertState.title}</Text>
-                        <Text style={styles.alertMessage}>{alertState.message}</Text>
-                        <View style={styles.alertProgressTrack}>
-                            <View
-                                style={[
-                                    styles.alertProgressFill,
-                                    { width: `${Math.round(alertProgress * 100)}%` },
-                                ]}
-                            />
-                        </View>
-                        <TouchableOpacity style={styles.alertButton} onPress={closeAlert}>
-                            <LinearGradient colors={Gradients.primary} style={styles.alertButtonGradient}>
-                                <Text style={styles.alertButtonText}>{alertState.confirmText || 'OK'}</Text>
-                            </LinearGradient>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
+                title={alertState.title}
+                message={alertState.message}
+                type={alertState.variant}
+                confirmText={alertState.confirmText || 'OK'}
+                onConfirm={closeAlert}
+            />
         </SafeAreaView>
     );
 }
@@ -1899,7 +1848,7 @@ const styles = StyleSheet.create({
     },
     alertOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         alignItems: 'center',
         justifyContent: 'center',
         padding: Spacing.xl,

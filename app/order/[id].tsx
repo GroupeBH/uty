@@ -1,10 +1,10 @@
+import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { StatusBadge } from '@/components/ui/StatusBadge';
-import { CustomAlert } from '@/components/ui/CustomAlert';
+import { MapPickerModal } from '@/components/MapPickerModal';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetOrderQuery, useRequestDeliveryMutation, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
-import { formatCurrencyAmount } from '@/utils/currency';
 import {
     OrderStatusValue,
     getNextSellerStatuses,
@@ -14,6 +14,8 @@ import {
     getOrderPartyId,
     getOrderPartyName,
 } from '@/types/order';
+import { formatCurrencyAmount } from '@/utils/currency';
+import { deliveryStorage } from '@/utils/deliveryStorage';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
@@ -22,12 +24,11 @@ import {
     ScrollView,
     StyleSheet,
     Text,
-    TouchableOpacity,
     TextInput,
+    TouchableOpacity,
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { deliveryStorage } from '@/utils/deliveryStorage';
 
 const STATUS_ACTION_LABELS: Record<OrderStatusValue, string> = {
     pending: 'Mettre en attente',
@@ -54,6 +55,19 @@ const formatDateTime = (value?: string) => {
     });
 };
 
+const parseCoordinateLabel = (
+    value?: string | null,
+): { latitude: number; longitude: number } | null => {
+    if (!value?.trim()) return null;
+    const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (!match) return null;
+    const latitude = Number(match[1]);
+    const longitude = Number(match[2]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+    return { latitude, longitude };
+};
+
 export default function OrderDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const router = useRouter();
@@ -65,6 +79,7 @@ export default function OrderDetailScreen() {
     const [deliveryIdInput, setDeliveryIdInput] = React.useState('');
     const [pickupLocationInput, setPickupLocationInput] = React.useState('');
     const [deliveryLocationInput, setDeliveryLocationInput] = React.useState('');
+    const [mapPickerField, setMapPickerField] = React.useState<'pickup' | 'delivery' | null>(null);
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
         title: string;
@@ -113,6 +128,17 @@ export default function OrderDetailScreen() {
         () => (order && isSeller ? getNextSellerStatuses(order.status) : []),
         [isSeller, order],
     );
+    const mapInitialLocation = React.useMemo(() => {
+        if (!mapPickerField) return undefined;
+        const sourceValue =
+            mapPickerField === 'pickup' ? pickupLocationInput : deliveryLocationInput;
+        const coordinates = parseCoordinateLabel(sourceValue);
+        if (!coordinates) return undefined;
+        return {
+            ...coordinates,
+            address: sourceValue.trim() || undefined,
+        };
+    }, [deliveryLocationInput, mapPickerField, pickupLocationInput]);
 
     React.useEffect(() => {
         const orderId = order?._id;
@@ -177,21 +203,42 @@ export default function OrderDetailScreen() {
     const changeStatus = async (nextStatus: OrderStatusValue) => {
         if (!order?._id) return;
 
+        const isPositiveConfirmation = nextStatus === 'confirmed';
+        const isRiskyAction = nextStatus === 'cancelled';
+        const modalType: 'success' | 'warning' | 'info' = isPositiveConfirmation
+            ? 'success'
+            : isRiskyAction
+                ? 'warning'
+                : 'info';
+        const modalTitle = isPositiveConfirmation
+            ? 'Confirmer la commande'
+            : isRiskyAction
+                ? 'Confirmer l annulation'
+                : 'Confirmer le changement';
+        const modalMessage = isPositiveConfirmation
+            ? 'Voulez-vous confirmer cette commande maintenant ?'
+            : `Passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`;
+
         showAlert({
-            title: 'Confirmer le changement',
-            message: `Passer la commande au statut "${STATUS_ACTION_LABELS[nextStatus]}" ?`,
-            type: 'warning',
+            title: modalTitle,
+            message: modalMessage,
+            type: modalType,
             showCancel: true,
-            confirmText: 'Confirmer',
+            confirmText: isPositiveConfirmation ? 'Oui, confirmer' : 'Confirmer',
             cancelText: 'Annuler',
             onConfirm: () => {
                 void (async () => {
                     try {
                         await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
                         await refetch();
+                        const successTitle = nextStatus === 'confirmed' ? 'Commande confirmee' : 'Statut mis a jour';
+                        const successMessage =
+                            nextStatus === 'confirmed'
+                                ? 'La commande a ete confirmee avec succes.'
+                                : 'Le statut de la commande a ete modifie avec succes.';
                         showAlert({
-                            title: 'Statut mis a jour',
-                            message: 'Le statut de la commande a ete modifie avec succes.',
+                            title: successTitle,
+                            message: successMessage,
                             type: 'success',
                         });
                     } catch (error: any) {
@@ -270,6 +317,21 @@ export default function OrderDetailScreen() {
         await deliveryStorage.setDeliveryIdForOrder(order._id, candidate);
         router.push(resolveDeliveryRoute(candidate) as any);
     };
+
+    const onMapConfirm = React.useCallback(
+        (location: { latitude: number; longitude: number; address?: string }) => {
+            const formattedLocation =
+                location.address?.trim() ||
+                `${location.latitude.toFixed(6)},${location.longitude.toFixed(6)}`;
+            if (mapPickerField === 'pickup') {
+                setPickupLocationInput(formattedLocation);
+            } else if (mapPickerField === 'delivery') {
+                setDeliveryLocationInput(formattedLocation);
+            }
+            setMapPickerField(null);
+        },
+        [mapPickerField],
+    );
 
     if (isLoading) {
         return <LoadingSpinner fullScreen />;
@@ -415,6 +477,13 @@ export default function OrderDetailScreen() {
                                             placeholder="Adresse ou point de pickup"
                                             style={styles.fieldInput}
                                         />
+                                        <TouchableOpacity
+                                            style={styles.mapSelectButton}
+                                            onPress={() => setMapPickerField('pickup')}
+                                        >
+                                            <Ionicons name="map-outline" size={16} color={Colors.primary} />
+                                            <Text style={styles.mapSelectButtonText}>Choisir sur la carte</Text>
+                                        </TouchableOpacity>
                                         <Text style={styles.fieldLabel}>Lieu de livraison (optionnel)</Text>
                                         <TextInput
                                             value={deliveryLocationInput}
@@ -422,6 +491,13 @@ export default function OrderDetailScreen() {
                                             placeholder="Adresse de livraison"
                                             style={styles.fieldInput}
                                         />
+                                        <TouchableOpacity
+                                            style={styles.mapSelectButton}
+                                            onPress={() => setMapPickerField('delivery')}
+                                        >
+                                            <Ionicons name="map-outline" size={16} color={Colors.primary} />
+                                            <Text style={styles.mapSelectButtonText}>Choisir sur la carte</Text>
+                                        </TouchableOpacity>
                                         <TouchableOpacity
                                             style={[styles.deliveryRequestButton, isRequestingDelivery && styles.disabledButton]}
                                             onPress={onRequestDelivery}
@@ -528,6 +604,12 @@ export default function OrderDetailScreen() {
                     callback?.();
                 }}
             />
+            <MapPickerModal
+                visible={Boolean(mapPickerField)}
+                initialLocation={mapInitialLocation}
+                onClose={() => setMapPickerField(null)}
+                onConfirm={onMapConfirm}
+            />
         </SafeAreaView>
     );
 }
@@ -617,6 +699,24 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.gray50,
         color: Colors.primary,
         fontSize: Typography.fontSize.sm,
+    },
+    mapSelectButton: {
+        marginTop: Spacing.xs,
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '40',
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs + 2,
+    },
+    mapSelectButtonText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     valueText: {
         fontSize: Typography.fontSize.base,

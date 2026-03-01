@@ -4,6 +4,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyKycEligibilityQuery } from '@/store/api/usersApi';
 import { useCreateShopMutation, useLazyGetMyShopQuery } from '@/store/api/shopsApi';
+import { KycIdType } from '@/types/kyc';
 import { Shop } from '@/types/shop';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
@@ -47,6 +48,13 @@ const KYC_REQUIREMENTS = [
     'Les donnees servent uniquement a la verification de compte.',
 ];
 
+const KYC_ID_OPTIONS: { label: string; value: KycIdType }[] = [
+    { label: 'Carte nationale', value: 'national_id' },
+    { label: 'Passeport', value: 'passport' },
+    { label: 'Permis de conduire', value: 'driver_license' },
+    { label: 'Carte electeur', value: 'voter_card' },
+];
+
 export default function CreateShopScreen() {
     const router = useRouter();
     const { user, requireAuth } = useAuth();
@@ -65,6 +73,11 @@ export default function CreateShopScreen() {
     const [isCorporate, setIsCorporate] = React.useState(false);
     const [logo, setLogo] = React.useState<PickedImage | null>(null);
     const [kycModalVisible, setKycModalVisible] = React.useState(false);
+    const [kycFullName, setKycFullName] = React.useState(
+        `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim(),
+    );
+    const [kycIdType, setKycIdType] = React.useState<KycIdType>('national_id');
+    const [kycIdNumber, setKycIdNumber] = React.useState('');
 
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
@@ -98,6 +111,12 @@ export default function CreateShopScreen() {
         });
     }, [loadMyShop, requireAuth]);
 
+    React.useEffect(() => {
+        const nextFullName = `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim();
+        if (!nextFullName) return;
+        setKycFullName((prev) => prev || nextFullName);
+    }, [user]);
+
     const parseApiErrorMessage = (error: any, fallback: string) => {
         if (!error) return fallback;
         if (typeof error === 'string') return error;
@@ -108,6 +127,28 @@ export default function CreateShopScreen() {
         if (typeof data?.error === 'string') return data.error;
         if (typeof error?.message === 'string') return error.message;
         return fallback;
+    };
+
+    const openKycModal = () => {
+        if (!kycFullName.trim()) {
+            showAlert({
+                title: 'Identite requise',
+                message: 'Renseignez le nom complet avant de lancer le KYC.',
+                type: 'warning',
+            });
+            return;
+        }
+
+        if (!kycIdNumber.trim()) {
+            showAlert({
+                title: 'Numero requis',
+                message: 'Renseignez le numero du document avant de lancer le KYC.',
+                type: 'warning',
+            });
+            return;
+        }
+
+        setKycModalVisible(true);
     };
 
     const hideAlert = () => {
@@ -122,22 +163,22 @@ export default function CreateShopScreen() {
         });
     };
 
-    const captureImage = async () => {
-        const permission = await ImagePicker.requestCameraPermissionsAsync();
+    const pickLogoFromLibrary = async () => {
+        const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (permission.status !== 'granted') {
             showAlert({
                 title: 'Permission requise',
-                message: 'Autorisez l acces a la camera pour capturer le logo de la boutique.',
+                message: 'Autorisez l acces aux photos pour joindre le logo de la boutique.',
                 type: 'warning',
             });
             return;
         }
 
-        const result = await ImagePicker.launchCameraAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
             allowsEditing: true,
-            quality: 0.8,
-            cameraType: ImagePicker.CameraType.back,
+            quality: 0.9,
+            selectionLimit: 1,
         });
 
         if (result.canceled || !result.assets?.length) {
@@ -162,7 +203,7 @@ export default function CreateShopScreen() {
                 message: 'La verification KYC doit etre approuvee avant la creation de boutique.',
                 type: 'warning',
                 confirmText: 'Ouvrir KYC',
-                onConfirm: async () => setKycModalVisible(true),
+                onConfirm: async () => openKycModal(),
             });
             return false;
         }
@@ -171,15 +212,6 @@ export default function CreateShopScreen() {
             showAlert({
                 title: 'Nom requis',
                 message: 'Veuillez saisir le nom de la boutique.',
-                type: 'warning',
-            });
-            return false;
-        }
-
-        if (step === 2 && !logo) {
-            showAlert({
-                title: 'Logo requis',
-                message: 'Ajoutez le logo de la boutique pour continuer.',
                 type: 'warning',
             });
             return false;
@@ -211,10 +243,10 @@ export default function CreateShopScreen() {
             return;
         }
 
-        if (!name.trim() || !logo) {
+        if (!name.trim()) {
             showAlert({
                 title: 'Informations incompletes',
-                message: 'Completez les etapes precedentes avant de soumettre.',
+                message: 'Le nom de la boutique est obligatoire avant soumission.',
                 type: 'warning',
             });
             return;
@@ -226,7 +258,7 @@ export default function CreateShopScreen() {
                 message: 'Votre KYC doit etre approuve avant de publier une boutique.',
                 type: 'warning',
                 confirmText: 'Faire KYC',
-                onConfirm: async () => setKycModalVisible(true),
+                onConfirm: async () => openKycModal(),
             });
             return;
         }
@@ -253,11 +285,13 @@ export default function CreateShopScreen() {
         if (subscription.trim()) formData.append('subscription', subscription.trim());
         formData.append('isCorporate', String(isCorporate));
 
-        formData.append('logo', {
-            uri: logo.uri,
-            name: logo.name,
-            type: logo.type,
-        } as any);
+        if (logo) {
+            formData.append('logo', {
+                uri: logo.uri,
+                name: logo.name,
+                type: logo.type,
+            } as any);
+        }
 
         try {
             await createShop(formData).unwrap();
@@ -345,7 +379,7 @@ export default function CreateShopScreen() {
             return (
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Etape 2: Informations boutique</Text>
-                    <Text style={styles.sectionHint}>Nom, description, type de structure et logo.</Text>
+                    <Text style={styles.sectionHint}>Nom, description, type de structure et logo optionnel.</Text>
 
                     <Text style={styles.label}>Nom *</Text>
                     <TextInput
@@ -366,20 +400,20 @@ export default function CreateShopScreen() {
                         multiline
                     />
 
-                    <Text style={styles.label}>Logo boutique *</Text>
-                    <TouchableOpacity style={styles.filePicker} onPress={captureImage} activeOpacity={0.85}>
+                    <Text style={styles.label}>Logo boutique (optionnel)</Text>
+                    <TouchableOpacity style={styles.filePicker} onPress={pickLogoFromLibrary} activeOpacity={0.85}>
                         {logo ? (
                             <Image source={{ uri: logo.uri }} style={styles.filePreview} />
                         ) : (
                             <View style={styles.filePlaceholder}>
-                                <Ionicons name="camera-outline" size={24} color={Colors.primary} />
-                                <Text style={styles.filePlaceholderText}>Capturer le logo</Text>
+                                <Ionicons name="images-outline" size={24} color={Colors.primary} />
+                                <Text style={styles.filePlaceholderText}>Joindre le logo depuis la galerie</Text>
                             </View>
                         )}
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.captureActionButton} onPress={captureImage} activeOpacity={0.85}>
-                        <Ionicons name={logo ? 'refresh-outline' : 'camera'} size={16} color={Colors.primary} />
-                        <Text style={styles.captureActionText}>{logo ? 'Reprendre la photo' : 'Demarrer la capture'}</Text>
+                    <TouchableOpacity style={styles.captureActionButton} onPress={pickLogoFromLibrary} activeOpacity={0.85}>
+                        <Ionicons name={logo ? 'refresh-outline' : 'images-outline'} size={16} color={Colors.primary} />
+                        <Text style={styles.captureActionText}>{logo ? 'Changer le logo' : 'Choisir dans la galerie'}</Text>
                     </TouchableOpacity>
 
                     <View style={styles.switchRow}>
@@ -405,6 +439,55 @@ export default function CreateShopScreen() {
                     <Text style={styles.sectionHint}>
                         Le KYC approuve est obligatoire pour publier une boutique et devenir livreur.
                     </Text>
+
+                    <View style={styles.kycIdentityCard}>
+                        <Text style={styles.kycIdentityTitle}>Identite du titulaire</Text>
+
+                        <Text style={styles.label}>Nom complet *</Text>
+                        <TextInput
+                            value={kycFullName}
+                            onChangeText={setKycFullName}
+                            style={styles.input}
+                            placeholder="Ex: Jean Koffi"
+                            placeholderTextColor={Colors.gray400}
+                        />
+
+                        <Text style={styles.label}>Type de document *</Text>
+                        <View style={styles.kycIdentityChipsRow}>
+                            {KYC_ID_OPTIONS.map((option) => {
+                                const isSelected = option.value === kycIdType;
+                                return (
+                                    <TouchableOpacity
+                                        key={option.value}
+                                        style={[
+                                            styles.kycIdentityChip,
+                                            isSelected && styles.kycIdentityChipSelected,
+                                        ]}
+                                        onPress={() => setKycIdType(option.value)}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.kycIdentityChipText,
+                                                isSelected && styles.kycIdentityChipTextSelected,
+                                            ]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+
+                        <Text style={styles.label}>Numero du document *</Text>
+                        <TextInput
+                            value={kycIdNumber}
+                            onChangeText={setKycIdNumber}
+                            style={styles.input}
+                            placeholder="Ex: CI-1234-5678"
+                            placeholderTextColor={Colors.gray400}
+                            autoCapitalize="characters"
+                        />
+                    </View>
 
                     <View style={styles.kycIntroCard}>
                         <Text style={styles.kycIntroTitle}>Etat de votre KYC</Text>
@@ -438,7 +521,7 @@ export default function CreateShopScreen() {
                         </Text>
                         <TouchableOpacity
                             style={styles.captureActionButton}
-                            onPress={() => setKycModalVisible(true)}
+                            onPress={openKycModal}
                             activeOpacity={0.85}
                         >
                             <Ionicons name={isKycApproved ? 'refresh-outline' : 'shield-checkmark-outline'} size={16} color={Colors.primary} />
@@ -519,7 +602,7 @@ export default function CreateShopScreen() {
                     <Text style={styles.summaryTitle}>Resume</Text>
                     <Text style={styles.summaryLine}>Nom: {name.trim() || '-'}</Text>
                     <Text style={styles.summaryLine}>Entreprise: {isCorporate ? 'Oui' : 'Non'}</Text>
-                    <Text style={styles.summaryLine}>Logo: {logo ? 'Ajoute' : 'Manquant'}</Text>
+                    <Text style={styles.summaryLine}>Logo: {logo ? 'Ajoute' : 'Non ajoute'}</Text>
                     <Text style={styles.summaryLine}>KYC: {isKycApproved ? 'Approuve' : 'Non valide'}</Text>
                 </View>
             </View>
@@ -622,7 +705,11 @@ export default function CreateShopScreen() {
 
                 <KycFlowModal
                     visible={kycModalVisible}
-                    initialFullName={`${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim()}
+                    identity={{
+                        fullName: kycFullName.trim(),
+                        idType: kycIdType,
+                        idNumber: kycIdNumber.trim(),
+                    }}
                     onClose={() => setKycModalVisible(false)}
                     onSuccess={async () => {
                         await refetchKycEligibility();
@@ -879,6 +966,45 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
         resizeMode: 'cover',
+    },
+    kycIdentityCard: {
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    kycIdentityTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        marginBottom: Spacing.xs,
+    },
+    kycIdentityChipsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.xs,
+    },
+    kycIdentityChip: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.gray300,
+        backgroundColor: Colors.white,
+    },
+    kycIdentityChipSelected: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    kycIdentityChipText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    kycIdentityChipTextSelected: {
+        color: Colors.white,
     },
     kycIntroCard: {
         borderRadius: BorderRadius.md,

@@ -1,5 +1,6 @@
 /**
- * Composant CartItem - item du panier avec controles de quantite.
+ * Composant CartItem — item du panier avec controles de quantite.
+ * Design premium avec image agrandie, badges visuels et meilleur contraste.
  */
 
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
@@ -7,6 +8,7 @@ import { Announcement } from '@/types/announcement';
 import { CartProduct as CartItemType } from '@/types/cart';
 import { formatCurrencyAmount, resolveCurrencyDisplay } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import React from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
@@ -28,41 +30,59 @@ export const CartItem: React.FC<CartItemProps> = ({
     const product = (typeof item.productId === 'object' ? item.productId : {}) as Announcement;
     const productName = product.name || 'Produit indisponible';
     const productPrice = product.price || 0;
-    const productImage = product.images?.length ? product.images[0] : 'https://via.placeholder.com/80';
+    const productImage = product.images?.length ? product.images[0] : 'https://via.placeholder.com/96';
     const productStock = typeof product.quantity === 'number' ? product.quantity : undefined;
     const disableIncrement = productStock !== undefined && item.quantity >= productStock;
     const lineTotal = productPrice * item.quantity;
     const resolvedCurrencySymbol = currencySymbol || resolveCurrencyDisplay(product.currency);
 
+    const stockRemaining = productStock !== undefined ? productStock - item.quantity : undefined;
+    const showStockWarning = stockRemaining !== undefined && stockRemaining >= 0 && stockRemaining < 10;
+
     return (
         <View style={styles.container}>
-            <Image source={{ uri: productImage }} style={styles.image} resizeMode="cover" />
+            {/* Product Image with overlay */}
+            <View style={styles.imageWrap}>
+                <Image source={{ uri: productImage }} style={styles.image} resizeMode="cover" />
+                <LinearGradient
+                    colors={['transparent', 'rgba(0,0,0,0.35)']}
+                    style={styles.imageOverlay}
+                />
+                <View style={styles.qtyOverlay}>
+                    <Text style={styles.qtyOverlayText}>x{item.quantity}</Text>
+                </View>
+            </View>
 
+            {/* Content */}
             <View style={styles.content}>
+                {/* Header Row */}
                 <View style={styles.header}>
                     <Text style={styles.name} numberOfLines={2}>
                         {productName}
                     </Text>
                     <TouchableOpacity onPress={() => onRemove(item)} style={styles.removeButton}>
-                        <Ionicons name="trash-outline" size={16} color={Colors.error} />
+                        <Ionicons name="close" size={14} color={Colors.error} />
                     </TouchableOpacity>
                 </View>
 
+                {/* Price Row */}
                 <View style={styles.priceRow}>
-                    <Text style={styles.price}>
-                        {formatCurrencyAmount(productPrice, resolvedCurrencySymbol)}
+                    <Text style={styles.unitPrice}>
+                        {formatCurrencyAmount(productPrice, resolvedCurrencySymbol)} /u
                     </Text>
                     <Text style={styles.lineTotal}>
                         {formatCurrencyAmount(lineTotal, resolvedCurrencySymbol)}
                     </Text>
                 </View>
 
+                {/* Quantity Controls */}
                 <View style={styles.actionsRow}>
                     <View style={styles.quantityContainer}>
                         <TouchableOpacity
                             style={[styles.quantityButton, item.quantity <= 1 && styles.quantityButtonDisabled]}
                             onPress={() => onDecrement(item)}
                             disabled={item.quantity <= 1}
+                            activeOpacity={0.7}
                         >
                             <Ionicons
                                 name="remove"
@@ -71,32 +91,35 @@ export const CartItem: React.FC<CartItemProps> = ({
                             />
                         </TouchableOpacity>
 
-                        <Text style={styles.quantity}>{item.quantity}</Text>
+                        <View style={styles.quantityBadge}>
+                            <Text style={styles.quantityBadgeText}>{item.quantity}</Text>
+                        </View>
 
                         <TouchableOpacity
-                            style={[styles.quantityButton, disableIncrement && styles.quantityButtonDisabled]}
+                            style={[styles.quantityButton, styles.quantityButtonAdd, disableIncrement && styles.quantityButtonDisabled]}
                             onPress={() => onIncrement(item)}
                             disabled={disableIncrement}
+                            activeOpacity={0.7}
                         >
                             <Ionicons
                                 name="add"
                                 size={16}
-                                color={disableIncrement ? Colors.gray300 : Colors.primary}
+                                color={disableIncrement ? Colors.gray300 : Colors.white}
                             />
                         </TouchableOpacity>
                     </View>
-
-                    <View style={styles.quantityBadge}>
-                        <Text style={styles.quantityBadgeText}>x{item.quantity}</Text>
-                    </View>
                 </View>
 
-                {productStock !== undefined && productStock > 0 && productStock - item.quantity < 10 && (
-                    <Text style={styles.stockWarning}>
-                        {productStock - item.quantity > 0
-                            ? `Plus que ${productStock - item.quantity} dispo`
-                            : 'Quantite maximale atteinte'}
-                    </Text>
+                {/* Stock Warning */}
+                {showStockWarning && (
+                    <View style={styles.stockWarningBadge}>
+                        <Ionicons name="alert-circle" size={12} color={Colors.warning} />
+                        <Text style={styles.stockWarningText}>
+                            {stockRemaining! > 0
+                                ? `Plus que ${stockRemaining} en stock`
+                                : 'Stock epuise'}
+                        </Text>
+                    </View>
                 )}
             </View>
         </View>
@@ -108,53 +131,83 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
+        padding: Spacing.sm,
         marginBottom: Spacing.md,
         borderWidth: 1,
-        borderColor: Colors.borderLight,
-        ...Shadows.sm,
+        borderColor: Colors.gray100,
+        ...Shadows.md,
+    },
+    imageWrap: {
+        width: 96,
+        height: 96,
+        borderRadius: BorderRadius.md,
+        overflow: 'hidden',
+        position: 'relative',
     },
     image: {
-        width: 84,
-        height: 84,
-        borderRadius: BorderRadius.md,
+        width: '100%',
+        height: '100%',
         backgroundColor: Colors.gray100,
+    },
+    imageOverlay: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 32,
+    },
+    qtyOverlay: {
+        position: 'absolute',
+        bottom: 4,
+        right: 4,
+        backgroundColor: Colors.primary + 'E6',
+        borderRadius: BorderRadius.sm,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+    },
+    qtyOverlayText: {
+        fontSize: 10,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
     },
     content: {
         flex: 1,
         marginLeft: Spacing.md,
+        justifyContent: 'space-between',
     },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: Spacing.xs,
     },
     name: {
         flex: 1,
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textPrimary,
-        marginRight: Spacing.sm,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.gray800,
+        marginRight: Spacing.xs,
+        lineHeight: 20,
     },
     removeButton: {
-        width: 30,
-        height: 30,
+        width: 28,
+        height: 28,
         borderRadius: BorderRadius.full,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.error + '12',
+        backgroundColor: Colors.error + '0F',
+        borderWidth: 1,
+        borderColor: Colors.error + '25',
     },
     priceRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.sm,
+        marginTop: 2,
     },
-    price: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
+    unitPrice: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.medium,
+        color: Colors.gray500,
     },
     lineTotal: {
         fontSize: Typography.fontSize.md,
@@ -164,48 +217,61 @@ const styles = StyleSheet.create({
     actionsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
+        marginTop: 4,
     },
     quantityContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.sm,
+        gap: 2,
     },
     quantityButton: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
+        width: 30,
+        height: 30,
+        borderRadius: BorderRadius.sm,
         backgroundColor: Colors.gray50,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 1,
-        borderColor: Colors.border,
+        borderColor: Colors.gray200,
+    },
+    quantityButtonAdd: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
     },
     quantityButtonDisabled: {
         backgroundColor: Colors.gray100,
         borderColor: Colors.gray200,
-    },
-    quantity: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textPrimary,
-        minWidth: 24,
-        textAlign: 'center',
+        opacity: 0.5,
     },
     quantityBadge: {
-        backgroundColor: Colors.primary + '10',
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs,
+        minWidth: 36,
+        height: 30,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '0D',
+        borderRadius: BorderRadius.sm,
+        paddingHorizontal: Spacing.sm,
     },
     quantityBadgeText: {
-        fontSize: Typography.fontSize.xs,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
     },
-    stockWarning: {
-        fontSize: Typography.fontSize.xs,
+    stockWarningBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: Colors.warning + '14',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+        alignSelf: 'flex-start',
+        marginTop: 4,
+    },
+    stockWarningText: {
+        fontSize: 10,
         color: Colors.warning,
-        marginTop: Spacing.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
 });

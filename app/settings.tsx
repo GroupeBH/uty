@@ -3,12 +3,12 @@
  */
 
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-    Alert,
     ScrollView,
     StyleSheet,
     Switch,
@@ -20,12 +20,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
     const router = useRouter();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [emailNotifications, setEmailNotifications] = useState(true);
     const [pushNotifications, setPushNotifications] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
     const [biometricAuth, setBiometricAuth] = useState(false);
+    const showComingSoon = React.useCallback(() => {
+        showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info');
+    }, [showStyledAlert]);
 
     const settingsSections = [
         {
@@ -65,7 +69,7 @@ export default function SettingsScreen() {
                     label: 'Changer le code PIN',
                     subtitle: 'Modifier votre code de sécurité',
                     gradient: Gradients.accent,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: showComingSoon,
                 },
             ],
         },
@@ -90,7 +94,7 @@ export default function SettingsScreen() {
                     label: 'Télécharger mes données',
                     subtitle: 'Exporter toutes mes données',
                     gradient: Gradients.success,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: showComingSoon,
                 },
                 {
                     icon: 'trash-outline',
@@ -99,7 +103,7 @@ export default function SettingsScreen() {
                     gradient: Gradients.warm,
                     isDestructive: true,
                     onPress: () => {
-                        Alert.alert(
+                        showStyledAlert(
                             'Supprimer le compte',
                             'Êtes-vous sûr de vouloir supprimer votre compte ? Cette action est irréversible.',
                             [
@@ -107,9 +111,10 @@ export default function SettingsScreen() {
                                 {
                                     text: 'Supprimer',
                                     style: 'destructive',
-                                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                                    onPress: showComingSoon,
                                 },
-                            ]
+                            ],
+                            'warning',
                         );
                     },
                 },
@@ -123,21 +128,22 @@ export default function SettingsScreen() {
                     label: 'Conditions d\'utilisation',
                     subtitle: 'Lire les conditions',
                     gradient: Gradients.cool,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: showComingSoon,
                 },
                 {
                     icon: 'shield-checkmark-outline',
                     label: 'Politique de confidentialité',
                     subtitle: 'Comment nous protégeons vos données',
                     gradient: Gradients.primary,
-                    onPress: () => Alert.alert('Info', 'Fonctionnalité à venir'),
+                    onPress: showComingSoon,
                 },
                 {
                     icon: 'information-circle-outline',
                     label: 'À propos',
                     subtitle: 'Version 1.0.0',
                     gradient: Gradients.accent,
-                    onPress: () => Alert.alert('À propos', 'UTY - Version 1.0.0\n\nApplication de marketplace'),
+                    onPress: () =>
+                        showStyledAlert('À propos', 'UTY - Version 1.0.0\n\nApplication de marketplace', undefined, 'info'),
                 },
             ],
         },
@@ -220,6 +226,7 @@ export default function SettingsScreen() {
                     </View>
                 ))}
             </ScrollView>
+            {alertNode}
         </SafeAreaView>
     );
 }

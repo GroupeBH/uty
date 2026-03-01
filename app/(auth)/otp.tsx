@@ -5,12 +5,12 @@ import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { setCredentials } from '@/store/slices/authSlice';
 import { tokenService } from '@/services/tokenService';
 import { storage } from '@/utils/storage';
+import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useState, useRef } from 'react';
 import {
-    Alert,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -20,15 +20,17 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type SignupStep = 'otp' | 'identity' | 'security' | 'preferences';
 const SIGNUP_STEPS: Exclude<SignupStep, 'otp'>[] = ['identity', 'security', 'preferences'];
 
 export default function OtpScreen() {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const dispatch = useAppDispatch();
     const params = useLocalSearchParams<{ phone: string; mode: 'register' | 'login' }>();
+    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [otp, setOtp] = useState(['', '', '', '', '']);
     const [step, setStep] = useState<SignupStep>('otp');
@@ -46,6 +48,11 @@ export default function OtpScreen() {
     const [register, { isLoading: isRegistering }] = useRegisterMutation();
     const { data: categories } = useGetCategoriesQuery();
     const currentSignupStepIndex = SIGNUP_STEPS.indexOf(step as Exclude<SignupStep, 'otp'>);
+    const keyboardVerticalOffset = Platform.select({
+        ios: 0,
+        android: Math.max(insets.bottom, 10),
+        default: 0,
+    });
 
     const handleOtpChange = (text: string, index: number) => {
         if (text.length > 1) {
@@ -71,7 +78,7 @@ export default function OtpScreen() {
     const handleVerifyOtp = async () => {
         const otpCode = otp.join('');
         if (otpCode.length !== 5) {
-            Alert.alert('Erreur', 'Veuillez entrer le code à 5 chiffres');
+            showStyledAlert('Erreur', 'Veuillez entrer le code à 5 chiffres');
             return;
         }
 
@@ -80,7 +87,7 @@ export default function OtpScreen() {
             setStep('identity');
         } catch (error: any) {
             console.error('OTP verification error:', error);
-            Alert.alert('Erreur', error?.data?.message || 'Code OTP invalide');
+            showStyledAlert('Erreur', error?.data?.message || 'Code OTP invalide');
         }
     };
 
@@ -94,7 +101,7 @@ export default function OtpScreen() {
 
     const validateIdentityStep = () => {
         if (!firstName.trim() || !lastName.trim()) {
-            Alert.alert('Erreur', 'Veuillez remplir votre prénom et votre nom');
+            showStyledAlert('Erreur', 'Veuillez remplir votre prénom et votre nom');
             return false;
         }
         return true;
@@ -102,11 +109,11 @@ export default function OtpScreen() {
 
     const validateSecurityStep = () => {
         if (!/^\d{4}$/.test(pin)) {
-            Alert.alert('Erreur', 'Le code PIN doit contenir 4 chiffres');
+            showStyledAlert('Erreur', 'Le code PIN doit contenir 4 chiffres');
             return false;
         }
         if (pin !== confirmPin) {
-            Alert.alert('Erreur', 'Les codes PIN ne correspondent pas');
+            showStyledAlert('Erreur', 'Les codes PIN ne correspondent pas');
             return false;
         }
         return true;
@@ -114,7 +121,7 @@ export default function OtpScreen() {
 
     const validatePreferencesStep = () => {
         if (selectedCategories.length === 0) {
-            Alert.alert('Erreur', 'Veuillez sélectionner au moins une catégorie');
+            showStyledAlert('Erreur', 'Veuillez sélectionner au moins une catégorie');
             return false;
         }
         return true;
@@ -157,7 +164,7 @@ export default function OtpScreen() {
                 })
             );
 
-            Alert.alert('Succès', 'Votre compte a été créé !', [
+            showStyledAlert('Succès', 'Votre compte a été créé !', [
                 {
                     text: 'OK',
                     onPress: () => router.replace('/(tabs)'),
@@ -165,7 +172,7 @@ export default function OtpScreen() {
             ]);
         } catch (error: any) {
             console.error('Registration error:', error);
-            Alert.alert('Erreur', error?.data?.message || 'Erreur lors de l\'inscription');
+            showStyledAlert('Erreur', error?.data?.message || 'Erreur lors de l\'inscription');
         }
     };
 
@@ -202,61 +209,98 @@ export default function OtpScreen() {
         }
     };
 
-    const signupTitle =
-        step === 'identity'
-            ? 'Complétez votre profil'
-            : step === 'security'
-              ? 'Sécurisez votre compte'
-              : 'Choisissez vos préférences';
+    const modeTitle =
+        step === 'otp'
+            ? 'Verification OTP'
+            : step === 'identity'
+              ? 'Completez votre profil'
+              : step === 'security'
+                ? 'Securisez votre compte'
+                : 'Choisissez vos preferences';
 
-    const signupSubtitle =
-        step === 'identity'
-            ? 'Renseignez vos informations personnelles'
-            : step === 'security'
-              ? 'Créez un code PIN pour protéger votre compte'
-              : 'Sélectionnez les catégories qui vous intéressent';
+    const modeSubtitle =
+        step === 'otp'
+            ? `Entrez le code recu au ${params.phone || 'numero renseigne'}.`
+            : step === 'identity'
+              ? 'Renseignez vos informations personnelles.'
+              : step === 'security'
+                ? 'Creez un code PIN pour proteger votre compte.'
+                : 'Selectionnez les categories qui vous interessent.';
+
+    const helperMessage =
+        step === 'otp'
+            ? 'Le code OTP contient 5 chiffres.'
+            : step === 'identity'
+              ? 'Utilisez vos vraies informations pour faciliter le support.'
+              : step === 'security'
+                ? 'Votre PIN doit contenir exactement 4 chiffres.'
+                : 'Choisissez au moins une categorie pour continuer.';
+
+    const modeColors = step === 'otp' ? Gradients.accent : Gradients.primary;
+    const modeIcon =
+        step === 'otp'
+            ? 'shield-checkmark-outline'
+            : step === 'identity'
+              ? 'person-outline'
+              : step === 'security'
+                ? 'lock-closed-outline'
+                : 'grid-outline';
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <KeyboardAvoidingView
                 style={styles.container}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={keyboardVerticalOffset}
             >
                 <ScrollView
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="on-drag"
                 >
-                    {/* Header */}
+                    <View pointerEvents="none" style={styles.colorOrbPrimary} />
+                    <View pointerEvents="none" style={styles.colorOrbAccent} />
+
                     <View style={styles.header}>
                         <TouchableOpacity style={styles.backButton} onPress={goToPreviousStep}>
                             <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
                         </TouchableOpacity>
+                        <LinearGradient colors={modeColors} style={styles.brandBadge}>
+                            <Ionicons name="shield-checkmark-outline" size={14} color={Colors.white} />
+                            <Text style={styles.brandBadgeText}>UTY Secure</Text>
+                        </LinearGradient>
+                    </View>
+
+                    <View style={styles.modeCard}>
+                        <LinearGradient colors={modeColors} style={styles.modeCardGradient}>
+                            <View style={styles.modeIconCircle}>
+                                <Ionicons
+                                    name={modeIcon as keyof typeof Ionicons.glyphMap}
+                                    size={22}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.modeTextWrap}>
+                                <Text style={styles.modeStepLabel}>
+                                    {step === 'otp' ? 'Etape 1/4' : `Etape ${currentSignupStepIndex + 2}/4`}
+                                </Text>
+                                <Text style={styles.modeTitle}>{modeTitle}</Text>
+                                <Text style={styles.modeSubtitle}>{modeSubtitle}</Text>
+                            </View>
+                        </LinearGradient>
                     </View>
 
                     {step === 'otp' ? (
                         <>
-                            {/* OTP Step */}
-                            <View style={styles.illustrationContainer}>
-                                <LinearGradient colors={Gradients.accent} style={styles.iconCircle}>
-                                    <Ionicons name="shield-checkmark-outline" size={64} color={Colors.white} />
-                                </LinearGradient>
-                            </View>
-
-                            <View style={styles.titleContainer}>
-                                <Text style={styles.title}>Code de vérification</Text>
-                                <Text style={styles.subtitle}>
-                                    Entrez le code à 5 chiffres envoyé au{'\n'}
-                                    <Text style={styles.phone}>{params.phone}</Text>
-                                </Text>
-                            </View>
-
-                            {/* OTP Inputs */}
                             <View style={styles.otpContainer}>
                                 {otp.map((digit, index) => (
                                     <TextInput
                                         key={index}
-                                        ref={(ref) => (inputRefs.current[index] = ref)}
-                                        style={styles.otpInput}
+                                        ref={(ref) => {
+                                            inputRefs.current[index] = ref;
+                                        }}
+                                        style={[styles.otpInput, digit && styles.otpInputFilled]}
                                         value={digit}
                                         onChangeText={(text) => handleOtpChange(text, index)}
                                         onKeyPress={(e) => handleKeyPress(e, index)}
@@ -268,14 +312,21 @@ export default function OtpScreen() {
                             </View>
 
                             <TouchableOpacity
-                                style={[styles.verifyButton, isVerifying && styles.disabledButton]}
+                                style={[styles.primaryButton, isVerifying && styles.disabledButton]}
                                 onPress={handleVerifyOtp}
                                 disabled={isVerifying}
                             >
-                                <LinearGradient colors={Gradients.accent} style={styles.verifyGradient}>
-                                    <Text style={styles.verifyButtonText}>
-                                        {isVerifying ? 'Vérification...' : 'Vérifier'}
-                                    </Text>
+                                <LinearGradient colors={Gradients.accent} style={styles.primaryGradient}>
+                                    {isVerifying ? (
+                                        <Text style={styles.primaryButtonText}>Verification...</Text>
+                                    ) : (
+                                        <>
+                                            <Text style={styles.primaryButtonText}>Verifier</Text>
+                                            <View style={styles.primaryIconWrap}>
+                                                <Ionicons name="arrow-forward" size={18} color={Colors.primary} />
+                                            </View>
+                                        </>
+                                    )}
                                 </LinearGradient>
                             </TouchableOpacity>
                         </>
@@ -283,51 +334,47 @@ export default function OtpScreen() {
                         <>
                             <View style={styles.signupStepper}>
                                 {SIGNUP_STEPS.map((signupStep, index) => {
-                                    const stepIndex = index + 1;
                                     const isActive = currentSignupStepIndex === index;
                                     const isDone = currentSignupStepIndex > index;
+                                    const label =
+                                        signupStep === 'identity'
+                                            ? 'Profil'
+                                            : signupStep === 'security'
+                                              ? 'Securite'
+                                              : 'Preferences';
                                     return (
-                                        <View key={signupStep} style={styles.signupStepItem}>
-                                            <View
-                                                style={[
-                                                    styles.signupStepCircle,
-                                                    isActive && styles.signupStepCircleActive,
-                                                    isDone && styles.signupStepCircleDone,
-                                                ]}
-                                            >
-                                                {isDone ? (
-                                                    <Ionicons name="checkmark" size={14} color={Colors.white} />
-                                                ) : (
-                                                    <Text
-                                                        style={[
-                                                            styles.signupStepNumber,
-                                                            (isActive || isDone) && styles.signupStepNumberActive,
-                                                        ]}
-                                                    >
-                                                        {stepIndex}
-                                                    </Text>
-                                                )}
-                                            </View>
+                                        <View
+                                            key={signupStep}
+                                            style={[
+                                                styles.signupStepChip,
+                                                isActive && styles.signupStepChipActive,
+                                                isDone && styles.signupStepChipDone,
+                                            ]}
+                                        >
+                                            {isDone ? (
+                                                <Ionicons name="checkmark" size={14} color={Colors.white} />
+                                            ) : (
+                                                <Text
+                                                    style={[
+                                                        styles.signupStepNumber,
+                                                        isActive && styles.signupStepNumberActive,
+                                                    ]}
+                                                >
+                                                    {index + 1}
+                                                </Text>
+                                            )}
                                             <Text
                                                 style={[
-                                                    styles.signupStepLabel,
-                                                    (isActive || isDone) && styles.signupStepLabelActive,
+                                                    styles.signupStepText,
+                                                    isActive && styles.signupStepTextActive,
+                                                    isDone && styles.signupStepTextDone,
                                                 ]}
                                             >
-                                                {signupStep === 'identity'
-                                                    ? 'Profil'
-                                                    : signupStep === 'security'
-                                                      ? 'Securite'
-                                                      : 'Preferences'}
+                                                {label}
                                             </Text>
                                         </View>
                                     );
                                 })}
-                            </View>
-
-                            <View style={styles.titleContainer}>
-                                <Text style={styles.title}>{signupTitle}</Text>
-                                <Text style={styles.subtitle}>{signupSubtitle}</Text>
                             </View>
 
                             <View style={styles.form}>
@@ -379,10 +426,10 @@ export default function OtpScreen() {
                                                     keyboardType="number-pad"
                                                     maxLength={4}
                                                 />
-                                                <TouchableOpacity onPress={() => setShowPin(!showPin)}>
+                                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowPin(!showPin)}>
                                                     <Ionicons
                                                         name={showPin ? 'eye-off-outline' : 'eye-outline'}
-                                                        size={20}
+                                                        size={18}
                                                         color={Colors.gray400}
                                                     />
                                                 </TouchableOpacity>
@@ -403,10 +450,10 @@ export default function OtpScreen() {
                                                     keyboardType="number-pad"
                                                     maxLength={4}
                                                 />
-                                                <TouchableOpacity onPress={() => setShowConfirmPin(!showConfirmPin)}>
+                                                <TouchableOpacity style={styles.eyeButton} onPress={() => setShowConfirmPin(!showConfirmPin)}>
                                                     <Ionicons
                                                         name={showConfirmPin ? 'eye-off-outline' : 'eye-outline'}
-                                                        size={20}
+                                                        size={18}
                                                         color={Colors.gray400}
                                                     />
                                                 </TouchableOpacity>
@@ -452,26 +499,28 @@ export default function OtpScreen() {
                                     </TouchableOpacity>
 
                                     <TouchableOpacity
-                                        style={[styles.registerButton, step === 'preferences' && isRegistering && styles.disabledButton]}
+                                        style={[styles.primaryButton, step === 'preferences' && isRegistering && styles.disabledButton]}
                                         onPress={goToNextSignupStep}
                                         disabled={step === 'preferences' && isRegistering}
                                     >
                                         <LinearGradient
                                             colors={Gradients.primary}
-                                            style={styles.registerGradient}
+                                            style={styles.primaryGradient}
                                         >
                                             {step === 'preferences' && isRegistering ? (
-                                                <Text style={styles.registerButtonText}>Inscription...</Text>
+                                                <Text style={styles.primaryButtonText}>Inscription...</Text>
                                             ) : (
                                                 <>
-                                                    <Text style={styles.registerButtonText}>
+                                                    <Text style={styles.primaryButtonText}>
                                                         {step === 'preferences' ? 'Creer mon compte' : 'Continuer'}
                                                     </Text>
-                                                    <Ionicons
-                                                        name={step === 'preferences' ? 'checkmark-circle' : 'arrow-forward'}
-                                                        size={20}
-                                                        color={Colors.white}
-                                                    />
+                                                    <View style={styles.primaryIconWrap}>
+                                                        <Ionicons
+                                                            name={step === 'preferences' ? 'checkmark' : 'arrow-forward'}
+                                                            size={18}
+                                                            color={Colors.primary}
+                                                        />
+                                                    </View>
                                                 </>
                                             )}
                                         </LinearGradient>
@@ -480,8 +529,18 @@ export default function OtpScreen() {
                             </View>
                         </>
                     )}
+
+                    <View style={styles.helperRow}>
+                        <Ionicons
+                            name={step === 'security' ? 'lock-closed-outline' : 'information-circle-outline'}
+                            size={16}
+                            color={step === 'otp' ? Colors.accentDark : Colors.primary}
+                        />
+                        <Text style={styles.helperText}>{helperMessage}</Text>
+                    </View>
                 </ScrollView>
             </KeyboardAvoidingView>
+            {alertNode}
         </SafeAreaView>
     );
 }
@@ -489,63 +548,120 @@ export default function OtpScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.white,
+        backgroundColor: '#F7FAFF',
     },
     scrollContent: {
         flexGrow: 1,
         paddingHorizontal: Spacing.xl,
         paddingBottom: Spacing.xxxl,
+        position: 'relative',
+    },
+    colorOrbPrimary: {
+        position: 'absolute',
+        top: 84,
+        right: -22,
+        width: 102,
+        height: 102,
+        borderRadius: 51,
+        backgroundColor: Colors.primary + '22',
+    },
+    colorOrbAccent: {
+        position: 'absolute',
+        top: 170,
+        left: -34,
+        width: 126,
+        height: 126,
+        borderRadius: 63,
+        backgroundColor: Colors.accent + '24',
     },
     header: {
-        paddingVertical: Spacing.md,
+        paddingTop: Spacing.md,
+        paddingBottom: Spacing.md + 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 42,
+        height: 42,
         alignItems: 'center',
         justifyContent: 'center',
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        ...Shadows.sm,
     },
-    illustrationContainer: {
+    brandBadge: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginVertical: Spacing.xxxl,
+        gap: Spacing.xs,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        ...Shadows.sm,
     },
-    iconCircle: {
-        width: 140,
-        height: 140,
-        borderRadius: 70,
+    brandBadgeText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    modeCard: {
+        marginBottom: Spacing.lg,
+    },
+    modeCardGradient: {
+        borderRadius: BorderRadius.xxl,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md + 2,
+        flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
+        gap: Spacing.md,
         ...Shadows.lg,
     },
-    titleContainer: {
-        marginBottom: Spacing.xxxl,
+    modeIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#FFFFFF33',
+        borderWidth: 1,
+        borderColor: '#FFFFFF55',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    title: {
-        fontSize: Typography.fontSize.xxxl,
+    modeTextWrap: {
+        flex: 1,
+    },
+    modeStepLabel: {
+        color: Colors.white + 'D9',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    modeTitle: {
+        color: Colors.white,
+        marginTop: 2,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
     },
-    subtitle: {
-        fontSize: Typography.fontSize.base,
-        color: Colors.textSecondary,
-        lineHeight: 24,
-    },
-    phone: {
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
+    modeSubtitle: {
+        color: Colors.white + 'E0',
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
     },
     otpContainer: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        marginBottom: Spacing.xxxl,
+        gap: Spacing.xs,
+        marginBottom: Spacing.lg,
     },
     otpInput: {
-        width: 50,
+        width: 54,
         height: 60,
-        borderRadius: BorderRadius.lg,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         textAlign: 'center',
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.bold,
@@ -553,96 +669,126 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         ...Shadows.sm,
     },
-    verifyButton: {
-        borderRadius: BorderRadius.xl,
+    otpInputFilled: {
+        borderColor: Colors.accentDark,
+        backgroundColor: Colors.accent + '12',
+    },
+    primaryButton: {
+        flex: 1.2,
+        borderRadius: BorderRadius.xxl,
         overflow: 'hidden',
-        ...Shadows.md,
+        ...Shadows.lg,
     },
-    verifyGradient: {
-        paddingVertical: Spacing.lg,
+    primaryGradient: {
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.lg,
+        gap: Spacing.sm,
     },
-    verifyButtonText: {
+    primaryButtonText: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
+    primaryIconWrap: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '66',
+        backgroundColor: Colors.white,
+    },
     disabledButton: {
-        opacity: 0.5,
+        opacity: 0.6,
     },
     signupStepper: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: Spacing.xl,
-    },
-    signupStepItem: {
-        flex: 1,
-        alignItems: 'center',
         gap: Spacing.xs,
+        marginBottom: Spacing.lg,
     },
-    signupStepCircle: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        borderWidth: 2,
+    signupStepChip: {
+        flex: 1,
+        minHeight: 38,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
         borderColor: Colors.gray200,
         backgroundColor: Colors.white,
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: 6,
+        paddingHorizontal: Spacing.xs,
     },
-    signupStepCircleActive: {
-        borderColor: Colors.primary,
-        backgroundColor: Colors.primary + '15',
+    signupStepChipActive: {
+        borderColor: Colors.primary + '60',
+        backgroundColor: Colors.primary + '12',
     },
-    signupStepCircleDone: {
+    signupStepChipDone: {
         borderColor: Colors.primary,
         backgroundColor: Colors.primary,
     },
     signupStepNumber: {
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.gray500,
     },
     signupStepNumberActive: {
         color: Colors.primary,
     },
-    signupStepLabel: {
+    signupStepText: {
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
-        fontWeight: Typography.fontWeight.medium,
+        fontWeight: Typography.fontWeight.semibold,
     },
-    signupStepLabelActive: {
+    signupStepTextActive: {
         color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
+    },
+    signupStepTextDone: {
+        color: Colors.white,
     },
     form: {
-        gap: Spacing.lg,
+        gap: Spacing.md,
     },
     inputGroup: {
         gap: Spacing.sm,
     },
     label: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.semibold,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
     },
     inputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
-        paddingHorizontal: Spacing.lg,
-        gap: Spacing.md,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
+        paddingHorizontal: Spacing.md,
+        gap: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         ...Shadows.sm,
+    },
+    inputContainerFocused: {
+        borderColor: Colors.primary,
+        backgroundColor: Colors.primary + '0A',
     },
     input: {
         flex: 1,
-        height: 50,
+        height: 52,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.medium,
+    },
+    eyeButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.gray100,
     },
     categoriesGrid: {
         flexDirection: 'row',
@@ -656,8 +802,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.md,
         paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.full,
-        borderWidth: 2,
-        borderColor: Colors.gray100,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
         backgroundColor: Colors.white,
     },
     categoryChipSelected: {
@@ -676,35 +822,17 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontWeight: Typography.fontWeight.bold,
     },
-    registerButton: {
-        flex: 1.2,
-        borderRadius: BorderRadius.xl,
-        overflow: 'hidden',
-        ...Shadows.md,
-    },
-    registerGradient: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: Spacing.lg,
-        gap: Spacing.sm,
-    },
-    registerButtonText: {
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.white,
-    },
     actionRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.md,
-        marginTop: Spacing.md,
+        marginTop: Spacing.sm,
     },
     secondaryButton: {
         flex: 0.8,
         minHeight: 54,
         borderRadius: BorderRadius.xl,
-        borderWidth: 2,
+        borderWidth: 1,
         borderColor: Colors.primary + '40',
         alignItems: 'center',
         justifyContent: 'center',
@@ -715,5 +843,20 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         color: Colors.primary,
     },
+    helperRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.xs,
+        marginTop: Spacing.md,
+    },
+    helperText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.medium,
+    },
 });
+
 

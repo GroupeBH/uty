@@ -8,6 +8,60 @@ const STORAGE_KEYS = {
     ONBOARDING_SPACE: 'onboardingSpace',
 } as const;
 
+const USER_STORAGE_KEYS = [
+    '_id',
+    'id',
+    'username',
+    'firstName',
+    'lastName',
+    'phone',
+    'verified_phone',
+    'email',
+    'image',
+    'roles',
+    'rating',
+    'preferredCategories',
+    'createdAt',
+    'updatedAt',
+] as const;
+
+const sanitizeUserForStorage = (user: any) => {
+    if (!user || typeof user !== 'object') {
+        return null;
+    }
+
+    const compact: Record<string, any> = {};
+    for (const key of USER_STORAGE_KEYS) {
+        const value = user[key];
+        if (value === undefined || value === null) continue;
+
+        if (typeof value === 'string') {
+            compact[key] = value.length > 1024 ? value.slice(0, 1024) : value;
+            continue;
+        }
+
+        if (typeof value === 'number' || typeof value === 'boolean') {
+            compact[key] = value;
+            continue;
+        }
+
+        if (Array.isArray(value)) {
+            compact[key] = value
+                .slice(0, 100)
+                .map((entry) =>
+                    typeof entry === 'string'
+                        ? entry.slice(0, 256)
+                        : typeof entry === 'number' || typeof entry === 'boolean'
+                        ? entry
+                        : null,
+                )
+                .filter((entry) => entry !== null);
+        }
+    }
+
+    return compact;
+};
+
 export const storage = {
     // Tokens
     async setAccessToken(token: string) {
@@ -46,10 +100,34 @@ export const storage = {
 
     // User
     async setUser(user: any) {
+        const compactUser = sanitizeUserForStorage(user);
         try {
-            await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+            if (!compactUser) {
+                await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+                return;
+            }
+
+            await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(compactUser));
         } catch (error) {
             console.error('Error saving user:', error);
+            const message = String((error as any)?.message || '');
+            if (message.includes('SQLITE_FULL') || message.toLowerCase().includes('disk is full')) {
+                try {
+                    // Free the biggest auth payload first when SQLite quota is exceeded.
+                    await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+                    if (compactUser?._id) {
+                        await AsyncStorage.setItem(
+                            STORAGE_KEYS.USER,
+                            JSON.stringify({
+                                _id: compactUser._id,
+                                roles: Array.isArray(compactUser.roles) ? compactUser.roles : [],
+                            }),
+                        );
+                    }
+                } catch {
+                    // Ignore cleanup errors.
+                }
+            }
         }
     },
 

@@ -294,7 +294,7 @@ export default function EditAnnouncementScreen() {
 
         const selectionLimit = Math.max(0, 10 - (existingImages.length + images.length));
         const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            mediaTypes: ['images'],
             allowsMultipleSelection: true,
             quality: 0.8,
             selectionLimit,
@@ -1598,7 +1598,7 @@ const styles = StyleSheet.create({
     },
     alertOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.45)',
+        backgroundColor: 'rgba(3, 12, 30, 0.64)',
         alignItems: 'center',
         justifyContent: 'center',
         padding: Spacing.xl,

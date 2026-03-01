@@ -3,10 +3,14 @@ import { useAuth } from '@/hooks/useAuth';
 import { Ionicons } from '@expo/vector-icons';
 import { Tabs, useRouter } from 'expo-router';
 import React from 'react';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function DeliveryPersonsTabsLayout() {
     const router = useRouter();
     const { isAuthenticated } = useAuth();
+    const insets = useSafeAreaInsets();
+    const tabBarBottomPadding = Math.max(insets.bottom, 10);
+    const tabBarHeight = 58 + tabBarBottomPadding;
     const openAuthModal = React.useCallback(() => {
         router.push({
             pathname: '/modal',
@@ -34,10 +38,11 @@ export default function DeliveryPersonsTabsLayout() {
                 headerShown: false,
                 tabBarActiveTintColor: Colors.primary,
                 tabBarInactiveTintColor: Colors.gray500,
+                tabBarHideOnKeyboard: true,
                 tabBarStyle: {
-                    height: 70,
+                    height: tabBarHeight,
                     paddingTop: 8,
-                    paddingBottom: 10,
+                    paddingBottom: tabBarBottomPadding,
                     borderTopColor: Colors.gray200,
                     backgroundColor: Colors.white,
                 },

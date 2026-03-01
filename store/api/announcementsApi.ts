@@ -34,7 +34,13 @@ export const announcementsApi = baseApi.injectEndpoints({
     endpoints: (builder) => ({
         getAnnouncements: builder.query<Announcement[], void>({
             query: () => '/announcements',
-            providesTags: ['Announcement'],
+            providesTags: (result) =>
+                result
+                    ? [
+                          'Announcement',
+                          ...result.map((item) => ({ type: 'Announcement' as const, id: item._id })),
+                      ]
+                    : ['Announcement'],
         }),
         getAnnouncementById: builder.query<Announcement, string>({
             query: (id) => `/announcements/${id}`,
@@ -68,11 +74,20 @@ export const announcementsApi = baseApi.injectEndpoints({
                 url: `/announcements/${id}/like`,
                 method: 'PATCH',
             }),
-            invalidatesTags: (result, error, id) => [{ type: 'Announcement', id }],
+            invalidatesTags: (result, error, id) => [
+                'Announcement',
+                { type: 'Announcement', id },
+            ],
         }),
         getMyAnnouncements: builder.query<Announcement[], void>({
             query: () => '/announcements/mine',
-            providesTags: ['Announcement'],
+            providesTags: (result) =>
+                result
+                    ? [
+                          'Announcement',
+                          ...result.map((item) => ({ type: 'Announcement' as const, id: item._id })),
+                      ]
+                    : ['Announcement'],
         }),
     }),
 });

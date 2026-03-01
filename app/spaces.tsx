@@ -11,7 +11,6 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 const DRIVER_ROLE_KEYS = ['driver', 'delivery_person', 'deliveryperson', 'delivery-person'];
-const SELLER_ROLE_KEYS = ['seller', 'admin'];
 
 const hasRole = (roles: string[] | undefined, candidates: string[]) =>
     Boolean(roles?.some((role) => candidates.includes((role || '').toLowerCase())));
@@ -26,7 +25,6 @@ export default function SpacesScreen() {
         }
     }, [isAuthenticated, requireAuth]);
 
-    const hasSellerRole = hasRole(user?.roles, SELLER_ROLE_KEYS);
     const hasDriverRole = hasRole(user?.roles, DRIVER_ROLE_KEYS);
 
     const { data: myShop } = useGetMyShopQuery(undefined, {
@@ -40,7 +38,7 @@ export default function SpacesScreen() {
         return <LoadingSpinner fullScreen />;
     }
 
-    const sellerReady = Boolean(myShop?._id || hasSellerRole);
+    const sellerReady = Boolean(myShop?._id);
     const driverReady = Boolean(deliveryProfile?._id || hasDriverRole);
 
     return (
