@@ -15,6 +15,9 @@ const SCREEN_ALIAS_TO_ROUTE: Record<string, string> = {
     index: '/(tabs)',
     orders: '/orders',
     order: '/orders',
+    messages: '/messages',
+    message: '/messages',
+    chat: '/messages',
     notifications: '/notifications',
     notification: '/notifications',
     profile: '/profile',
@@ -141,6 +144,16 @@ export const resolveNotificationRoute = ({
         return resolveDeliveryRoute(deliveryId, payload, userRoles);
     }
 
+    const conversationId = getPayloadValue(payload, [
+        'conversationId',
+        'conversation_id',
+        'chatId',
+        'chat_id',
+    ]);
+    if (conversationId) {
+        return `/messages/${conversationId}`;
+    }
+
     const orderId = getPayloadValue(payload, ['orderId', 'order_id']);
     if (orderId) {
         return `/order/${orderId}`;
@@ -176,6 +189,9 @@ export const resolveNotificationRoute = ({
     if (type.startsWith('order_') || type.includes('rated') || type.includes('payment')) {
         return '/orders';
     }
+    if (type.includes('chat') || type.includes('message')) {
+        return '/messages';
+    }
     if (type.includes('announcement') || type.includes('publish') || type.includes('product')) {
         return '/my-announcements';
     }
@@ -186,6 +202,9 @@ export const resolveNotificationRoute = ({
     }
     if (text.includes('commande') || text.includes('livraison')) {
         return '/orders';
+    }
+    if (text.includes('message') || text.includes('discussion') || text.includes('chat')) {
+        return '/messages';
     }
 
     return null;

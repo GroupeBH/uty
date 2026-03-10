@@ -19,6 +19,7 @@ const MAPPING = {
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
   'magnifyingglass': 'search',
+  'message.fill': 'chat',
   'cart.fill': 'shopping-cart',
   'person.fill': 'person',
   'list.bullet.rectangle.fill': 'list-alt',

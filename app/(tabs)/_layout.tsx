@@ -55,14 +55,33 @@ export default function TabLayout() {
       <Tabs.Screen
         name="search"
         options={{
-          title: 'Recherche',
+          title: 'Messagerie',
           tabBarIcon: ({ color, focused }) => (
             <IconSymbol 
               size={focused ? 30 : 26} 
-              name="magnifyingglass" 
+              name="message.fill" 
               color={color} 
             />
           ),
+        }}
+        listeners={{
+          tabPress: (event) => {
+            event.preventDefault();
+            if (!isAuthenticated) {
+              router.push({
+                pathname: '/modal',
+                params: {
+                  mode: 'login',
+                  title: 'Connexion requise',
+                  reason: 'Connectez-vous pour acceder a vos messages.',
+                  source: 'tab_messages',
+                },
+              });
+              return;
+            }
+
+            router.push('/messages' as any);
+          },
         }}
       />
       <Tabs.Screen

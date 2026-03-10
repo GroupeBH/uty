@@ -14,6 +14,10 @@ import {
     useCreateCommentMutation,
     useGetCommentsForAnnouncementQuery,
 } from '@/store/api/commentsApi';
+import {
+    useCreateConversationMutation,
+    useSendMessageMutation as useSendChatMessageMutation,
+} from '@/store/api/messagingApi';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -119,6 +123,8 @@ export default function ProductDetailScreen() {
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
+    const [createConversation, { isLoading: isCreatingConversation }] = useCreateConversationMutation();
+    const [sendChatMessage, { isLoading: isSendingChatMessage }] = useSendChatMessageMutation();
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -133,6 +139,7 @@ export default function ProductDetailScreen() {
     
     // Contact form states
     const [message, setMessage] = useState('');
+    const isContactSubmitting = isCreatingConversation || isSendingChatMessage;
     const [alertState, setAlertState] = useState<{
         visible: boolean;
         title: string;
@@ -479,6 +486,15 @@ export default function ProductDetailScreen() {
             subtitle: shopName ? `Boutique: ${shopName}` : 'Contact via messagerie securisee',
         };
     }, [product?.shop, product?.user]);
+    const sellerUserId = React.useMemo(() => {
+        if (!product?.user) return '';
+        if (typeof product.user === 'string') return product.user;
+
+        const asObject = product.user as any;
+        if (typeof asObject._id === 'string') return asObject._id;
+        if (typeof asObject.id === 'string') return asObject.id;
+        return '';
+    }, [product?.user]);
 
     React.useEffect(() => {
         if (remainingStock === undefined) return;
@@ -546,19 +562,47 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const handleContactSeller = () => {
+    const handleContactSeller = async () => {
         if (!requireAuth('Vous devez être connecté pour contacter le vendeur')) {
             return;
         }
 
-        if (!message.trim()) {
+        const content = message.trim();
+        if (!content) {
             showAlert('Erreur', 'Veuillez entrer un message', 'warning');
             return;
         }
-        // TODO: Implémenter l'envoi du message
-        showAlert('Message envoye', 'Le vendeur a recu votre message', 'success');
-        setShowContactModal(false);
-        setMessage('');
+
+        if (!sellerUserId) {
+            showAlert('Erreur', 'Vendeur indisponible pour la messagerie.', 'error');
+            return;
+        }
+
+        if (currentUserId && sellerUserId === currentUserId) {
+            showAlert('Info', 'Vous ne pouvez pas vous envoyer un message.', 'info');
+            return;
+        }
+
+        try {
+            const conversation = await createConversation({
+                participantIds: [sellerUserId],
+            }).unwrap();
+
+            await sendChatMessage({
+                conversationId: conversation.id,
+                data: { content },
+            }).unwrap();
+
+            setShowContactModal(false);
+            setMessage('');
+            router.push(`/messages/${conversation.id}` as any);
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(error, "Impossible d'envoyer votre message."),
+                'error',
+            );
+        }
     };
 
     const handleSubmitReview = async () => {
@@ -1224,16 +1268,22 @@ export default function ProductDetailScreen() {
                                 textAlignVertical="top"
                             />
                             
-                            <TouchableOpacity 
-                                style={styles.sendMessageButton}
-                                onPress={handleContactSeller}
+                            <TouchableOpacity
+                                style={[
+                                    styles.sendMessageButton,
+                                    isContactSubmitting && styles.sendMessageButtonDisabled,
+                                ]}
+                                onPress={() => void handleContactSeller()}
+                                disabled={isContactSubmitting}
                             >
                                 <LinearGradient
                                     colors={Gradients.primary}
                                     style={styles.sendMessageGradient}
                                 >
                                     <Ionicons name="send" size={20} color={Colors.white} />
-                                    <Text style={styles.sendMessageText}>Envoyer le message</Text>
+                                    <Text style={styles.sendMessageText}>
+                                        {isContactSubmitting ? 'Envoi en cours...' : 'Envoyer le message'}
+                                    </Text>
                                 </LinearGradient>
                             </TouchableOpacity>
                         </View>
@@ -2125,6 +2175,9 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
+    },
+    sendMessageButtonDisabled: {
+        opacity: 0.7,
     },
     sendMessageGradient: {
         flexDirection: 'row',
