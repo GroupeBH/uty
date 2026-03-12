@@ -36,7 +36,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     Dimensions,
-    LayoutAnimation,
     Linking,
     Modal,
     Platform,
@@ -45,7 +44,6 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
-    UIManager,
     View,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -68,7 +66,7 @@ type StepActionItem = {
     loading?: boolean;
     onPress: () => void;
 };
-type DeliverySectionKey = 'navigation' | 'progression' | 'actions' | 'messages';
+type DeliveryWorkspaceTab = 'navigation' | 'actions' | 'messages';
 type RouteSource = 'none' | 'backend' | 'google' | 'fallback';
 type ViewerRole = 'driver' | 'seller' | 'buyer' | 'observer';
 type ForcedViewerRole = Exclude<ViewerRole, 'observer'>;
@@ -294,89 +292,6 @@ const parseNumeric = (value: unknown): number | null => {
         );
     }
     return null;
-};
-
-const parseRouteCost = (
-    value: unknown,
-): { amount: number; currency: string } | null => {
-    if (value === null || value === undefined) return null;
-
-    if (typeof value === 'number' && Number.isFinite(value)) {
-        return { amount: value, currency: 'FC' };
-    }
-
-    if (typeof value === 'string') {
-        const normalized = value.trim();
-        if (!normalized) return null;
-        const parsed = Number(normalized.replace(/[^\d.,-]/g, '').replace(',', '.'));
-        if (Number.isFinite(parsed)) {
-            return { amount: parsed, currency: 'FC' };
-        }
-        return null;
-    }
-
-    if (typeof value !== 'object') return null;
-    const record = value as Record<string, unknown>;
-    const nestedCandidates: unknown[] = [
-        record.estimatedCost,
-        record.deliveryCost,
-        record.totalCost,
-        record.cost,
-        record.price,
-        record.amount,
-        record.fee,
-        record.routeCost,
-    ];
-
-    for (const candidate of nestedCandidates) {
-        const parsed = parseRouteCost(candidate);
-        if (parsed) {
-            const currencyCandidate =
-                record.currency ??
-                (typeof record.currencyCode === 'string' ? record.currencyCode : undefined) ??
-                (typeof record.symbol === 'string' ? record.symbol : undefined);
-            const currency =
-                typeof currencyCandidate === 'string' && currencyCandidate.trim().length > 0
-                    ? currencyCandidate.trim().toUpperCase()
-                    : parsed.currency;
-
-            return { amount: parsed.amount, currency };
-        }
-    }
-
-    return null;
-};
-
-const normalizePhone = (value: unknown): string | null => {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : null;
-};
-
-const readActorPhone = (actor: unknown): string | null => {
-    if (!actor || typeof actor !== 'object') return null;
-    const record = actor as Record<string, unknown>;
-    return normalizePhone(record.phone);
-};
-
-const readActorName = (actor: unknown, fallback: string): string => {
-    if (!actor || typeof actor !== 'object') return fallback;
-    const record = actor as Record<string, unknown>;
-    const firstName = typeof record.firstName === 'string' ? record.firstName.trim() : '';
-    const lastName = typeof record.lastName === 'string' ? record.lastName.trim() : '';
-    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-    if (fullName) return fullName;
-
-    const username = typeof record.username === 'string' ? record.username.trim() : '';
-    if (username) return username;
-
-    const name = typeof record.name === 'string' ? record.name.trim() : '';
-    if (name) return name;
-
-    const email = typeof record.email === 'string' ? record.email.trim() : '';
-    if (email) return email;
-
-    return fallback;
 };
 
 const parseRoutePoint = (value: unknown): LatLng | null => {
@@ -708,21 +623,13 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const [isGuidanceMode, setIsGuidanceMode] = React.useState(true);
     const [routeMetrics, setRouteMetrics] = React.useState<RouteMetrics | null>(null);
     const [routeSource, setRouteSource] = React.useState<RouteSource>('none');
-    const [routeCost, setRouteCost] = React.useState<{ amount: number; currency: string } | null>(null);
-    const [isMapExpanded, setIsMapExpanded] = React.useState(true);
+    const [isMapExpanded, setIsMapExpanded] = React.useState(false);
     const [resolvedPickupAddress, setResolvedPickupAddress] = React.useState('');
     const [resolvedDropoffAddress, setResolvedDropoffAddress] = React.useState('');
     const [pickupAddressLookupDone, setPickupAddressLookupDone] = React.useState(false);
     const [dropoffAddressLookupDone, setDropoffAddressLookupDone] = React.useState(false);
     const [routeRefreshKey, setRouteRefreshKey] = React.useState(0);
-    const [androidDetailsModalVisible, setAndroidDetailsModalVisible] = React.useState(false);
-    const [androidDetailsModalType, setAndroidDetailsModalType] = React.useState<'route' | 'timeline'>('route');
-    const [expandedSections, setExpandedSections] = React.useState<Record<DeliverySectionKey, boolean>>({
-        navigation: false,
-        progression: false,
-        actions: false,
-        messages: false,
-    });
+    const [activeWorkspaceTab, setActiveWorkspaceTab] = React.useState<DeliveryWorkspaceTab>('actions');
     const [alert, setAlert] = React.useState<{
         visible: boolean;
         title: string;
@@ -785,37 +692,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 : 'observer';
     const viewerRole: ViewerRole = forcedViewerRole || autoViewerRole;
 
-    const buyerActor = typeof delivery?.buyerId === 'object' ? delivery.buyerId : null;
-    const sellerActor = typeof delivery?.sellerId === 'object' ? delivery.sellerId : null;
-    const deliveryPersonRecord =
-        delivery?.deliveryPersonId && typeof delivery.deliveryPersonId === 'object'
-            ? (delivery.deliveryPersonId as Record<string, unknown>)
-            : null;
-    const deliveryPersonUser =
-        deliveryPersonRecord?.userId && typeof deliveryPersonRecord.userId === 'object'
-            ? (deliveryPersonRecord.userId as Record<string, unknown>)
-            : null;
-
-    const buyerDisplayName = readActorName(buyerActor, 'Acheteur');
-    const sellerDisplayName = readActorName(sellerActor, 'Vendeur');
-    const driverDisplayName = readActorName(deliveryPersonUser, 'Livreur');
-    const buyerPhone = readActorPhone(buyerActor);
-    const sellerPhone = readActorPhone(sellerActor);
-    const driverPhone = readActorPhone(deliveryPersonUser);
-
-    const orderRecord =
-        delivery?.orderId && typeof delivery.orderId === 'object'
-            ? (delivery.orderId as Record<string, unknown>)
-            : null;
-    const orderItems = Array.isArray(orderRecord?.items)
-        ? (orderRecord.items as Record<string, unknown>[])
-        : [];
-    const orderItemsCount = orderItems.reduce((sum, item) => {
-        const quantity = parseNumeric(item?.quantity);
-        if (quantity && quantity > 0) return sum + Math.round(quantity);
-        return sum + 1;
-    }, 0);
-
     const sellerPickupConfirmed = Boolean(
         (tracking?.sellerPickupConfirmed ?? delivery?.sellerPickupConfirmed) === true,
     );
@@ -836,16 +712,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const canDriverScanPickupQr = isAssignedDriver && isPickupStep && !driverPickupConfirmed;
     const canDriverShowDropoffQr = isAssignedDriver && isDropoffStep && !buyerDropoffConfirmed;
     const canBuyerScanDropoffQr = isBuyer && isDropoffStep && !buyerDropoffConfirmed;
-
-    const hasAnyAction = Boolean(
-        canAcceptDelivery ||
-        canArrivePickup ||
-        canSellerShowPickupQr ||
-        canDriverScanPickupQr ||
-        canArriveDropoff ||
-        canDriverShowDropoffQr ||
-        canBuyerScanDropoffQr,
-    );
 
     const pickupCoordinatesSource = (tracking?.pickupCoordinates || delivery?.pickupCoordinates) as DeliveryGeoPoint | null | undefined;
     const dropoffCoordinatesSource = (tracking?.deliveryCoordinates || delivery?.deliveryCoordinates) as DeliveryGeoPoint | null | undefined;
@@ -1033,17 +899,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         },
         [refetchAll],
     );
-
-    React.useEffect(() => {
-        if (Platform.OS === 'android' && typeof UIManager.setLayoutAnimationEnabledExperimental === 'function') {
-            UIManager.setLayoutAnimationEnabledExperimental(true);
-        }
-    }, []);
-
-    const toggleSection = (section: DeliverySectionKey) => {
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        setExpandedSections((prev) => ({ ...prev, [section]: !prev[section] }));
-    };
 
     const closeQrModal = () => {
         setQrModalVisible(false);
@@ -1267,13 +1122,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             setIsLiveSharingEnabled(false);
         }
     }, [canShareLiveLocation, isLiveSharingEnabled]);
-
-    React.useEffect(() => {
-        setRouteCost(
-            parseRouteCost(routePayloadForCost) ||
-            parseRouteCost((delivery as any)?.orderId?.deliveryCost),
-        );
-    }, [delivery, routePayloadForCost]);
 
     React.useEffect(() => {
         if (!deliveryId || !isLiveSharingEnabled || !canShareLiveLocation) {
@@ -1556,45 +1404,12 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         }
     };
 
-    const callActor = React.useCallback(
-        async (phone: string | null, fallbackLabel: string) => {
-            if (!phone) {
-                setAlert({
-                    visible: true,
-                    title: 'Contact indisponible',
-                    message: `Aucun numero ${fallbackLabel.toLowerCase()} disponible pour le moment.`,
-                    type: 'warning',
-                });
-                return;
-            }
-
-            const url = `tel:${phone}`;
-            try {
-                const supported = await Linking.canOpenURL(url);
-                if (!supported) throw new Error('unsupported');
-                await Linking.openURL(url);
-            } catch {
-                setAlert({
-                    visible: true,
-                    title: 'Appel impossible',
-                    message: `Impossible de lancer l appel vers ${fallbackLabel.toLowerCase()}.`,
-                    type: 'error',
-                });
-            }
-        },
-        [],
-    );
-
     const distanceLabel = routeMetrics && routeMetrics.distanceKm > 0
         ? `${routeMetrics.distanceKm.toFixed(1)} km`
         : 'Distance -';
     const durationLabel = routeMetrics && routeMetrics.durationMin > 0
         ? `${routeMetrics.durationMin} min`
         : 'Duree -';
-    const routeCostLabel =
-        routeCost && Number.isFinite(routeCost.amount)
-            ? `${Math.max(Math.round(routeCost.amount), 0).toLocaleString('fr-FR')} ${routeCost.currency}`
-            : 'Cout N/D';
     const routeModeLabel = React.useMemo(() => {
         const payload =
             (routePayloadForCost as Record<string, unknown> | null | undefined) || null;
@@ -1606,14 +1421,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         if (normalizedMode === 'driving' || normalizedMode === 'car') return 'Voiture';
         return 'Standard';
     }, [routePayloadForCost]);
-    const bikeDurationLabel =
-        routeMetrics && routeMetrics.durationMin > 0
-            ? `${Math.max(Math.round(routeMetrics.durationMin * 1.35), routeMetrics.durationMin + 3)} min`
-            : '--';
-    const walkDurationLabel =
-        routeMetrics && routeMetrics.durationMin > 0
-            ? `${Math.max(Math.round(routeMetrics.durationMin * 2.2), routeMetrics.durationMin + 8)} min`
-            : '--';
     const routeSourceLabel =
         routeSource === 'backend'
             ? 'Trajet backend'
@@ -1622,28 +1429,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 : routeSource === 'fallback'
                     ? 'Trajet direct'
                     : 'Trajet en attente';
-    const routeSourceHint =
-        routeSource === 'backend'
-            ? `Source: ${backendRouteCandidate?.provider === 'tracking' ? 'tracking' : 'delivery'}`
-            : routeSource === 'google'
-                ? 'Source: calcul mobile'
-                : routeSource === 'fallback'
-                    ? 'Source: ligne directe'
-                    : 'Source: --';
-    const etaArrivalLabel =
-        routeMetrics && routeMetrics.durationMin > 0
-            ? (() => {
-                const etaDate = new Date();
-                etaDate.setMinutes(etaDate.getMinutes() + routeMetrics.durationMin);
-                return etaDate.toLocaleTimeString('fr-FR', {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                });
-            })()
-            : '--:--';
-    const routeSummaryLabel =
-        routeMetrics?.summary?.trim() ||
-        (headingToPickup ? 'Vers le point de retrait' : 'Vers le point de livraison');
     const startPointLabel = isAssignedDriver
         ? 'Ma position actuelle'
         : driverPoint
@@ -1771,415 +1556,25 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         return actions;
     })();
     const progressionSummary = `${Math.min(stageProgressIndex + 1, DELIVERY_STAGE_ORDER.length)}/${DELIVERY_STAGE_ORDER.length}`;
-    const dropoffFullyConfirmed = buyerDropoffConfirmed && Boolean(
-        (tracking?.driverDropoffConfirmed ?? delivery?.driverDropoffConfirmed) === true,
-    );
-    const pickupSummaryLabel = pickupFullyConfirmed ? 'Retrait valide' : 'Retrait en attente';
-    const dropoffSummaryLabel = dropoffFullyConfirmed ? 'Livraison valide' : 'Livraison en attente';
     const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
     const latestMessagePreview = latestMessage?.message?.trim()
         ? latestMessage.message.trim()
         : 'Aucun message pour le moment.';
-    const timelineRows = [
-        {
-            key: 'accepted',
-            label: 'Course acceptee',
-            done: Boolean(delivery?.acceptedAt || tracking?.acceptedAt),
-            at: formatClockTime(tracking?.acceptedAt || delivery?.acceptedAt || null),
-        },
-        {
-            key: 'pickup-arrival',
-            label: 'Arrivee au retrait',
-            done: Boolean(delivery?.arrivedAtPickupAt || tracking?.arrivedAtPickupAt),
-            at: formatClockTime(tracking?.arrivedAtPickupAt || delivery?.arrivedAtPickupAt || null),
-        },
-        {
-            key: 'transit-start',
-            label: 'Debut transit',
-            done: Boolean(delivery?.startedAt || tracking?.startedAt),
-            at: formatClockTime(tracking?.startedAt || delivery?.startedAt || null),
-        },
-        {
-            key: 'dropoff-arrival',
-            label: 'Arrivee a destination',
-            done: Boolean(delivery?.arrivedAtDropoffAt || tracking?.arrivedAtDropoffAt),
-            at: formatClockTime(tracking?.arrivedAtDropoffAt || delivery?.arrivedAtDropoffAt || null),
-        },
-        {
-            key: 'completed',
-            label: 'Livraison terminee',
-            done: Boolean(delivery?.deliveredAt || tracking?.deliveredAt),
-            at: formatClockTime(tracking?.deliveredAt || delivery?.deliveredAt || null),
-        },
-    ];
-    const buyerFlowLabels = ['Confirmee', 'Preparation', 'En route', 'Livree'];
-    const buyerFlowIndex =
-        status === 'delivered'
-            ? 3
-            : ['picked_up', 'in_transit', 'at_dropoff'].includes(status)
-                ? 2
-                : ['assigned', 'at_pickup'].includes(status)
-                    ? 1
-                    : 0;
-    const buyerFlowProgressPercent = ((buyerFlowIndex + 1) / buyerFlowLabels.length) * 100;
-    const buyerHeroTitle =
-        status === 'delivered'
-            ? 'Livraison confirmee'
-            : buyerFlowIndex >= 2
-                ? 'Livreur en route'
-                : buyerFlowIndex === 1
-                    ? 'Commande en preparation'
-                    : 'Commande confirmee';
-    const sellerProgressPercent =
-        status === 'delivered'
-            ? 100
-            : status === 'at_dropoff'
-                ? 92
-                : status === 'picked_up' || status === 'in_transit'
-                    ? 80
-                    : status === 'at_pickup'
-                        ? 65
-                        : status === 'assigned'
-                            ? 45
-                            : 25;
-    const sellerProgressHint =
-        status === 'delivered'
-            ? 'Commande remise au client'
-            : headingToPickup
-                ? `Retrait estime dans ${durationLabel}`
-                : `Livraison estimee dans ${durationLabel}`;
-    const rolePrimaryAction = prioritizedStepActions[0] || null;
-    const roleSecondaryActions = prioritizedStepActions.slice(1, 3);
-    const roleCardBadgeLabel =
-        viewerRole === 'driver'
-            ? 'Espace livreur'
-            : viewerRole === 'seller'
-                ? 'Espace vendeur'
-                : 'Espace acheteur';
-    const shouldShowRoleStoryboard = viewerRole !== 'observer';
-    const openMessagesSection = () => {
-        setExpandedSections((prev) => ({ ...prev, messages: true }));
-    };
-
-    const renderRoleStoryboard = () => {
-        if (!shouldShowRoleStoryboard) {
-            return null;
-        }
-
-        if (viewerRole === 'driver') {
-            return (
-                <LinearGradient
-                    colors={[Colors.primaryDark, Colors.primary]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[styles.roleStoryboardCard, styles.roleStoryboardDriver]}
-                >
-                    <View style={styles.roleHeaderRow}>
-                        <View style={styles.roleHeaderTextWrap}>
-                            <Text style={styles.roleEyebrow}>{roleCardBadgeLabel}</Text>
-                            <Text style={styles.roleHeadline}>
-                                {canAcceptDelivery ? 'Nouvelle course disponible' : 'Suivi livraison actif'}
-                            </Text>
-                        </View>
-                        <View style={styles.roleStatusPill}>
-                            <Text style={styles.roleStatusPillText}>
-                                {DELIVERY_STATUS_LABELS[status] || status}
-                            </Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.roleMetricsRow}>
-                        <View style={styles.roleMetricTile}>
-                            <Text style={styles.roleMetricLabel}>Cout trajet</Text>
-                            <Text style={styles.roleMetricValue}>{routeCostLabel}</Text>
-                        </View>
-                        <View style={styles.roleMetricTile}>
-                            <Text style={styles.roleMetricLabel}>Distance</Text>
-                            <Text style={styles.roleMetricValue}>{distanceLabel}</Text>
-                        </View>
-                        <View style={styles.roleMetricTile}>
-                            <Text style={styles.roleMetricLabel}>Panier</Text>
-                            <Text style={styles.roleMetricValue}>
-                                {orderItemsCount > 0 ? `${orderItemsCount} article(s)` : '--'}
-                            </Text>
-                        </View>
-                    </View>
-
-                    <View style={styles.roleJourneyCard}>
-                        <View style={styles.roleJourneyPoint}>
-                            <Ionicons name="storefront" size={15} color={Colors.accent} />
-                            <View style={styles.roleJourneyTextWrap}>
-                                <Text style={styles.roleJourneyLabel}>Retrait - {sellerDisplayName}</Text>
-                                <Text style={styles.roleJourneyValue} numberOfLines={2}>
-                                    {pickupLabel || 'Point de retrait non defini'}
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.roleJourneyDivider} />
-                        <View style={styles.roleJourneyPoint}>
-                            <Ionicons name="location" size={15} color={Colors.accent} />
-                            <View style={styles.roleJourneyTextWrap}>
-                                <Text style={styles.roleJourneyLabel}>Livraison Â· {buyerDisplayName}</Text>
-                                <Text style={styles.roleJourneyValue} numberOfLines={2}>
-                                    {dropoffLabel || 'Point de livraison non defini'}
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-
-                    <View style={styles.roleContactsRow}>
-                        <TouchableOpacity
-                            style={styles.roleContactChip}
-                            onPress={() => {
-                                void callActor(sellerPhone, 'vendeur');
-                            }}
-                        >
-                            <Ionicons name="call-outline" size={14} color={Colors.accent} />
-                            <Text style={styles.roleContactText}>Vendeur</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.roleContactChip}
-                            onPress={() => {
-                                void callActor(buyerPhone, 'acheteur');
-                            }}
-                        >
-                            <Ionicons name="call-outline" size={14} color={Colors.accent} />
-                            <Text style={styles.roleContactText}>Acheteur</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    {rolePrimaryAction ? (
-                        <Button
-                            title={rolePrimaryAction.title}
-                            variant="primary"
-                            fullWidth
-                            size="lg"
-                            loading={rolePrimaryAction.loading}
-                            onPress={rolePrimaryAction.onPress}
-                            style={styles.rolePrimaryActionBtn}
-                        />
-                    ) : null}
-                    {roleSecondaryActions.length > 0 ? (
-                        <View style={styles.roleSecondaryActionsRow}>
-                            {roleSecondaryActions.map((action) => (
-                                <Button
-                                    key={action.key}
-                                    title={action.title}
-                                    variant="outline"
-                                    size="sm"
-                                    loading={action.loading}
-                                    onPress={action.onPress}
-                                    style={styles.roleSecondaryActionBtn}
-                                />
-                            ))}
-                        </View>
-                    ) : null}
-                </LinearGradient>
-            );
-        }
-
-        if (viewerRole === 'seller') {
-            return (
-                <LinearGradient
-                    colors={[Colors.primaryDark, Colors.primary]}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={[styles.roleStoryboardCard, styles.roleSellerCard]}
-                >
-                    <View style={styles.roleHeaderRow}>
-                        <View style={styles.roleHeaderTextWrap}>
-                            <Text style={styles.roleEyebrow}>{roleCardBadgeLabel}</Text>
-                            <Text style={styles.roleHeadline}>Suivi preparation commande</Text>
-                        </View>
-                        <Text style={styles.roleCompletionText}>{Math.round(sellerProgressPercent)}%</Text>
-                    </View>
-
-                    <View style={styles.roleProgressTrack}>
-                        <View style={[styles.roleProgressFill, { width: `${sellerProgressPercent}%` }]} />
-                    </View>
-                    <View style={styles.roleProgressMetaRow}>
-                        <Text style={styles.roleProgressMetaText}>{sellerProgressHint}</Text>
-                        <Text style={styles.roleProgressMetaText}>
-                            {orderItemsCount > 0 ? `${orderItemsCount} article(s)` : 'Panier indisponible'}
-                        </Text>
-                    </View>
-
-                    <View style={styles.roleDriverCard}>
-                        <View style={styles.roleDriverHeadRow}>
-                            <View style={styles.roleDriverAvatar}>
-                                <Ionicons name="person" size={18} color={Colors.primary} />
-                            </View>
-                            <View style={styles.roleDriverTextWrap}>
-                                <Text style={styles.roleDriverName}>{driverDisplayName}</Text>
-                                <Text style={styles.roleDriverMeta}>
-                                    {durationLabel} avant arrivee
-                                </Text>
-                            </View>
-                            <TouchableOpacity
-                                style={styles.roleDriverCallButton}
-                                onPress={() => {
-                                    void callActor(driverPhone, 'livreur');
-                                }}
-                            >
-                                <Ionicons name="call-outline" size={16} color={Colors.primary} />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-
-                    <View style={styles.roleCodeCard}>
-                        <View style={styles.roleCodeTextWrap}>
-                            <Text style={styles.roleCodeLabel}>Code retrait</Text>
-                            <Text style={styles.roleCodeValue}>
-                                {canSellerShowPickupQr
-                                    ? `Generez le QR pour ${driverDisplayName}`
-                                    : pickupSummaryLabel}
-                            </Text>
-                        </View>
-                        {canSellerShowPickupQr ? (
-                            <Button
-                                title="Afficher QR"
-                                variant="primary"
-                                size="sm"
-                                loading={isGeneratingPickupQr}
-                                onPress={onSellerShowPickupQr}
-                            />
-                        ) : null}
-                    </View>
-
-                    {rolePrimaryAction && !canSellerShowPickupQr ? (
-                        <Button
-                            title={rolePrimaryAction.title}
-                            variant="primary"
-                            fullWidth
-                            size="lg"
-                            loading={rolePrimaryAction.loading}
-                            onPress={rolePrimaryAction.onPress}
-                            style={styles.rolePrimaryActionBtn}
-                        />
-                    ) : null}
-                </LinearGradient>
-            );
-        }
-
-        return (
-            <LinearGradient
-                colors={[Colors.primaryDark, Colors.primary]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.roleStoryboardCard, styles.roleBuyerCard]}
-            >
-                <View style={styles.roleHeaderRow}>
-                    <View style={styles.roleHeaderTextWrap}>
-                        <Text style={styles.roleEyebrow}>{roleCardBadgeLabel}</Text>
-                        <Text style={styles.roleHeadline}>{buyerHeroTitle}</Text>
-                    </View>
-                    <View style={styles.roleEtaBadge}>
-                        <Text style={styles.roleEtaBadgeText}>{durationLabel}</Text>
-                        <Text style={styles.roleEtaBadgeSub}>ETA</Text>
-                    </View>
-                </View>
-
-                <View style={styles.roleProgressTrack}>
-                    <View style={[styles.roleProgressFill, { width: `${buyerFlowProgressPercent}%` }]} />
-                </View>
-                <View style={styles.buyerFlowLabelsRow}>
-                    {buyerFlowLabels.map((label, index) => (
-                        <Text
-                            key={label}
-                            style={[
-                                styles.buyerFlowLabel,
-                                index <= buyerFlowIndex && styles.buyerFlowLabelActive,
-                            ]}
-                        >
-                            {label}
-                        </Text>
-                    ))}
-                </View>
-
-                <View style={styles.roleDriverCard}>
-                    <View style={styles.roleDriverHeadRow}>
-                        <View style={styles.roleDriverAvatar}>
-                            <Ionicons name="bicycle" size={16} color={Colors.primary} />
-                        </View>
-                        <View style={styles.roleDriverTextWrap}>
-                            <Text style={styles.roleDriverName}>{driverDisplayName}</Text>
-                            <Text style={styles.roleDriverMeta}>{routeSummaryLabel}</Text>
-                        </View>
-                        <TouchableOpacity
-                            style={styles.roleDriverCallButton}
-                            onPress={() => {
-                                void callActor(driverPhone, 'livreur');
-                            }}
-                        >
-                            <Ionicons name="call-outline" size={16} color={Colors.primary} />
-                        </TouchableOpacity>
-                    </View>
-                    <View style={styles.roleContactsRow}>
-                        <TouchableOpacity style={styles.roleContactChip} onPress={openMessagesSection}>
-                            <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.accent} />
-                            <Text style={styles.roleContactText}>Message</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={styles.roleContactChip}
-                            onPress={() => {
-                                void callActor(driverPhone, 'livreur');
-                            }}
-                        >
-                            <Ionicons name="call-outline" size={14} color={Colors.accent} />
-                            <Text style={styles.roleContactText}>Appeler</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                <View style={styles.roleJourneyCard}>
-                    <View style={styles.roleJourneyPoint}>
-                        <Ionicons name="location" size={15} color={Colors.accent} />
-                        <View style={styles.roleJourneyTextWrap}>
-                            <Text style={styles.roleJourneyLabel}>Adresse livraison</Text>
-                            <Text style={styles.roleJourneyValue} numberOfLines={2}>
-                                {dropoffLabel || 'Adresse indisponible'}
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-
-                {rolePrimaryAction ? (
-                    <Button
-                        title={rolePrimaryAction.title}
-                        variant="primary"
-                        fullWidth
-                        size="lg"
-                        loading={rolePrimaryAction.loading}
-                        onPress={rolePrimaryAction.onPress}
-                        style={styles.rolePrimaryActionBtn}
-                    />
-                ) : null}
-            </LinearGradient>
-        );
-    };
-
-    const openAndroidDetailModal = (type: 'route' | 'timeline') => {
-        if (Platform.OS !== 'android') return;
-        setAndroidDetailsModalType(type);
-        setAndroidDetailsModalVisible(true);
-    };
-    const showQuickInfoAlert = () => {
-        setAlert({
-            visible: true,
-            title: 'Infos livraison',
-            message: [
-                `Statut: ${DELIVERY_STATUS_LABELS[status] || status}`,
-                `Duree: ${durationLabel}`,
-                `Distance: ${distanceLabel}`,
-                `Cout: ${routeCostLabel}`,
-                `Mode: ${routeModeLabel}`,
-                `Destination: ${activeTargetLabel || 'Non definie'}`,
-                `Trajet: ${routeSourceLabel}`,
-            ].join('\n'),
-            type: 'info',
-        });
-    };
-
+    const workspaceTabs: {
+        key: DeliveryWorkspaceTab;
+        label: string;
+        icon: keyof typeof Ionicons.glyphMap;
+        badge: string;
+    }[] = [
+            {
+                key: 'navigation',
+                label: 'Navigation',
+                icon: isGuidanceMode ? 'navigate' : 'map-outline',
+                badge: durationLabel,
+            },
+            { key: 'actions', label: 'Actions', icon: 'flash-outline', badge: `${availableActionsCount}` },
+            { key: 'messages', label: 'Messages', icon: 'chatbubble-ellipses-outline', badge: `${messages.length}` },
+        ];
     if (!deliveryId || isLoading) return <LoadingSpinner fullScreen />;
     if (deliveryError || !delivery) {
         return (
@@ -2360,25 +1755,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         </View>
                     ) : null}
 
-                    <View style={styles.transportRail}>
-                        <View style={styles.transportPrimary}>
-                            <Text style={styles.transportPrimaryTime}>{durationLabel}</Text>
-                            <Text style={styles.transportPrimaryMeta}>Trajet principal</Text>
-                        </View>
-                        <View style={styles.transportOption}>
-                            <Ionicons name="car-outline" size={18} color={Colors.primary} />
-                            <Text style={styles.transportOptionTime}>{durationLabel}</Text>
-                        </View>
-                        <View style={styles.transportOption}>
-                            <Ionicons name="bicycle-outline" size={18} color={Colors.primary} />
-                            <Text style={styles.transportOptionTime}>{bikeDurationLabel}</Text>
-                        </View>
-                        <View style={styles.transportOption}>
-                            <Ionicons name="walk-outline" size={18} color={Colors.primary} />
-                            <Text style={styles.transportOptionTime}>{walkDurationLabel}</Text>
-                        </View>
-                    </View>
-
                     <TouchableOpacity style={styles.recenterFab} onPress={recenterMap}>
                         <Ionicons name="locate" size={18} color={Colors.primary} />
                     </TouchableOpacity>
@@ -2425,213 +1801,79 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                     )}
                 </View>
 
-                {renderRoleStoryboard()}
-
-                <View style={styles.priorityActionsCard}>
-                    <View style={styles.priorityActionsHeader}>
-                        <View>
-                            <Text style={styles.priorityActionsTitle}>Actions prioritaires</Text>
-                            <Text style={styles.priorityActionsSubtitle}>
-                                Etape actuelle: {DELIVERY_STATUS_LABELS[status] || status}
+                <View style={styles.workspaceCard}>
+                    <View style={styles.workspaceHeader}>
+                        <View style={styles.workspaceHeaderTextWrap}>
+                            <Text style={styles.workspaceTitle}>Pilotage livraison</Text>
+                            <Text style={styles.workspaceSubtitle}>
+                                {viewerRole === 'driver'
+                                    ? 'Vue livreur simplifiee.'
+                                    : viewerRole === 'seller'
+                                        ? 'Vue vendeur simplifiee.'
+                                        : viewerRole === 'buyer'
+                                            ? 'Vue acheteur simplifiee.'
+                                            : 'Navigation, actions et messages uniquement.'}
                             </Text>
                         </View>
-                        <View style={styles.priorityActionsMeta}>
-                            <Text style={styles.priorityActionsMetaText}>{availableActionsCount} action(s)</Text>
+                        <View style={styles.workspaceStatusPill}>
+                            <Text style={styles.workspaceStatusText}>
+                                {progressionSummary} - {DELIVERY_STATUS_LABELS[status] || status}
+                            </Text>
                         </View>
                     </View>
 
-                    {prioritizedStepActions.length > 0 ? (
-                        prioritizedStepActions.slice(0, 3).map((action, index) => (
-                            <View key={action.key} style={styles.priorityActionRow}>
-                                <View style={styles.priorityActionInfo}>
-                                    <View style={styles.priorityActionIcon}>
-                                        <Ionicons name={action.icon} size={16} color={Colors.primary} />
-                                    </View>
-                                    <View style={styles.priorityActionTextWrap}>
-                                        <Text style={styles.priorityActionTitle}>{action.title}</Text>
-                                        <Text style={styles.priorityActionSubtitle}>{action.subtitle}</Text>
-                                    </View>
-                                </View>
-                                <Button
-                                    title={index === 0 ? 'Executer' : 'Lancer'}
-                                    variant={index === 0 ? 'secondary' : 'outline'}
-                                    size="sm"
-                                    loading={action.loading}
-                                    onPress={action.onPress}
-                                />
-                            </View>
-                        ))
-                    ) : (
-                        <View style={styles.noActionState}>
-                            <Ionicons name="time-outline" size={18} color={Colors.gray500} />
-                            <Text style={styles.noActionStateText}>
-                                Aucune action immediate. Suivez la progression de livraison.
-                            </Text>
-                        </View>
-                    )}
-
-                    <View style={styles.quickDetailButtons}>
-                        {Platform.OS === 'android' ? (
-                            <>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.workspaceTabsRow}
+                    >
+                        {workspaceTabs.map((tab) => {
+                            const isActive = activeWorkspaceTab === tab.key;
+                            return (
                                 <TouchableOpacity
-                                    style={styles.quickDetailButton}
-                                    onPress={() => openAndroidDetailModal('route')}
+                                    key={tab.key}
+                                    style={[
+                                        styles.workspaceTabButton,
+                                        isActive && styles.workspaceTabButtonActive,
+                                    ]}
+                                    onPress={() => setActiveWorkspaceTab(tab.key)}
+                                    activeOpacity={0.9}
                                 >
-                                    <Ionicons name="map-outline" size={15} color={Colors.primary} />
-                                    <Text style={styles.quickDetailButtonText}>Trajet (modal)</Text>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.quickDetailButton}
-                                    onPress={() => openAndroidDetailModal('timeline')}
-                                >
-                                    <Ionicons name="git-network-outline" size={15} color={Colors.primary} />
-                                    <Text style={styles.quickDetailButtonText}>Etapes (modal)</Text>
-                                </TouchableOpacity>
-                            </>
-                        ) : null}
-                        <TouchableOpacity style={styles.quickDetailButton} onPress={showQuickInfoAlert}>
-                            <Ionicons name="alert-circle-outline" size={15} color={Colors.primary} />
-                            <Text style={styles.quickDetailButtonText}>Infos rapides (alerte)</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-
-                {!shouldShowRoleStoryboard ? (
-                    <>
-                        <View style={styles.rideSheetCard}>
-                            <LinearGradient
-                                colors={['#1A4172', '#2561A8']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.rideSheetGradient}
-                            >
-                                <View style={styles.rideSheetTopRow}>
-                                    <View style={styles.rideSheetEtaBlock}>
-                                        <Text style={styles.rideSheetStatusLabel}>
-                                            {DELIVERY_STATUS_LABELS[status] || status}
-                                        </Text>
-                                        <Text style={styles.rideSheetEtaValue}>{durationLabel}</Text>
-                                        <Text style={styles.rideSheetEtaSub}>Arrivee estimee: {etaArrivalLabel}</Text>
-                                    </View>
-                                    <View style={styles.rideSheetDistanceBlock}>
-                                        <Text style={styles.rideSheetDistanceLabel}>Distance</Text>
-                                        <Text style={styles.rideSheetDistanceValue}>{distanceLabel}</Text>
-                                        <Text style={styles.rideSheetCostText}>{routeCostLabel}</Text>
-                                        <Text style={styles.rideSheetDistanceSub}>
-                                            {routeModeLabel} Â· {routeSourceHint}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                <View style={styles.rideSheetDivider} />
-
-                                <View style={styles.rideStopsRow}>
-                                    <View style={styles.rideStopsRail}>
-                                        <View style={styles.rideStopDotStart} />
-                                        <View style={styles.rideStopRail} />
-                                        <View style={styles.rideStopDotEnd} />
-                                    </View>
-                                    <View style={styles.rideStopsContent}>
-                                        <Text style={styles.rideStopLabel}>Depart</Text>
-                                        <Text style={styles.rideStopValue} numberOfLines={1}>
-                                            {startPointLabel}
-                                        </Text>
-                                        <View style={styles.rideStopSeparator} />
-                                        <Text style={styles.rideStopLabel}>
-                                            {headingToPickup ? 'Retrait' : 'Livraison'}
-                                        </Text>
-                                        <Text style={styles.rideStopValue} numberOfLines={2}>
-                                            {activeTargetLabel || 'Destination non definie'}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                <View style={styles.rideFooterRow}>
-                                    <Text style={styles.rideSummaryText} numberOfLines={1}>
-                                        {routeSummaryLabel}
+                                    <Ionicons
+                                        name={tab.icon}
+                                        size={14}
+                                        color={isActive ? Colors.white : Colors.primary}
+                                    />
+                                    <Text
+                                        style={[
+                                            styles.workspaceTabText,
+                                            isActive && styles.workspaceTabTextActive,
+                                        ]}
+                                    >
+                                        {tab.label}
                                     </Text>
                                     <View
                                         style={[
-                                            styles.routeSourcePill,
-                                            routeSource === 'backend' && styles.routeSourcePillBackend,
-                                            routeSource === 'fallback' && styles.routeSourcePillFallback,
+                                            styles.workspaceTabBadge,
+                                            isActive && styles.workspaceTabBadgeActive,
                                         ]}
                                     >
-                                        <Text style={styles.routeSourcePillText}>{routeSourceLabel}</Text>
+                                        <Text
+                                            style={[
+                                                styles.workspaceTabBadgeText,
+                                                isActive && styles.workspaceTabBadgeTextActive,
+                                            ]}
+                                        >
+                                            {tab.badge}
+                                        </Text>
                                     </View>
-                                </View>
-                            </LinearGradient>
-                        </View>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
 
-                        <View style={styles.overviewCard}>
-                            <View style={styles.overviewChip}>
-                                <Text style={styles.overviewLabel}>Statut</Text>
-                                <Text style={styles.overviewValue}>{DELIVERY_STATUS_LABELS[status] || status}</Text>
-                            </View>
-                            <View style={styles.overviewChip}>
-                                <Text style={styles.overviewLabel}>ETA</Text>
-                                <Text style={styles.overviewValue}>{durationLabel}</Text>
-                            </View>
-                            <View style={styles.overviewChip}>
-                                <Text style={styles.overviewLabel}>Distance</Text>
-                                <Text style={styles.overviewValue}>{distanceLabel}</Text>
-                            </View>
-                            <View style={styles.overviewChip}>
-                                <Text style={styles.overviewLabel}>Cout trajet</Text>
-                                <Text style={styles.overviewValue}>{routeCostLabel}</Text>
-                            </View>
-                            <View style={styles.overviewChip}>
-                                <Text style={styles.overviewLabel}>Trajet</Text>
-                                <Text style={styles.overviewValue}>{routeSourceLabel}</Text>
-                            </View>
-                        </View>
-                    </>
-                ) : null}
-
-                <View style={styles.accordionCard}>
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        style={styles.accordionHeader}
-                        onPress={() => toggleSection('navigation')}
-                    >
-                        <View style={styles.accordionHeaderLeft}>
-                            <View style={styles.accordionIconWrap}>
-                                <Ionicons name="navigate-outline" size={16} color={Colors.primary} />
-                            </View>
-                            <View style={styles.accordionTextWrap}>
-                                <Text style={styles.accordionTitle}>Navigation & Controle</Text>
-                                <Text style={styles.accordionSubtitle}>
-                                    Guidage live, carte et partage de position
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.accordionHeaderRight}>
-                            <View style={styles.accordionBadgePill}>
-                                <Text style={styles.accordionBadgeText}>
-                                    {isGuidanceMode ? 'Guidage actif' : 'Mode carte'}
-                                </Text>
-                            </View>
-                            <View style={styles.accordionChevron}>
-                                <Ionicons
-                                    name={expandedSections.navigation ? 'chevron-up' : 'chevron-down'}
-                                    size={16}
-                                    color={Colors.primary}
-                                />
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-                    {!expandedSections.navigation ? (
-                        <View style={styles.accordionPreviewRow}>
-                            <View style={styles.previewPill}>
-                                <Ionicons name="pin-outline" size={13} color={Colors.primary} />
-                                <Text style={styles.previewText} numberOfLines={1}>
-                                    {activeTargetLabel || 'Destination en attente'}
-                                </Text>
-                            </View>
-                        </View>
-                    ) : null}
-                    {expandedSections.navigation ? (
-                        <View style={styles.accordionBody}>
+                    {activeWorkspaceTab === 'navigation' ? (
+                        <View style={styles.workspacePanel}>
                             <View style={styles.mapHeader}>
                                 <View style={styles.mapHeaderActions}>
                                     <TouchableOpacity
@@ -2739,244 +1981,90 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                             <View style={styles.mapHintGrid}>
                                 <View style={styles.mapHintRow}>
                                     <Text style={styles.mapHintLabel}>Statut</Text>
-                                    <Text style={styles.mapHintValue}>{DELIVERY_STATUS_LABELS[status] || status}</Text>
+                                    <Text style={styles.mapHintValue}>
+                                        {DELIVERY_STATUS_LABELS[status] || status}
+                                    </Text>
                                 </View>
                                 <View style={styles.mapHintRow}>
                                     <Text style={styles.mapHintLabel}>Destination</Text>
-                                    <Text style={styles.mapHintValue} numberOfLines={1}>{activeTargetLabel || '-'}</Text>
-                                </View>
-                                <View style={styles.mapHintRow}>
-                                    <Text style={styles.mapHintLabel}>Cout trajet</Text>
-                                    <Text style={styles.mapHintValue} numberOfLines={1}>{routeCostLabel}</Text>
-                                </View>
-                                <View style={styles.mapHintRow}>
-                                    <Text style={styles.mapHintLabel}>Livreur</Text>
                                     <Text style={styles.mapHintValue} numberOfLines={1}>
-                                        {driverPoint
-                                            ? `${driverPoint.latitude.toFixed(5)}, ${driverPoint.longitude.toFixed(5)}`
-                                            : 'Position indisponible'}
+                                        {activeTargetLabel || '-'}
+                                    </Text>
+                                </View>
+                                <View style={styles.mapHintRow}>
+                                    <Text style={styles.mapHintLabel}>ETA / Distance</Text>
+                                    <Text style={styles.mapHintValue} numberOfLines={1}>
+                                        {durationLabel} - {distanceLabel}
+                                    </Text>
+                                </View>
+                                <View style={styles.mapHintRow}>
+                                    <Text style={styles.mapHintLabel}>Trajet</Text>
+                                    <Text style={styles.mapHintValue} numberOfLines={1}>
+                                        {routeModeLabel} - {routeSourceLabel}
                                     </Text>
                                 </View>
                             </View>
                         </View>
                     ) : null}
-                </View>
 
-                <View style={styles.accordionCard}>
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        style={styles.accordionHeader}
-                        onPress={() => toggleSection('progression')}
-                    >
-                        <View style={styles.accordionHeaderLeft}>
-                            <View style={styles.accordionIconWrap}>
-                                <Ionicons name="git-network-outline" size={16} color={Colors.primary} />
+                    {activeWorkspaceTab === 'actions' ? (
+                        <View style={styles.workspacePanel}>
+                            <View style={styles.priorityActionsHeader}>
+                                <View>
+                                    <Text style={styles.priorityActionsTitle}>Actions prioritaires</Text>
+                                    <Text style={styles.priorityActionsSubtitle}>
+                                        Etape actuelle: {DELIVERY_STATUS_LABELS[status] || status}
+                                    </Text>
+                                </View>
+                                <View style={styles.priorityActionsMeta}>
+                                    <Text style={styles.priorityActionsMetaText}>
+                                        {availableActionsCount} action(s)
+                                    </Text>
+                                </View>
                             </View>
-                            <View style={styles.accordionTextWrap}>
-                                <Text style={styles.accordionTitle}>Progression</Text>
-                                <Text style={styles.accordionSubtitle}>
-                                    Etapes de validation retrait/livraison
 
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.accordionHeaderRight}>
-                            <View style={styles.accordionBadgePill}>
-                                <Text style={styles.accordionBadgeText}>{progressionSummary}</Text>
-                            </View>
-                            <View style={styles.accordionChevron}>
-                                <Ionicons
-                                    name={expandedSections.progression ? 'chevron-up' : 'chevron-down'}
-                                    size={16}
-                                    color={Colors.primary}
-                                />
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-                    {!expandedSections.progression ? (
-                        <View style={styles.accordionPreviewRow}>
-                            <View style={styles.previewPill}>
-                                <Ionicons name="storefront-outline" size={13} color={Colors.primary} />
-                                <Text style={styles.previewText}>{pickupSummaryLabel}</Text>
-                            </View>
-                            <View style={styles.previewPill}>
-                                <Ionicons name="checkmark-done-outline" size={13} color={Colors.primary} />
-                                <Text style={styles.previewText}>{dropoffSummaryLabel}</Text>
-                            </View>
-                        </View>
-                    ) : null}
-                    {expandedSections.progression ? (
-                        <View style={styles.accordionBody}>
-                            <View style={styles.stagesRow}>
-                                {DELIVERY_STAGE_ORDER.map((stage, index) => {
-                                    const isDone = index <= stageProgressIndex;
-                                    const isCurrent = index === stageProgressIndex;
-                                    return (
-                                        <View key={stage.key} style={[styles.stageChip, isDone && styles.stageChipDone, isCurrent && styles.stageChipCurrent]}>
-                                            <Ionicons name={stage.icon} size={14} color={isDone ? Colors.white : Colors.gray500} />
-                                            <Text style={[styles.stageChipText, isDone && styles.stageChipTextDone]}>{stage.label}</Text>
+                            {prioritizedStepActions.length > 0 ? (
+                                prioritizedStepActions.map((action, index) => (
+                                    <View key={action.key} style={styles.priorityActionRow}>
+                                        <View style={styles.priorityActionInfo}>
+                                            <View style={styles.priorityActionIcon}>
+                                                <Ionicons
+                                                    name={action.icon}
+                                                    size={16}
+                                                    color={Colors.primary}
+                                                />
+                                            </View>
+                                            <View style={styles.priorityActionTextWrap}>
+                                                <Text style={styles.priorityActionTitle}>{action.title}</Text>
+                                                <Text style={styles.priorityActionSubtitle}>{action.subtitle}</Text>
+                                            </View>
                                         </View>
-                                    );
-                                })}
-                            </View>
+                                        <Button
+                                            title={index === 0 ? 'Executer' : 'Lancer'}
+                                            variant={index === 0 ? 'secondary' : 'outline'}
+                                            size="sm"
+                                            loading={action.loading}
+                                            onPress={action.onPress}
+                                        />
+                                    </View>
+                                ))
+                            ) : (
+                                <View style={styles.noActionState}>
+                                    <Ionicons name="time-outline" size={18} color={Colors.gray500} />
+                                    <Text style={styles.noActionStateText}>
+                                        Aucune action immediate. Suivez la progression de livraison.
+                                    </Text>
+                                </View>
+                            )}
                         </View>
                     ) : null}
-                </View>
 
-                <View style={styles.accordionCard}>
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        style={styles.accordionHeader}
-                        onPress={() => toggleSection('actions')}
-                    >
-                        <View style={styles.accordionHeaderLeft}>
-                            <View style={styles.accordionIconWrap}>
-                                <Ionicons name="flash-outline" size={16} color={Colors.primary} />
+                    {activeWorkspaceTab === 'messages' ? (
+                        <View style={styles.workspacePanel}>
+                            <View style={styles.workspaceMessagesHeader}>
+                                <Text style={styles.priorityActionsTitle}>Messages</Text>
+                                <Text style={styles.priorityActionsSubtitle}>{latestMessagePreview}</Text>
                             </View>
-                            <View style={styles.accordionTextWrap}>
-                                <Text style={styles.accordionTitle}>Actions livraison</Text>
-                                <Text style={styles.accordionSubtitle}>
-                                    Actions disponibles selon votre role
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.accordionHeaderRight}>
-                            <View style={styles.accordionBadgePill}>
-                                <Text style={styles.accordionBadgeText}>
-                                    {availableActionsCount} dispo.
-                                </Text>
-                            </View>
-                            <View style={styles.accordionChevron}>
-                                <Ionicons
-                                    name={expandedSections.actions ? 'chevron-up' : 'chevron-down'}
-                                    size={16}
-                                    color={Colors.primary}
-                                />
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-                    {!expandedSections.actions ? (
-                        <View style={styles.accordionPreviewRow}>
-                            <View style={styles.previewPill}>
-                                <Ionicons
-                                    name={hasAnyAction ? 'checkmark-circle-outline' : 'time-outline'}
-                                    size={13}
-                                    color={Colors.primary}
-                                />
-                                <Text style={styles.previewText}>
-                                    {hasAnyAction
-                                        ? `${availableActionsCount} action(s) prete(s)`
-                                        : 'Aucune action a cette etape'}
-                                </Text>
-                            </View>
-                        </View>
-                    ) : null}
-                    {expandedSections.actions ? (
-                        <View style={styles.accordionBody}>
-                            {canAcceptDelivery ? (
-                                <Button title="Accepter livraison" variant="secondary" loading={isAccepting} onPress={() => runAction(() => acceptDelivery(deliveryId).unwrap(), 'Livraison acceptee.')} style={styles.actionBtn} />
-                            ) : null}
-                            {canArrivePickup ? (
-                                <Button title="Arrivee au retrait" variant="secondary" loading={isArrivingPickup} onPress={() => runAction(() => driverArrivePickup(deliveryId).unwrap(), 'Arrivee au retrait confirmee.')} style={styles.actionBtn} />
-                            ) : null}
-                            {canSellerShowPickupQr ? (
-                                <Button
-                                    title="Afficher QR commande"
-                                    variant="secondary"
-                                    loading={isGeneratingPickupQr}
-                                    onPress={onSellerShowPickupQr}
-                                    style={styles.actionBtn}
-                                />
-                            ) : null}
-                            {canDriverScanPickupQr ? (
-                                <Button
-                                    title="Scanner QR commande vendeur"
-                                    variant="secondary"
-                                    loading={isScanningPickupQr}
-                                    onPress={() => openQrScanModal({
-                                        title: 'Scan QR commande',
-                                        caption: 'Scannez le QR montre par le vendeur pour lancer la livraison.',
-                                        inputPlaceholder: 'Code QR commande du vendeur',
-                                        action: (qrData) => scanPickupQr({ id: deliveryId, qrData }).unwrap(),
-                                    })}
-                                    style={styles.actionBtn}
-                                />
-                            ) : null}
-                            {canArriveDropoff ? (
-                                <Button title="Arrivee a destination" variant="secondary" loading={isArrivingDropoff} onPress={() => runAction(() => driverArriveDropoff(deliveryId).unwrap(), 'Arrivee a destination confirmee.')} style={styles.actionBtn} />
-                            ) : null}
-                            {canDriverShowDropoffQr ? (
-                                <Button
-                                    title="Afficher QR livraison"
-                                    variant="secondary"
-                                    loading={isGeneratingDropoffQr}
-                                    onPress={onDriverShowDropoffQr}
-                                    style={styles.actionBtn}
-                                />
-                            ) : null}
-                            {canBuyerScanDropoffQr ? (
-                                <Button
-                                    title="Scanner QR livraison"
-                                    variant="secondary"
-                                    loading={isScanningDropoffQr}
-                                    onPress={() => openQrScanModal({
-                                        title: 'Scan QR livraison',
-                                        caption: 'Scannez le QR montre par le livreur pour valider la fin de livraison.',
-                                        inputPlaceholder: 'Code QR livraison du livreur',
-                                        action: (qrData) => scanDropoffQr({ id: deliveryId, qrData }).unwrap(),
-                                    })}
-                                    style={styles.actionBtn}
-                                />
-                            ) : null}
-                            {!hasAnyAction ? (
-                                <Text style={styles.infoText}>Aucune action disponible pour votre role a cette etape.</Text>
-                            ) : null}
-                        </View>
-                    ) : null}
-                </View>
-
-                <View style={styles.accordionCard}>
-                    <TouchableOpacity
-                        activeOpacity={0.9}
-                        style={styles.accordionHeader}
-                        onPress={() => toggleSection('messages')}
-                    >
-                        <View style={styles.accordionHeaderLeft}>
-                            <View style={styles.accordionIconWrap}>
-                                <Ionicons name="chatbubble-ellipses-outline" size={16} color={Colors.primary} />
-                            </View>
-                            <View style={styles.accordionTextWrap}>
-                                <Text style={styles.accordionTitle}>Messages</Text>
-                                <Text style={styles.accordionSubtitle}>
-                                    Chat rapide entre acheteur, vendeur et livreur
-                                </Text>
-                            </View>
-                        </View>
-                        <View style={styles.accordionHeaderRight}>
-                            <View style={styles.accordionBadgePill}>
-                                <Text style={styles.accordionBadgeText}>{messages.length} msg</Text>
-                            </View>
-                            <View style={styles.accordionChevron}>
-                                <Ionicons
-                                    name={expandedSections.messages ? 'chevron-up' : 'chevron-down'}
-                                    size={16}
-                                    color={Colors.primary}
-                                />
-                            </View>
-                        </View>
-                    </TouchableOpacity>
-                    {!expandedSections.messages ? (
-                        <View style={styles.accordionPreviewRow}>
-                            <View style={styles.previewPill}>
-                                <Ionicons name="chatbox-outline" size={13} color={Colors.primary} />
-                                <Text style={styles.previewText} numberOfLines={1}>
-                                    {latestMessagePreview}
-                                </Text>
-                            </View>
-                        </View>
-                    ) : null}
-                    {expandedSections.messages ? (
-                        <View style={styles.accordionBody}>
                             <ScrollView
                                 style={styles.messagesList}
                                 nestedScrollEnabled
@@ -2993,17 +2081,33 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                         ]}
                                     >
                                         <View style={styles.msgHead}>
-                                            <Text style={styles.msgRole}>{msg.senderRole.replace('_', ' ')}</Text>
+                                            <Text style={styles.msgRole}>
+                                                {msg.senderRole.replace('_', ' ')}
+                                            </Text>
                                             <Text style={styles.msgTime}>{formatClockTime(msg.sentAt)}</Text>
                                         </View>
                                         <Text style={styles.msgText}>{msg.message}</Text>
                                     </View>
                                 ))}
-                                {messages.length === 0 ? <Text style={styles.infoText}>Aucun message.</Text> : null}
+                                {messages.length === 0 ? (
+                                    <Text style={styles.infoText}>Aucun message.</Text>
+                                ) : null}
                             </ScrollView>
                             <View style={styles.msgComposer}>
-                                <TextInput style={styles.msgInput} value={messageInput} onChangeText={setMessageInput} placeholder="Ecrire un message..." />
-                                <TouchableOpacity style={styles.sendBtn} onPress={onSendMessage} disabled={isSendingMessage}>
+                                <TextInput
+                                    style={styles.msgInput}
+                                    value={messageInput}
+                                    onChangeText={setMessageInput}
+                                    placeholder="Ecrire un message..."
+                                />
+                                <TouchableOpacity
+                                    style={[
+                                        styles.sendBtn,
+                                        (!messageInput.trim() || isSendingMessage) && styles.sendBtnDisabled,
+                                    ]}
+                                    onPress={onSendMessage}
+                                    disabled={!messageInput.trim() || isSendingMessage}
+                                >
                                     <Ionicons name="send" size={16} color={Colors.white} />
                                 </TouchableOpacity>
                             </View>
@@ -3085,81 +2189,6 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 </View>
             </Modal>
 
-            <Modal
-                visible={androidDetailsModalVisible}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setAndroidDetailsModalVisible(false)}
-            >
-                <View style={styles.androidDetailsOverlay}>
-                    <View style={styles.androidDetailsSheet}>
-                        <View style={styles.androidDetailsHeader}>
-                            <Text style={styles.androidDetailsTitle}>
-                                {androidDetailsModalType === 'route'
-                                    ? 'Details trajet'
-                                    : 'Progression livraison'}
-                            </Text>
-                            <TouchableOpacity
-                                style={styles.androidDetailsCloseBtn}
-                                onPress={() => setAndroidDetailsModalVisible(false)}
-                            >
-                                <Ionicons name="close" size={16} color={Colors.primary} />
-                            </TouchableOpacity>
-                        </View>
-
-                        {androidDetailsModalType === 'route' ? (
-                            <View style={styles.androidDetailsBody}>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Duree</Text>
-                                    <Text style={styles.androidDetailsValue}>{durationLabel}</Text>
-                                </View>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Distance</Text>
-                                    <Text style={styles.androidDetailsValue}>{distanceLabel}</Text>
-                                </View>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Cout trajet</Text>
-                                    <Text style={styles.androidDetailsValue}>{routeCostLabel}</Text>
-                                </View>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Mode</Text>
-                                    <Text style={styles.androidDetailsValue}>{routeModeLabel}</Text>
-                                </View>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Source</Text>
-                                    <Text style={styles.androidDetailsValue}>{routeSourceLabel}</Text>
-                                </View>
-                                <View style={styles.androidDetailsRow}>
-                                    <Text style={styles.androidDetailsLabel}>Resume</Text>
-                                    <Text style={styles.androidDetailsValue} numberOfLines={2}>
-                                        {routeSummaryLabel}
-                                    </Text>
-                                </View>
-                            </View>
-                        ) : (
-                            <ScrollView style={styles.androidTimelineList} showsVerticalScrollIndicator={false}>
-                                {timelineRows.map((row) => (
-                                    <View key={row.key} style={styles.androidTimelineItem}>
-                                        <View
-                                            style={[
-                                                styles.androidTimelineDot,
-                                                row.done && styles.androidTimelineDotDone,
-                                            ]}
-                                        />
-                                        <View style={styles.androidTimelineContent}>
-                                            <Text style={styles.androidTimelineTitle}>{row.label}</Text>
-                                            <Text style={styles.androidTimelineMeta}>
-                                                {row.done ? `Validee a ${row.at}` : 'En attente'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                ))}
-                            </ScrollView>
-                        )}
-                    </View>
-                </View>
-            </Modal>
-
             <CustomAlert visible={alert.visible} title={alert.title} message={alert.message} type={alert.type} onConfirm={() => setAlert((prev) => ({ ...prev, visible: false }))} />
         </SafeAreaView>
     );
@@ -3196,11 +2225,102 @@ const styles = StyleSheet.create({
     headerTitle: { fontSize: Typography.fontSize.lg, fontWeight: Typography.fontWeight.extrabold, color: Colors.primary, letterSpacing: 0.3 },
     headerSubtitle: { fontSize: Typography.fontSize.sm, color: Colors.gray500, marginTop: 1 },
     content: { paddingHorizontal: Spacing.lg, gap: Spacing.md, paddingBottom: 120 },
+    workspaceCard: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '14',
+        padding: Spacing.md,
+        gap: Spacing.sm,
+        ...Shadows.md,
+    },
+    workspaceHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    workspaceHeaderTextWrap: {
+        flex: 1,
+    },
+    workspaceTitle: {
+        fontSize: Typography.fontSize.md,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    workspaceSubtitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    workspaceStatusPill: {
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '2F',
+        backgroundColor: Colors.primary + '12',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 5,
+    },
+    workspaceStatusText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    workspaceTabsRow: {
+        paddingVertical: 2,
+        gap: Spacing.xs,
+    },
+    workspaceTabButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '1A',
+        backgroundColor: Colors.primary + '08',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+    },
+    workspaceTabButtonActive: {
+        borderColor: Colors.primary,
+        backgroundColor: Colors.primary,
+    },
+    workspaceTabText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    workspaceTabTextActive: {
+        color: Colors.white,
+    },
+    workspaceTabBadge: {
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '30',
+        backgroundColor: Colors.white,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+    },
+    workspaceTabBadgeActive: {
+        borderColor: Colors.white + '90',
+        backgroundColor: Colors.primaryDark,
+    },
+    workspaceTabBadgeText: {
+        fontSize: 10,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    workspaceTabBadgeTextActive: {
+        color: Colors.white,
+    },
+    workspacePanel: {
+        gap: Spacing.sm,
+    },
     overviewCard: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: Spacing.sm,
-        marginTop: Spacing.xs,
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
         borderWidth: 1,
@@ -3227,6 +2347,114 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
+    },
+    workspaceRouteCard: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
+        backgroundColor: Colors.primary + '05',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        gap: Spacing.sm,
+    },
+    workspaceRouteRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    workspaceRouteTextWrap: {
+        flex: 1,
+    },
+    workspaceRouteLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    workspaceRouteValue: {
+        marginTop: 1,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+        lineHeight: 19,
+    },
+    workspaceRouteDivider: {
+        marginLeft: 6,
+        height: 1,
+        backgroundColor: Colors.primary + '15',
+    },
+    workspaceRouteMeta: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    workspaceRouteMetaSoft: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+    },
+    workspaceTimelineCard: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        backgroundColor: Colors.gray50,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        gap: Spacing.sm,
+    },
+    workspaceTimelineHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    workspaceTimelineTitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    workspaceTimelineSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    workspaceTimelineRows: {
+        marginTop: Spacing.xs,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.white,
+        overflow: 'hidden',
+    },
+    workspaceTimelineRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 7,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
+    },
+    workspaceTimelineDot: {
+        width: 8,
+        height: 8,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray300,
+    },
+    workspaceTimelineDotDone: {
+        backgroundColor: Colors.success,
+    },
+    workspaceTimelineRowLabel: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray700,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    workspaceTimelineRowValue: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    workspaceMessagesHeader: {
+        gap: 2,
     },
     mapExperienceCard: {
         marginTop: Spacing.sm,
@@ -4249,6 +3477,7 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
     },
     sendBtn: { width: 40, height: 40, borderRadius: BorderRadius.full, alignItems: 'center', justifyContent: 'center', backgroundColor: Colors.primary },
+    sendBtnDisabled: { opacity: 0.45 },
     modalOverlay: { flex: 1, backgroundColor: 'rgba(3, 12, 30, 0.64)', justifyContent: 'center', padding: Spacing.xl },
     modalCard: { backgroundColor: Colors.white, borderRadius: BorderRadius.xxl, paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.lg, borderWidth: 1, borderColor: Colors.primary + '18', overflow: 'hidden', ...Shadows.xl },
     modalTopStripe: { position: 'absolute', top: 0, left: 0, right: 0, height: 5 },

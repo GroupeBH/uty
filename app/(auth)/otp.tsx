@@ -1,4 +1,5 @@
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { useAppDispatch } from '@/store/hooks';
 import { useRegisterMutation, useVerifyOtpMutation } from '@/store/api/authApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
@@ -476,7 +477,12 @@ export default function OtpScreen() {
                                                     ]}
                                                     onPress={() => toggleCategory(category._id)}
                                                 >
-                                                    <Text style={styles.categoryIcon}>{category.icon}</Text>
+                                                    <CategoryIcon
+                                                        icon={category.icon}
+                                                        size={16}
+                                                        textStyle={styles.categoryIcon}
+                                                        imageStyle={styles.categoryIconImage}
+                                                    />
                                                     <Text
                                                         style={[
                                                             styles.categoryName,
@@ -812,6 +818,9 @@ const styles = StyleSheet.create({
     },
     categoryIcon: {
         fontSize: 16,
+    },
+    categoryIconImage: {
+        borderRadius: 8,
     },
     categoryName: {
         fontSize: Typography.fontSize.sm,

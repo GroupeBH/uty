@@ -182,6 +182,13 @@ export default function ProfileScreen() {
                     onPress: () => router.push('/notifications'),
                 },
                 {
+                    icon: 'chatbubble-ellipses-outline',
+                    label: 'Messagerie',
+                    subtitle: 'Mes conversations avec les vendeurs',
+                    gradient: Gradients.primary,
+                    onPress: () => router.push('/messages' as any),
+                },
+                {
                     icon: 'settings-outline',
                     label: 'Paramètres',
                     subtitle: 'Préférences et confidentialité',

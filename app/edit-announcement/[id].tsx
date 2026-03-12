@@ -5,6 +5,7 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { MapPickerModal } from '@/components/MapPickerModal';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
@@ -676,10 +677,11 @@ export default function EditAnnouncementScreen() {
                                         colors={Gradients.primary}
                                         style={styles.categoryGradient}
                                     >
-                                        <Ionicons
-                                            name={announcement.category.icon || 'cube-outline'}
-                                            size={48}
-                                            color={Colors.white}
+                                        <CategoryIcon
+                                            icon={announcement.category.icon}
+                                            size={36}
+                                            textStyle={styles.categoryIconText}
+                                            imageStyle={styles.categoryIconImage}
                                         />
                                     </LinearGradient>
                                     <View style={styles.categoryInfo}>
@@ -1313,6 +1315,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: Spacing.md,
+    },
+    categoryIconText: {
+        fontSize: 36,
+    },
+    categoryIconImage: {
+        borderRadius: 18,
     },
     categoryInfo: {
         flex: 1,

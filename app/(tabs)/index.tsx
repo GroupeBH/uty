@@ -10,10 +10,12 @@ import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
     Animated,
+    NativeScrollEvent,
+    NativeSyntheticEvent,
     RefreshControl,
     ScrollView,
     StyleSheet,
@@ -80,20 +82,6 @@ const CATEGORY_GRADIENTS = [
     Gradients.sunset,
     Gradients.ocean,
 ];
-
-const resolveCategoryIcon = (name?: string, backendIcon?: string): keyof typeof Ionicons.glyphMap => {
-    const value = `${name || ''} ${backendIcon || ''}`.toLowerCase();
-
-    if (value.includes('elect') || value.includes('tech') || value.includes('digit')) return 'hardware-chip-outline';
-    if (value.includes('mode') || value.includes('fashion') || value.includes('vet')) return 'shirt-outline';
-    if (value.includes('maison') || value.includes('home') || value.includes('meuble')) return 'home-outline';
-    if (value.includes('sport')) return 'football-outline';
-    if (value.includes('livre') || value.includes('book')) return 'book-outline';
-    if (value.includes('beaute') || value.includes('beauty') || value.includes('cosmet')) return 'sparkles-outline';
-    if (value.includes('auto') || value.includes('vehic')) return 'car-sport-outline';
-    if (value.includes('service')) return 'briefcase-outline';
-    return 'grid-outline';
-};
 
 const toIdString = (value: any): string | null => {
     if (!value) return null;
@@ -181,14 +169,20 @@ const QUICK_ACTIONS = [
     { id: '3', title: 'Ma boutique', icon: 'storefront-outline', gradient: Gradients.cool, route: '/my-shop' },
     { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
 ];
+const SEARCH_HIDE_THRESHOLD = 64;
+const SEARCH_SHOW_THRESHOLD = 18;
+const SEARCH_CONTAINER_MAX_HEIGHT = 96;
 
 export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
+    const [isSearchCollapsed, setIsSearchCollapsed] = useState(false);
     const router = useRouter();
     const { user, isAuthenticated, requireAuth } = useAuth();
     const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
     const scrollY = React.useRef(new Animated.Value(0)).current;
     const searchScaleAnim = React.useRef(new Animated.Value(1)).current;
+    const searchVisibilityAnim = React.useRef(new Animated.Value(1)).current;
+    const isSearchCollapsedRef = React.useRef(false);
 
     const { data: announcements, isLoading, error, refetch } = useGetAnnouncementsQuery();
     const {
@@ -361,7 +355,7 @@ export default function HomeScreen() {
         return source.slice(0, 10).map((category: any, index: number) => ({
             id: String(category._id),
             name: category.name || 'Categorie',
-            icon: resolveCategoryIcon(category.name, category.icon),
+            icon: category.icon,
             gradient: CATEGORY_GRADIENTS[index % CATEGORY_GRADIENTS.length],
             count: categoryCounts.get(String(category._id)) || 0,
         }));
@@ -373,23 +367,67 @@ export default function HomeScreen() {
         setRefreshing(false);
     };
 
-    const greetingOpacity = scrollY.interpolate({
-        inputRange: [0, 40],
-        outputRange: [1, 0],
-        extrapolate: 'clamp',
-    });
+    React.useEffect(() => {
+        Animated.timing(searchVisibilityAnim, {
+            toValue: isSearchCollapsed ? 0 : 1,
+            duration: 200,
+            useNativeDriver: false,
+        }).start();
+    }, [isSearchCollapsed, searchVisibilityAnim]);
 
-    const greetingScale = scrollY.interpolate({
-        inputRange: [0, 40],
-        outputRange: [1, 0.8],
-        extrapolate: 'clamp',
-    });
+    useFocusEffect(
+        React.useCallback(() => {
+            // Evite un etat "cache" persistant au retour de navigation.
+            isSearchCollapsedRef.current = false;
+            setIsSearchCollapsed(false);
+            searchVisibilityAnim.stopAnimation();
+            searchVisibilityAnim.setValue(1);
+        }, [searchVisibilityAnim]),
+    );
 
-    const searchBarScale = scrollY.interpolate({
-        inputRange: [0, 80],
-        outputRange: [1, 0.96],
+    const searchBarScale = searchVisibilityAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.96, 1],
         extrapolate: 'clamp',
     });
+    const searchBarOpacity = searchVisibilityAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 1],
+        extrapolate: 'clamp',
+    });
+    const searchBarTranslateY = searchVisibilityAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [-20, 0],
+        extrapolate: 'clamp',
+    });
+    const searchContainerMaxHeight = searchVisibilityAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, SEARCH_CONTAINER_MAX_HEIGHT],
+        extrapolate: 'clamp',
+    });
+    const headerBottomSpacing = searchVisibilityAnim.interpolate({
+        inputRange: [0, 1],
+        outputRange: [Spacing.md, Spacing.lg],
+        extrapolate: 'clamp',
+    });
+    const onHomeScroll = React.useCallback(
+        (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+            const offsetY = Math.max(0, event.nativeEvent.contentOffset.y || 0);
+            scrollY.setValue(offsetY);
+
+            if (!isSearchCollapsedRef.current && offsetY >= SEARCH_HIDE_THRESHOLD) {
+                isSearchCollapsedRef.current = true;
+                setIsSearchCollapsed(true);
+                return;
+            }
+
+            if (isSearchCollapsedRef.current && offsetY <= SEARCH_SHOW_THRESHOLD) {
+                isSearchCollapsedRef.current = false;
+                setIsSearchCollapsed(false);
+            }
+        },
+        [scrollY],
+    );
 
     // Animation de la barre de recherche au focus
     const handleSearchPress = () => {
@@ -423,7 +461,12 @@ export default function HomeScreen() {
                     </View>
 
                     {/* Contenu principal du header */}
-                    <View style={styles.headerContent}>
+                    <Animated.View
+                        style={[
+                            styles.headerContent,
+                            { marginBottom: headerBottomSpacing },
+                        ]}
+                    >
                         {/* Section utilisateur avec avatar */}
                         <View style={styles.userSection}>
                             <TouchableOpacity
@@ -441,22 +484,14 @@ export default function HomeScreen() {
                                 </LinearGradient>
                             </TouchableOpacity>
 
-                            <Animated.View
-                                style={[
-                                    styles.greetingContainer,
-                                    {
-                                        opacity: greetingOpacity,
-                                        transform: [{ scale: greetingScale }],
-                                    }
-                                ]}
-                            >
+                            <View style={styles.greetingContainer}>
                                 <Text style={styles.greeting}>{greetingLine}</Text>
                                 <Text style={styles.userName}>
                                     {isAuthenticated
                                         ? 'Heureux de vous revoir'
                                         : 'Explorez les annonces du moment'}
                                 </Text>
-                            </Animated.View>
+                            </View>
                         </View>
 
                         {/* Actions du header */}
@@ -488,15 +523,20 @@ export default function HomeScreen() {
                                 </View>
                             </TouchableOpacity>
                         </View>
-                    </View>
+                    </Animated.View>
 
                     {/* Barre de recherche moderne */}
                     <Animated.View
                         style={[
                             styles.searchContainer,
                             {
-                                transform: [{ scale: searchBarScale }],
-                            }
+                                maxHeight: searchContainerMaxHeight,
+                                opacity: searchBarOpacity,
+                                transform: [
+                                    { translateY: searchBarTranslateY },
+                                    { scale: searchBarScale },
+                                ],
+                            },
                         ]}
                     >
                         <TouchableOpacity
@@ -546,10 +586,7 @@ export default function HomeScreen() {
             <Animated.ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.scrollContent}
-                onScroll={Animated.event(
-                    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                    { useNativeDriver: true }
-                )}
+                onScroll={onHomeScroll}
                 scrollEventThrottle={16}
                 refreshControl={
                     <RefreshControl
@@ -808,6 +845,7 @@ const styles = StyleSheet.create({
     headerWrapper: {
         overflow: 'hidden',
         zIndex: 10,
+        marginBottom: Spacing.xs,
         borderBottomLeftRadius: BorderRadius.xxxl,
         borderBottomRightRadius: BorderRadius.xxxl,
         shadowColor: Colors.primary,
@@ -815,10 +853,8 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.3,
         shadowRadius: 12,
         elevation: 12,
-        minHeight: 200,
     },
     headerGradient: {
-        flex: 1,
         paddingHorizontal: Spacing.xl,
         paddingTop: Spacing.lg,
         paddingBottom: Spacing.lg,
@@ -892,7 +928,7 @@ const styles = StyleSheet.create({
         marginBottom: 2,
     },
     userName: {
-        fontSize: Typography.fontSize.xl,
+        fontSize: Typography.fontSize.lg,
         color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
         letterSpacing: 0.3,
@@ -938,6 +974,7 @@ const styles = StyleSheet.create({
     },
     searchContainer: {
         zIndex: 1,
+        overflow: 'hidden',
     },
     modernSearchBar: {
         backgroundColor: Colors.white,
@@ -992,6 +1029,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
+        paddingTop: Spacing.sm,
         paddingBottom: Spacing.xxl + 80,
     },
     statsSection: {

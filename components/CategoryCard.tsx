@@ -2,15 +2,14 @@
  * Composant CategoryCard - Carte catégorie avec icône
  */
 
-import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { CategoryIcon } from './CategoryIcon';
 
 interface CategoryCardProps {
     name: string;
-    icon: keyof typeof Ionicons.glyphMap;
+    icon: unknown;
     gradient: readonly [string, string, ...string[]];
     count?: number;
     onPress?: () => void;
@@ -19,7 +18,6 @@ interface CategoryCardProps {
 export const CategoryCard: React.FC<CategoryCardProps> = ({
     name,
     icon,
-    gradient,
     count,
     onPress,
 }) => {
@@ -29,17 +27,17 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
             onPress={onPress}
             activeOpacity={0.8}
         >
-            <LinearGradient
-                colors={gradient as any}
-                style={styles.gradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-            >
-                <Ionicons name={icon} size={28} color={Colors.white} />
+            <View style={styles.iconContainer}>
+                <CategoryIcon
+                    icon={icon}
+                    size={54}
+                    textStyle={styles.iconText}
+                    imageStyle={styles.iconImage}
+                />
                 {count !== undefined && count > 0 && (
                     <Text style={styles.count}>{count}</Text>
                 )}
-            </LinearGradient>
+            </View>
             <Text style={styles.name} numberOfLines={1}>{name}</Text>
         </TouchableOpacity>
     );
@@ -51,13 +49,19 @@ const styles = StyleSheet.create({
         width: 85,
         marginRight: Spacing.md,
     },
-    gradient: {
+    iconText: {
+        fontSize: 28,
+        color: Colors.white,
+    },
+    iconImage: {
+        borderRadius: 17,
+    },
+    iconContainer: {
         width: 72,
         height: 72,
-        borderRadius: BorderRadius.xl,
+        borderRadius: BorderRadius.full,
         alignItems: 'center',
         justifyContent: 'center',
-        ...Shadows.md,
         marginBottom: Spacing.sm,
         position: 'relative',
     },

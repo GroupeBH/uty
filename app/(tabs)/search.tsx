@@ -3,6 +3,7 @@
  */
 
 import { ProductCard } from '@/components/ProductCard';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,18 +24,6 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-
-const resolveCategoryIcon = (name?: string, backendIcon?: string): keyof typeof Ionicons.glyphMap => {
-    const value = `${name || ''} ${backendIcon || ''}`.toLowerCase();
-    if (value.includes('elect') || value.includes('tech') || value.includes('digit')) return 'hardware-chip-outline';
-    if (value.includes('mode') || value.includes('fashion')) return 'shirt-outline';
-    if (value.includes('maison') || value.includes('home')) return 'home-outline';
-    if (value.includes('sport')) return 'football-outline';
-    if (value.includes('livre') || value.includes('book')) return 'book-outline';
-    if (value.includes('beaute') || value.includes('beauty')) return 'sparkles-outline';
-    if (value.includes('auto') || value.includes('vehic')) return 'car-sport-outline';
-    return 'grid-outline';
-};
 
 const normalizeId = (value: unknown): string | null => {
     if (!value) return null;
@@ -83,10 +72,10 @@ export default function SearchScreen() {
             .map((item: any, index: number) => ({
                 id: String(item._id),
                 label: item.name || `Categorie ${index + 1}`,
-                icon: resolveCategoryIcon(item.name, item.icon),
+                icon: item.icon,
             }));
 
-        return [{ id: 'all', label: 'Tout', icon: 'apps-outline' as const }, ...apiCategories];
+        return [{ id: 'all', label: 'Tout', icon: null }, ...apiCategories];
     }, [categoriesData]);
 
     const filteredData = useMemo(() => {
@@ -113,9 +102,11 @@ export default function SearchScreen() {
         });
     }, [announcements, category, searchQuery]);
 
-    const activeCategoryLabel = useMemo(() => {
-        if (!category) return 'Toutes les categories';
-        return categories.find((entry) => entry.id === category)?.label || 'Categorie';
+    const activeCategoryMeta = useMemo(() => {
+        if (!category) return { icon: null, label: 'Toutes les categories' };
+        const found = categories.find((entry) => entry.id === category);
+        if (!found) return { icon: null, label: 'Categorie' };
+        return { icon: found.icon, label: found.label };
     }, [categories, category]);
 
     const handleAddToCart = (product: Announcement) => {
@@ -207,8 +198,17 @@ export default function SearchScreen() {
                     </View>
                     <View style={[styles.metaPill, styles.metaPillSoft]}>
                         <Ionicons name="funnel-outline" size={14} color={Colors.gray700} />
+                        <View style={styles.metaCategoryWrap}>
+                            <CategoryIcon
+                                icon={activeCategoryMeta.icon}
+                                size={13}
+                                fallback="🏷️"
+                                textStyle={styles.metaCategoryIconText}
+                                imageStyle={styles.metaCategoryIconImage}
+                            />
+                        </View>
                         <Text style={styles.metaPillSoftText} numberOfLines={1}>
-                            {activeCategoryLabel}
+                            {activeCategoryMeta.label}
                         </Text>
                     </View>
                     {category ? (
@@ -235,11 +235,24 @@ export default function SearchScreen() {
                                 onPress={() => setCategory(cat.id === 'all' ? undefined : cat.id)}
                             >
                                 <View style={[styles.categoryIconWrap, isSelected && styles.categoryIconWrapActive]}>
-                                    <Ionicons
-                                        name={cat.icon as any}
-                                        size={15}
-                                        color={isSelected ? Colors.white : Colors.primary}
-                                    />
+                                    {cat.id === 'all' ? (
+                                        <Ionicons
+                                            name="apps-outline"
+                                            size={14}
+                                            color={isSelected ? Colors.white : Colors.primary}
+                                        />
+                                    ) : (
+                                        <CategoryIcon
+                                            icon={cat.icon}
+                                            size={14}
+                                            fallback="🏷️"
+                                            textStyle={[
+                                                styles.categoryIconText,
+                                                isSelected && styles.categoryIconTextActive,
+                                            ]}
+                                            imageStyle={styles.categoryIconImage}
+                                        />
+                                    )}
                                 </View>
                                 <Text style={[styles.categoryText, isSelected && styles.categoryTextActive]}>
                                     {cat.label}
@@ -434,6 +447,16 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
     },
+    metaCategoryWrap: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    metaCategoryIconText: {
+        fontSize: 13,
+    },
+    metaCategoryIconImage: {
+        borderRadius: 7,
+    },
     resetCategoryBtn: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -485,6 +508,16 @@ const styles = StyleSheet.create({
     },
     categoryIconWrapActive: {
         backgroundColor: Colors.white + '2B',
+    },
+    categoryIconText: {
+        fontSize: 12,
+        color: Colors.primary,
+    },
+    categoryIconTextActive: {
+        color: Colors.white,
+    },
+    categoryIconImage: {
+        borderRadius: 7,
     },
     categoryText: {
         fontSize: Typography.fontSize.xs,

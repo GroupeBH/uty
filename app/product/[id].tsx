@@ -14,6 +14,11 @@ import {
     useCreateCommentMutation,
     useGetCommentsForAnnouncementQuery,
 } from '@/store/api/commentsApi';
+import {
+    useCreateConversationMutation,
+    useSendMessageMutation as useSendChatMessageMutation,
+} from '@/store/api/messagingApi';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,6 +41,59 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const SENSITIVE_ATTRIBUTE_KEYWORDS = [
+    'password',
+    'token',
+    'secret',
+    'otp',
+    'email',
+    'phone',
+    'mobile',
+    'whatsapp',
+    'credential',
+    'refresh',
+    'access',
+    'session',
+    'provider',
+    'facebookid',
+    'googleid',
+    'fcm',
+    'apikey',
+];
+
+const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+const toSafeArray = (value: unknown): string[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((entry) => (typeof entry === 'string' ? normalizeWhitespace(entry) : ''))
+        .filter(Boolean);
+};
+
+const anonymizeAddress = (value: string): string => {
+    const cleaned = normalizeWhitespace(value);
+    if (!cleaned) return '';
+    return cleaned.replace(/\b\d+[A-Za-z\-\/]*\b/g, '***');
+};
+
+const isSensitiveAttributeKey = (key: string): boolean => {
+    const normalized = key
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .toLowerCase()
+        .trim();
+    const compact = normalized.replace(/[\s_\-]/g, '');
+    if (
+        compact === 'id' ||
+        normalized.endsWith('_id') ||
+        ['userid', 'sellerid', 'shopid', 'categoryid', 'currencyid', 'announcementid', 'commentid'].includes(
+            compact,
+        )
+    ) {
+        return true;
+    }
+    return SENSITIVE_ATTRIBUTE_KEYWORDS.some((keyword) => compact.includes(keyword));
+};
 
 export default function ProductDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -66,6 +124,8 @@ export default function ProductDetailScreen() {
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
+    const [createConversation, { isLoading: isCreatingConversation }] = useCreateConversationMutation();
+    const [sendChatMessage, { isLoading: isSendingChatMessage }] = useSendChatMessageMutation();
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -80,6 +140,7 @@ export default function ProductDetailScreen() {
     
     // Contact form states
     const [message, setMessage] = useState('');
+    const isContactSubmitting = isCreatingConversation || isSendingChatMessage;
     const [alertState, setAlertState] = useState<{
         visible: boolean;
         title: string;
@@ -176,11 +237,36 @@ export default function ProductDetailScreen() {
             return false;
         });
     }, [currentUserId, product?.likes]);
+    const locationPreview = toSafeArray(product?.location)[0];
     const infoChips = [
-        product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
-        product?.location?.[0] ? { icon: 'location-outline', label: product.location[0] } : null,
-        product?.quantity ? { icon: 'layers-outline', label: `${product.quantity} en stock` } : null,
-    ].filter(Boolean) as { icon: string; label: string }[];
+        product?.category?.name
+            ? {
+                icon: 'pricetag-outline',
+                label: product.category.name,
+                categoryIcon: product.category.icon,
+            }
+            : null,
+        locationPreview ? { icon: 'location-outline', label: locationPreview } : null,
+        typeof product?.quantity === 'number'
+            ? { icon: 'layers-outline', label: `${product.quantity} en stock` }
+            : null,
+        product?.isSold ? { icon: 'checkmark-done-outline', label: 'Annonce vendue' } : null,
+    ].filter(Boolean) as { icon: string; label: string; categoryIcon?: unknown }[];
+
+    const formatDateTime = (value?: string) => {
+        if (!value) return '';
+        try {
+            return new Date(value).toLocaleString('fr-FR', {
+                day: '2-digit',
+                month: 'short',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+            });
+        } catch {
+            return '';
+        }
+    };
     const normalizeObject = (value: any): Record<string, any> => {
         if (!value) return {};
         if (value instanceof Map) {
@@ -203,10 +289,15 @@ export default function ProductDetailScreen() {
     };
     const formatAttributeValue = (value: any): string => {
         if (value === null || value === undefined) return '';
-        if (Array.isArray(value)) return value.join(', ');
+        if (Array.isArray(value)) {
+            return value
+                .map((entry) => (typeof entry === 'string' ? normalizeWhitespace(entry) : String(entry)))
+                .filter(Boolean)
+                .join(', ');
+        }
         if (typeof value === 'boolean') return value ? 'Oui' : 'Non';
         if (typeof value === 'number') return value.toString();
-        if (typeof value === 'string') return value;
+        if (typeof value === 'string') return normalizeWhitespace(value);
         if (typeof value === 'object') {
             if (value.minimum !== undefined && value.maximum !== undefined) {
                 return `${value.minimum} - ${value.maximum}`;
@@ -229,6 +320,7 @@ export default function ProductDetailScreen() {
         const specifications = normalizeObject(product.specifications);
         const merged = { ...specifications, ...attributes };
         return Object.entries(merged)
+            .filter(([key]) => !isSensitiveAttributeKey(key))
             .map(([key, value]) => {
                 const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
                 const display = formatAttributeValue(value);
@@ -236,6 +328,181 @@ export default function ProductDetailScreen() {
             })
             .filter((item) => item.value && item.value.toString().length > 0);
     }, [product]);
+
+    const publicLocations = React.useMemo(() => toSafeArray(product?.location), [product?.location]);
+    const publicAddresses = React.useMemo(
+        () => toSafeArray(product?.address).map(anonymizeAddress).filter(Boolean),
+        [product?.address],
+    );
+    const pickupLocationLabel = React.useMemo(() => {
+        const pickupLocation = product?.pickupLocation;
+        if (!pickupLocation) return '';
+
+        const maskedAddress =
+            typeof pickupLocation.address === 'string' ? anonymizeAddress(pickupLocation.address) : '';
+        if (maskedAddress) {
+            return maskedAddress;
+        }
+
+        if (Array.isArray(pickupLocation.coordinates) && pickupLocation.coordinates.length >= 2) {
+            const longitude = Number(pickupLocation.coordinates[0]);
+            const latitude = Number(pickupLocation.coordinates[1]);
+            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+                return `Lat ${latitude.toFixed(2)}, Lng ${longitude.toFixed(2)} (approx.)`;
+            }
+        }
+
+        return '';
+    }, [product?.pickupLocation]);
+    const detailRows = React.useMemo(() => {
+        if (!product) return [];
+
+        const rows: { icon: string; label: string; value: string; categoryIcon?: unknown }[] = [];
+        rows.push({
+            icon: product.isSold ? 'checkmark-circle-outline' : 'hourglass-outline',
+            label: 'Statut',
+            value: product.isSold ? 'Vendu' : 'Disponible',
+        });
+
+        if (typeof product.quantity === 'number') {
+            rows.push({
+                icon: 'cube-outline',
+                label: 'Quantite disponible',
+                value: `${product.quantity}`,
+            });
+        }
+
+        rows.push({
+            icon: 'bicycle-outline',
+            label: 'Livraison',
+            value:
+                product.isDeliverable === undefined
+                    ? 'Non precise'
+                    : product.isDeliverable
+                        ? 'Disponible'
+                        : 'Non disponible',
+        });
+
+        if (Array.isArray(product.weightClass) && product.weightClass.length > 0) {
+            rows.push({
+                icon: 'barbell-outline',
+                label: 'Classe de poids',
+                value: product.weightClass.join(', '),
+            });
+        }
+
+        if (publicLocations.length > 0) {
+            rows.push({
+                icon: 'location-outline',
+                label: 'Localisation',
+                value: publicLocations.join(' / '),
+            });
+        }
+
+        if (publicAddresses.length > 0) {
+            rows.push({
+                icon: 'home-outline',
+                label: 'Adresse (masquee)',
+                value: publicAddresses.join(' / '),
+            });
+        }
+
+        if (pickupLocationLabel) {
+            rows.push({
+                icon: 'navigate-outline',
+                label: 'Point de retrait',
+                value: pickupLocationLabel,
+            });
+        }
+
+        if (typeof product.views === 'number') {
+            rows.push({
+                icon: 'eye-outline',
+                label: 'Vues',
+                value: `${product.views}`,
+            });
+        }
+
+        rows.push({
+            icon: 'heart-outline',
+            label: 'Likes',
+            value: `${likeCount}`,
+        });
+        rows.push({
+            icon: 'chatbubble-ellipses-outline',
+            label: 'Commentaires',
+            value: `${comments.length}`,
+        });
+
+        if (product?.category?.name) {
+            rows.push({
+                icon: 'pricetag-outline',
+                label: 'Categorie',
+                value: product.category.name,
+                categoryIcon: product.category.icon,
+            });
+        }
+
+        if (typeof product.shop === 'object' && product.shop?.name) {
+            rows.push({
+                icon: 'storefront-outline',
+                label: 'Boutique',
+                value: normalizeWhitespace(product.shop.name),
+            });
+        }
+
+        const createdAt = formatDateTime(product.createdAt);
+        if (createdAt) {
+            rows.push({
+                icon: 'calendar-outline',
+                label: 'Publie le',
+                value: createdAt,
+            });
+        }
+
+        const updatedAt = formatDateTime(product.updatedAt);
+        if (updatedAt) {
+            rows.push({
+                icon: 'time-outline',
+                label: 'Mise a jour',
+                value: updatedAt,
+            });
+        }
+
+        return rows;
+    }, [comments.length, likeCount, pickupLocationLabel, product, publicAddresses, publicLocations]);
+    const sellerIdentity = React.useMemo(() => {
+        const seller = typeof product?.user === 'object' ? (product.user as any) : undefined;
+        const firstName =
+            typeof seller?.firstName === 'string' ? normalizeWhitespace(seller.firstName) : '';
+        const lastName = typeof seller?.lastName === 'string' ? normalizeWhitespace(seller.lastName) : '';
+        const username =
+            typeof seller?.username === 'string' ? normalizeWhitespace(seller.username) : '';
+        const lastInitial = lastName ? `${lastName.charAt(0).toUpperCase()}.` : '';
+        const displayName = firstName ? `${firstName} ${lastInitial}`.trim() : username || 'Vendeur';
+        const rating = typeof seller?.rating === 'number' ? seller.rating : null;
+        const avatar = typeof seller?.image === 'string' ? seller.image.trim() : '';
+        const shopName =
+            typeof product?.shop === 'object' && product.shop?.name
+                ? normalizeWhitespace(product.shop.name)
+                : '';
+
+        return {
+            avatar,
+            displayName,
+            rating,
+            subtitle: shopName ? `Boutique: ${shopName}` : 'Contact via messagerie securisee',
+        };
+    }, [product?.shop, product?.user]);
+    const sellerUserId = React.useMemo(() => {
+        if (!product?.user) return '';
+        if (typeof product.user === 'string') return product.user;
+
+        const asObject = product.user as any;
+        if (typeof asObject._id === 'string') return asObject._id;
+        if (typeof asObject.id === 'string') return asObject.id;
+        return '';
+    }, [product?.user]);
 
     React.useEffect(() => {
         if (remainingStock === undefined) return;
@@ -303,19 +570,47 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const handleContactSeller = () => {
+    const handleContactSeller = async () => {
         if (!requireAuth('Vous devez être connecté pour contacter le vendeur')) {
             return;
         }
 
-        if (!message.trim()) {
+        const content = message.trim();
+        if (!content) {
             showAlert('Erreur', 'Veuillez entrer un message', 'warning');
             return;
         }
-        // TODO: Implémenter l'envoi du message
-        showAlert('Message envoye', 'Le vendeur a recu votre message', 'success');
-        setShowContactModal(false);
-        setMessage('');
+
+        if (!sellerUserId) {
+            showAlert('Erreur', 'Vendeur indisponible pour la messagerie.', 'error');
+            return;
+        }
+
+        if (currentUserId && sellerUserId === currentUserId) {
+            showAlert('Info', 'Vous ne pouvez pas vous envoyer un message.', 'info');
+            return;
+        }
+
+        try {
+            const conversation = await createConversation({
+                participantIds: [sellerUserId],
+            }).unwrap();
+
+            await sendChatMessage({
+                conversationId: conversation.id,
+                data: { content },
+            }).unwrap();
+
+            setShowContactModal(false);
+            setMessage('');
+            router.push(`/messages/${conversation.id}` as any);
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(error, "Impossible d'envoyer votre message."),
+                'error',
+            );
+        }
     };
 
     const handleSubmitReview = async () => {
@@ -537,7 +832,16 @@ export default function ProductDetailScreen() {
                         <View style={styles.infoChips}>
                             {infoChips.map((chip, index) => (
                                 <View key={`${chip.label}-${index}`} style={styles.infoChip}>
-                                    <Ionicons name={chip.icon as any} size={14} color={Colors.accent} />
+                                    {chip.categoryIcon ? (
+                                        <CategoryIcon
+                                            icon={chip.categoryIcon}
+                                            size={14}
+                                            textStyle={styles.infoChipEmoji}
+                                            imageStyle={styles.infoChipImage}
+                                        />
+                                    ) : (
+                                        <Ionicons name={chip.icon as any} size={14} color={Colors.accent} />
+                                    )}
                                     <Text style={styles.infoChipText}>{chip.label}</Text>
                                 </View>
                             ))}
@@ -670,25 +974,72 @@ export default function ProductDetailScreen() {
                         )}
                     </View>
 
-{/* Informations vendeur */}
+                    <View style={styles.section}>
+                        <Text style={styles.sectionTitle}>Details de l annonce</Text>
+                        <View style={styles.detailsList}>
+                            {detailRows.map((row, index) => (
+                                <View
+                                    key={`${row.label}-${index}`}
+                                    style={[
+                                        styles.detailRow,
+                                        index === detailRows.length - 1 && styles.detailRowLast,
+                                    ]}
+                                >
+                                    <View style={styles.detailIconWrap}>
+                                        {row.categoryIcon ? (
+                                            <CategoryIcon
+                                                icon={row.categoryIcon}
+                                                size={13}
+                                                textStyle={styles.detailEmoji}
+                                                imageStyle={styles.detailIconImage}
+                                            />
+                                        ) : (
+                                            <Ionicons name={row.icon as any} size={14} color={Colors.primary} />
+                                        )}
+                                    </View>
+                                    <View style={styles.detailTextWrap}>
+                                        <Text style={styles.detailLabel}>{row.label}</Text>
+                                        <Text style={styles.detailValue}>{row.value}</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+                        <View style={styles.securityHintCard}>
+                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
+                            <Text style={styles.securityHintText}>
+                                Certaines donnees sont masquees pour proteger le vendeur et le systeme.
+                            </Text>
+                        </View>
+                    </View>
+
+                    {/* Informations vendeur */}
                     <View style={styles.sellerSection}>
                         <Text style={styles.sectionTitle}>👤 Vendeur</Text>
                         <View style={styles.sellerCard}>
                             <View style={styles.sellerAvatar}>
-                                <Ionicons name="person" size={32} color={Colors.primary} />
+                                {sellerIdentity.avatar ? (
+                                    <Image source={{ uri: sellerIdentity.avatar }} style={styles.sellerAvatarImage} />
+                                ) : (
+                                    <Ionicons name="person" size={32} color={Colors.primary} />
+                                )}
                             </View>
                             <View style={styles.sellerInfo}>
-                                <Text style={styles.sellerName}>
-                                    {typeof product.user === 'object' && product.user?.firstName 
-                                        ? product?.user?.firstName 
-                                        : 'Anonyme'}
-                                </Text>
+                                <Text style={styles.sellerName}>{sellerIdentity.displayName}</Text>
+                                <Text style={styles.sellerSubtitle}>{sellerIdentity.subtitle}</Text>
                                 <View style={styles.sellerRating}>
-                                    <Ionicons name="star" size={14} color={Colors.accent} />
-                                    <Text style={styles.sellerRatingText}>4.8 (156 ventes)</Text>
+                                    <Ionicons
+                                        name={sellerIdentity.rating !== null ? 'star' : 'shield-checkmark-outline'}
+                                        size={14}
+                                        color={sellerIdentity.rating !== null ? Colors.accent : Colors.primary}
+                                    />
+                                    <Text style={styles.sellerRatingText}>
+                                        {sellerIdentity.rating !== null
+                                            ? `${sellerIdentity.rating.toFixed(1)} de moyenne`
+                                            : 'Coordonnees privees non exposees'}
+                                    </Text>
                                 </View>
                             </View>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 style={styles.contactSellerButton}
                                 onPress={() => {
                                     if (requireAuth('Vous devez être connecté pour contacter le vendeur')) {
@@ -699,6 +1050,9 @@ export default function ProductDetailScreen() {
                                 <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
                             </TouchableOpacity>
                         </View>
+                        <Text style={styles.sellerSecurityNote}>
+                            Echangez avec le vendeur uniquement via la messagerie integree.
+                        </Text>
                     </View>
 
                     {/* Avis clients */}
@@ -735,6 +1089,8 @@ export default function ProductDetailScreen() {
                                 {comments.map((comment) => {
                                     const commentUser =
                                         typeof comment.user === 'object' ? comment.user : undefined;
+                                    const commentRating =
+                                        typeof comment.rating === 'number' ? comment.rating : null;
                                     return (
                                         <View key={comment._id} style={styles.reviewCard}>
                                             <View style={styles.reviewCardTop}>
@@ -762,13 +1118,13 @@ export default function ProductDetailScreen() {
                                                         </Text>
                                                     </View>
                                                 </View>
-                                                {typeof comment.rating === 'number' && (
+                                                {commentRating !== null && (
                                                     <View style={styles.reviewStarsInline}>
                                                         {[1, 2, 3, 4, 5].map((star) => (
                                                             <Ionicons
                                                                 key={`${comment._id}-${star}`}
                                                                 name={
-                                                                    star <= comment.rating
+                                                                    star <= commentRating
                                                                         ? 'star'
                                                                         : 'star-outline'
                                                                 }
@@ -938,16 +1294,22 @@ export default function ProductDetailScreen() {
                                 textAlignVertical="top"
                             />
                             
-                            <TouchableOpacity 
-                                style={styles.sendMessageButton}
-                                onPress={handleContactSeller}
+                            <TouchableOpacity
+                                style={[
+                                    styles.sendMessageButton,
+                                    isContactSubmitting && styles.sendMessageButtonDisabled,
+                                ]}
+                                onPress={() => void handleContactSeller()}
+                                disabled={isContactSubmitting}
                             >
                                 <LinearGradient
                                     colors={Gradients.primary}
                                     style={styles.sendMessageGradient}
                                 >
                                     <Ionicons name="send" size={20} color={Colors.white} />
-                                    <Text style={styles.sendMessageText}>Envoyer le message</Text>
+                                    <Text style={styles.sendMessageText}>
+                                        {isContactSubmitting ? 'Envoi en cours...' : 'Envoyer le message'}
+                                    </Text>
                                 </LinearGradient>
                             </TouchableOpacity>
                         </View>
@@ -1234,6 +1596,12 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
     },
+    infoChipEmoji: {
+        fontSize: 14,
+    },
+    infoChipImage: {
+        borderRadius: 7,
+    },
     purchasePanel: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
@@ -1401,6 +1769,67 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         lineHeight: 24,
     },
+    detailsList: {
+        gap: Spacing.sm,
+    },
+    detailRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
+    },
+    detailRowLast: {
+        borderBottomWidth: 0,
+        paddingBottom: 0,
+    },
+    detailIconWrap: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: Colors.gray50,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 1,
+    },
+    detailEmoji: {
+        fontSize: 13,
+    },
+    detailIconImage: {
+        borderRadius: 6.5,
+    },
+    detailTextWrap: {
+        flex: 1,
+    },
+    detailLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    detailValue: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.bold,
+        marginTop: 2,
+    },
+    securityHintCard: {
+        marginTop: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary + '10',
+        borderWidth: 1,
+        borderColor: Colors.primary + '20',
+        padding: Spacing.md,
+    },
+    securityHintText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        lineHeight: 18,
+    },
     sellerSection: {
         marginBottom: Spacing.xl,
     },
@@ -1420,6 +1849,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: Spacing.md,
+        overflow: 'hidden',
+    },
+    sellerAvatarImage: {
+        width: '100%',
+        height: '100%',
     },
     sellerInfo: {
         flex: 1,
@@ -1428,6 +1862,11 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
+        marginBottom: Spacing.xs / 2,
+    },
+    sellerSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
         marginBottom: Spacing.xs / 2,
     },
     sellerRating: {
@@ -1447,6 +1886,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         ...Shadows.md,
+    },
+    sellerSecurityNote: {
+        marginTop: Spacing.sm,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        lineHeight: 18,
     },
     reviewsHeader: {
         flexDirection: 'row',
@@ -1768,6 +2213,9 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         ...Shadows.md,
+    },
+    sendMessageButtonDisabled: {
+        opacity: 0.7,
     },
     sendMessageGradient: {
         flexDirection: 'row',
