@@ -5,6 +5,7 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { MapPickerModal } from '@/components/MapPickerModal';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
@@ -734,6 +735,12 @@ export default function PublishScreen() {
                                                 }}
                                                 style={styles.breadcrumbItem}
                                             >
+                                                <CategoryIcon
+                                                    icon={cat.icon}
+                                                    size={14}
+                                                    textStyle={styles.breadcrumbIcon}
+                                                    imageStyle={styles.breadcrumbIconImage}
+                                                />
                                                 <Text style={styles.breadcrumbText}>{cat.name}</Text>
                                             </TouchableOpacity>
                                         </React.Fragment>
@@ -767,19 +774,13 @@ export default function PublishScreen() {
                                                 }
                                                 style={styles.categoryCardGradient}
                                             >
-                                                {category.icon ? (
-                                                    <Text style={styles.categoryIcon}>{category.icon}</Text>
-                                                ) : (
-                                                    <Ionicons
-                                                        name={category.isLeaf ? 'folder' : 'folder-open'}
-                                                        size={32}
-                                                        color={
-                                                            selectedLeafCategory?._id === category._id
-                                                                ? Colors.primary
-                                                                : Colors.textSecondary
-                                                        }
-                                                    />
-                                                )}
+                                                <CategoryIcon
+                                                    icon={category.icon}
+                                                    size={32}
+                                                    fallback={category.isLeaf ? '📦' : '📁'}
+                                                    textStyle={styles.categoryIcon}
+                                                    imageStyle={styles.categoryIconImage}
+                                                />
                                                 <Text
                                                     style={[
                                                         styles.categoryName,
@@ -813,9 +814,17 @@ export default function PublishScreen() {
                                     </View>
                                     <View style={styles.leafSelectedContent}>
                                         <Text style={styles.leafSelectedTitle}>Catégorie sélectionnée</Text>
-                                        <Text style={styles.leafSelectedSubtitle}>
-                                            {selectedLeafCategory.name}
-                                        </Text>
+                                        <View style={styles.leafSelectedCategoryRow}>
+                                            <CategoryIcon
+                                                icon={selectedLeafCategory.icon}
+                                                size={16}
+                                                textStyle={styles.leafSelectedCategoryIcon}
+                                                imageStyle={styles.leafSelectedCategoryImage}
+                                            />
+                                            <Text style={styles.leafSelectedSubtitle}>
+                                                {selectedLeafCategory.name}
+                                            </Text>
+                                        </View>
                                         <Text style={styles.leafSelectedHint}>
                                             Vous pouvez continuer vers l&apos;etape suivante.
                                         </Text>
@@ -1491,6 +1500,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: Spacing.xs / 2,
     },
+    breadcrumbIcon: {
+        fontSize: Typography.fontSize.sm,
+    },
+    breadcrumbIconImage: {
+        borderRadius: 7,
+    },
     breadcrumbText: {
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.semibold,
@@ -1525,6 +1540,10 @@ const styles = StyleSheet.create({
     },
     categoryIcon: {
         fontSize: 40,
+        marginBottom: Spacing.sm,
+    },
+    categoryIconImage: {
+        borderRadius: 16,
         marginBottom: Spacing.sm,
     },
     categoryName: {
@@ -1838,8 +1857,19 @@ const styles = StyleSheet.create({
     leafSelectedSubtitle: {
         fontSize: Typography.fontSize.sm,
         color: Colors.accent,
-        marginTop: Spacing.xs,
         fontWeight: Typography.fontWeight.semibold,
+    },
+    leafSelectedCategoryRow: {
+        marginTop: Spacing.xs,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+    },
+    leafSelectedCategoryIcon: {
+        fontSize: Typography.fontSize.sm,
+    },
+    leafSelectedCategoryImage: {
+        borderRadius: 8,
     },
     leafSelectedHint: {
         fontSize: Typography.fontSize.sm,

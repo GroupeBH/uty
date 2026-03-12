@@ -18,6 +18,7 @@ import {
     useCreateConversationMutation,
     useSendMessageMutation as useSendChatMessageMutation,
 } from '@/store/api/messagingApi';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -238,13 +239,19 @@ export default function ProductDetailScreen() {
     }, [currentUserId, product?.likes]);
     const locationPreview = toSafeArray(product?.location)[0];
     const infoChips = [
-        product?.category?.name ? { icon: 'pricetag-outline', label: product.category.name } : null,
+        product?.category?.name
+            ? {
+                icon: 'pricetag-outline',
+                label: product.category.name,
+                categoryIcon: product.category.icon,
+            }
+            : null,
         locationPreview ? { icon: 'location-outline', label: locationPreview } : null,
         typeof product?.quantity === 'number'
             ? { icon: 'layers-outline', label: `${product.quantity} en stock` }
             : null,
         product?.isSold ? { icon: 'checkmark-done-outline', label: 'Annonce vendue' } : null,
-    ].filter(Boolean) as { icon: string; label: string }[];
+    ].filter(Boolean) as { icon: string; label: string; categoryIcon?: unknown }[];
 
     const formatDateTime = (value?: string) => {
         if (!value) return '';
@@ -350,7 +357,7 @@ export default function ProductDetailScreen() {
     const detailRows = React.useMemo(() => {
         if (!product) return [];
 
-        const rows: { icon: string; label: string; value: string }[] = [];
+        const rows: { icon: string; label: string; value: string; categoryIcon?: unknown }[] = [];
         rows.push({
             icon: product.isSold ? 'checkmark-circle-outline' : 'hourglass-outline',
             label: 'Statut',
@@ -432,6 +439,7 @@ export default function ProductDetailScreen() {
                 icon: 'pricetag-outline',
                 label: 'Categorie',
                 value: product.category.name,
+                categoryIcon: product.category.icon,
             });
         }
 
@@ -824,7 +832,16 @@ export default function ProductDetailScreen() {
                         <View style={styles.infoChips}>
                             {infoChips.map((chip, index) => (
                                 <View key={`${chip.label}-${index}`} style={styles.infoChip}>
-                                    <Ionicons name={chip.icon as any} size={14} color={Colors.accent} />
+                                    {chip.categoryIcon ? (
+                                        <CategoryIcon
+                                            icon={chip.categoryIcon}
+                                            size={14}
+                                            textStyle={styles.infoChipEmoji}
+                                            imageStyle={styles.infoChipImage}
+                                        />
+                                    ) : (
+                                        <Ionicons name={chip.icon as any} size={14} color={Colors.accent} />
+                                    )}
                                     <Text style={styles.infoChipText}>{chip.label}</Text>
                                 </View>
                             ))}
@@ -969,7 +986,16 @@ export default function ProductDetailScreen() {
                                     ]}
                                 >
                                     <View style={styles.detailIconWrap}>
-                                        <Ionicons name={row.icon as any} size={14} color={Colors.primary} />
+                                        {row.categoryIcon ? (
+                                            <CategoryIcon
+                                                icon={row.categoryIcon}
+                                                size={13}
+                                                textStyle={styles.detailEmoji}
+                                                imageStyle={styles.detailIconImage}
+                                            />
+                                        ) : (
+                                            <Ionicons name={row.icon as any} size={14} color={Colors.primary} />
+                                        )}
                                     </View>
                                     <View style={styles.detailTextWrap}>
                                         <Text style={styles.detailLabel}>{row.label}</Text>
@@ -1570,6 +1596,12 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
     },
+    infoChipEmoji: {
+        fontSize: 14,
+    },
+    infoChipImage: {
+        borderRadius: 7,
+    },
     purchasePanel: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
@@ -1760,6 +1792,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginTop: 1,
+    },
+    detailEmoji: {
+        fontSize: 13,
+    },
+    detailIconImage: {
+        borderRadius: 6.5,
     },
     detailTextWrap: {
         flex: 1,

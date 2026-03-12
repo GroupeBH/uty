@@ -53,7 +53,7 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="search"
+        name="messages"
         options={{
           title: 'Messagerie',
           tabBarIcon: ({ color, focused }) => (
@@ -66,8 +66,8 @@ export default function TabLayout() {
         }}
         listeners={{
           tabPress: (event) => {
-            event.preventDefault();
             if (!isAuthenticated) {
+              event.preventDefault();
               router.push({
                 pathname: '/modal',
                 params: {
@@ -77,11 +77,14 @@ export default function TabLayout() {
                   source: 'tab_messages',
                 },
               });
-              return;
             }
-
-            router.push('/messages' as any);
           },
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          href: null,
         }}
       />
       <Tabs.Screen

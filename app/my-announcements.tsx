@@ -4,6 +4,7 @@
  */
 
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeleteAnnouncementMutation, useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { formatCurrencyAmount } from '@/utils/currency';
@@ -214,17 +215,21 @@ export default function MyAnnouncementsScreen() {
 
     const categories = React.useMemo(() => {
         if (!announcements) return [];
-        const map = new Map<string, string>();
+        const map = new Map<string, { name: string; icon: unknown }>();
         announcements.forEach((item: any) => {
             const categoryId =
                 typeof item.category === 'string' ? item.category : item.category?._id;
             const categoryName =
                 typeof item.category === 'string' ? 'Categorie' : item.category?.name;
+            const categoryIcon =
+                typeof item.category === 'string'
+                    ? undefined
+                    : item.category?.icon;
             if (categoryId && categoryName && !map.has(categoryId)) {
-                map.set(categoryId, categoryName);
+                map.set(categoryId, { name: categoryName, icon: categoryIcon });
             }
         });
-        return Array.from(map, ([id, name]) => ({ id, name }));
+        return Array.from(map, ([id, data]) => ({ id, ...data }));
     }, [announcements]);
 
     const filteredAnnouncements = React.useMemo(() => {
@@ -290,9 +295,17 @@ export default function MyAnnouncementsScreen() {
                     <Text style={styles.cardTitle} numberOfLines={2}>
                         {item.name}
                     </Text>
-                    <Text style={styles.cardCategory} numberOfLines={1}>
-                        {item.category?.name || 'Sans catégorie'}
-                    </Text>
+                    <View style={styles.cardCategoryRow}>
+                        <CategoryIcon
+                            icon={item.category?.icon}
+                            size={14}
+                            textStyle={styles.cardCategoryIcon}
+                            imageStyle={styles.cardCategoryIconImage}
+                        />
+                        <Text style={styles.cardCategory} numberOfLines={1}>
+                            {item.category?.name || 'Sans catégorie'}
+                        </Text>
+                    </View>
                     <View style={styles.cardFooter}>
                         <Text style={styles.cardPrice}>
                             {formatCurrencyAmount(item.price, item.currency)}
@@ -439,14 +452,25 @@ export default function MyAnnouncementsScreen() {
                                     ]}
                                     onPress={() => setSelectedCategoryId(category.id)}
                                 >
-                                    <Text
-                                        style={[
-                                            styles.filterChipText,
-                                            selectedCategoryId === category.id && styles.filterChipTextActive,
-                                        ]}
-                                    >
-                                        {category.name}
-                                    </Text>
+                                    <View style={styles.filterChipContent}>
+                                        <CategoryIcon
+                                            icon={category.icon}
+                                            size={14}
+                                            textStyle={[
+                                                styles.filterChipIcon,
+                                                selectedCategoryId === category.id && styles.filterChipIconActive,
+                                            ]}
+                                            imageStyle={styles.filterChipIconImage}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.filterChipText,
+                                                selectedCategoryId === category.id && styles.filterChipTextActive,
+                                            ]}
+                                        >
+                                            {category.name}
+                                        </Text>
+                                    </View>
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
@@ -724,7 +748,18 @@ const styles = StyleSheet.create({
     cardCategory: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
+    },
+    cardCategoryRow: {
         marginTop: Spacing.xs / 2,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+    },
+    cardCategoryIcon: {
+        fontSize: Typography.fontSize.sm,
+    },
+    cardCategoryIconImage: {
+        borderRadius: 7,
     },
     cardFooter: {
         flexDirection: 'row',
@@ -921,6 +956,20 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
         fontWeight: Typography.fontWeight.semibold,
+    },
+    filterChipContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+    },
+    filterChipIcon: {
+        fontSize: Typography.fontSize.sm,
+    },
+    filterChipIconImage: {
+        borderRadius: 7,
+    },
+    filterChipIconActive: {
+        color: Colors.white,
     },
     filterChipTextActive: {
         color: Colors.white,
