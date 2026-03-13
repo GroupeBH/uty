@@ -11,10 +11,14 @@ const hasPackage = (packageName: string): boolean => {
 
 export default ({ config }: ConfigContext): ExpoConfig => {
     const hasFirebaseApp = hasPackage('@react-native-firebase/app');
+    const hasGoogleSignin = hasPackage('@react-native-google-signin/google-signin');
     const androidGoogleServicesFile =
         process.env.GOOGLE_SERVICES_JSON?.trim() || './google-services.json';
     const iosGoogleServicesFile =
         process.env.GOOGLE_SERVICE_INFO_PLIST?.trim() || './GoogleService-Info.plist';
+    const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+    const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
+    const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim();
 
     const plugins: NonNullable<ExpoConfig['plugins']> = [
         'expo-router',
@@ -43,6 +47,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
 
     if (hasFirebaseApp) {
         plugins.push('@react-native-firebase/app');
+    }
+
+    if (hasGoogleSignin) {
+        if (googleIosUrlScheme) {
+            plugins.push([
+                '@react-native-google-signin/google-signin',
+                {
+                    iosUrlScheme: googleIosUrlScheme,
+                },
+            ]);
+        } else {
+            plugins.push('@react-native-google-signin/google-signin');
+        }
     }
 
     if (hasPackage('react-native-vision-camera')) {
@@ -107,6 +124,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             eas: {
                 projectId: '39639191-336f-463d-855c-f836f78be137',
             },
+            EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: googleWebClientId,
+            EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID: googleIosClientId,
+            EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME: googleIosUrlScheme,
         },
     };
 };

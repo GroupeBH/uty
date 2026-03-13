@@ -1,26 +1,44 @@
 {
   "project_info": {
-    "project_number": "814670285728",
-    "project_id": "uty-app-167bc",
-    "storage_bucket": "uty-app-167bc.firebasestorage.app"
+    "project_number": "456633127780",
+    "project_id": "uty-app-df237",
+    "storage_bucket": "uty-app-df237.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:814670285728:android:4d895f856d7a2f924ff2c5",
+        "mobilesdk_app_id": "1:456633127780:android:fd448c7d63244428052071",
         "android_client_info": {
           "package_name": "com.uty"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "456633127780-jgroomfbl0qloe48jb7u6j3m92r77d09.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.uty",
+            "certificate_hash": "cd6532e0fd6869f755d049975cb13822fbb6e427"
+          }
+        },
+        {
+          "client_id": "456633127780-m6aqa14bgnvv0eas5qo5us41n49lausq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
-          "current_key": "AIzaSyBTTg78toZbTirmSm4-qM5LF6zgQblrYTw"
+          "current_key": "AIzaSyAiG4KgpuwH_lrN91hEzMwqa3i13-ed_Lw"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "456633127780-m6aqa14bgnvv0eas5qo5us41n49lausq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }

@@ -16,6 +16,7 @@ export interface RegisterDto {
     preferredCategoryIds: string[];
     image?: string;
     pin: string;
+    googleRegistrationToken?: string;
 }
 
 export interface LoginDto {
@@ -23,10 +24,29 @@ export interface LoginDto {
     pin: string;
 }
 
+export interface GoogleMobileAuthDto {
+    idToken: string;
+}
+
 export interface AuthResponse {
     access_token: string;
     refresh_token: string;
 }
+
+export interface GoogleRegistrationRequiredResponse {
+    requiresRegistration: true;
+    message: string;
+    registrationToken: string;
+    profile: {
+        provider: 'google';
+        email?: string;
+        image?: string;
+        firstName: string;
+        lastName: string;
+    };
+}
+
+export type GoogleMobileAuthResponse = AuthResponse | GoogleRegistrationRequiredResponse;
 
 export interface User {
     _id: string;
@@ -73,6 +93,13 @@ export const authApi = baseApi.injectEndpoints({
                 body: dto,
             }),
         }),
+        googleMobile: builder.mutation<GoogleMobileAuthResponse, GoogleMobileAuthDto>({
+            query: (dto) => ({
+                url: '/auth/google/mobile',
+                method: 'POST',
+                body: dto,
+            }),
+        }),
         logout: builder.mutation<{ message: string }, void>({
             query: () => ({
                 url: '/auth/logout',
@@ -105,6 +132,7 @@ export const {
     useVerifyOtpMutation,
     useRegisterMutation,
     useLoginMutation,
+    useGoogleMobileMutation,
     useLogoutMutation,
     useGetProfileQuery,
     useRefreshTokenMutation,
