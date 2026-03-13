@@ -92,7 +92,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
         android: {
             package: 'com.uty',
-            versionCode: 29,
+            versionCode: 30,
             softwareKeyboardLayoutMode: 'resize',
             permissions: ['com.google.android.gms.permission.AD_ID'],
             ...(hasFirebaseApp ? { googleServicesFile: androidGoogleServicesFile } : {}),
