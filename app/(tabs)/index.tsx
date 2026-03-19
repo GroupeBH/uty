@@ -443,6 +443,23 @@ export default function HomeScreen() {
         router.push('/search');
     };
 
+    const handleQuickActionPress = React.useCallback(
+        (action: (typeof QUICK_ACTIONS)[number]) => {
+            if (action.route === '/my-announcements' && !isAuthenticated) {
+                requireAuth('Connectez-vous pour acceder a vos annonces.');
+                return;
+            }
+
+            if (action.route === '/profile' && !isAuthenticated) {
+                requireAuth('Connectez-vous pour acceder a vos favoris.');
+                return;
+            }
+
+            router.push(action.route as any);
+        },
+        [isAuthenticated, requireAuth, router],
+    );
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header moderne avec animations */}
@@ -695,7 +712,7 @@ export default function HomeScreen() {
                                 <TouchableOpacity
                                     key={action.id}
                                     style={styles.actionCard}
-                                    onPress={() => router.push(action.route as any)}
+                                    onPress={() => handleQuickActionPress(action)}
                                     accessibilityLabel={action.title}
                                     activeOpacity={0.7}
                                 >

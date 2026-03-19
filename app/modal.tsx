@@ -261,7 +261,17 @@ export default function AuthModal() {
         return '/(tabs)';
     };
 
+    const shouldGoHomeOnClose = () => {
+        const source = readParam(params.source).trim();
+        const returnUrl = readParam(params.returnUrl).trim();
+        return source.length > 0 || returnUrl.length > 0;
+    };
+
     const closeModal = () => {
+        if (shouldGoHomeOnClose()) {
+            router.replace('/(tabs)' as any);
+            return;
+        }
         router.back();
     };
 
@@ -462,6 +472,14 @@ export default function AuthModal() {
     const handleContinueToPin = () => {
         if (!validatePhone()) return;
         setLoginStep('pin');
+    };
+
+    const handleForgotPin = () => {
+        if (isBusy) return;
+        router.push({
+            pathname: '/forgot-pin',
+            params: phone.trim() ? { phone: phone.trim() } : undefined,
+        });
     };
 
     const handleLogin = async () => {
@@ -1080,6 +1098,9 @@ export default function AuthModal() {
                                             <Ionicons name="information-circle-outline" size={14} color={Colors.gray500} />
                                             <Text style={styles.pinHintText}>Le PIN contient exactement 4 chiffres</Text>
                                         </View>
+                                        <TouchableOpacity onPress={handleForgotPin} style={styles.forgotPinButton}>
+                                            <Text style={styles.forgotPinText}>PIN oublie ? Reinitialiser</Text>
+                                        </TouchableOpacity>
                                     </View>
                                 )}
 
@@ -1710,6 +1731,15 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
         fontWeight: Typography.fontWeight.medium,
+    },
+    forgotPinButton: {
+        alignSelf: 'flex-end',
+        paddingVertical: 2,
+    },
+    forgotPinText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     otpRow: {
         flexDirection: 'row',
