@@ -1,4 +1,6 @@
 import { ConfigContext, ExpoConfig } from 'expo/config';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const hasPackage = (packageName: string): boolean => {
     try {
@@ -9,6 +11,33 @@ const hasPackage = (packageName: string): boolean => {
     }
 };
 
+const readWebClientIdFromGoogleServices = (filePath: string): string | undefined => {
+    try {
+        const resolvedPath = path.resolve(process.cwd(), filePath);
+        const raw = fs.readFileSync(resolvedPath, 'utf-8');
+        const parsed = JSON.parse(raw) as {
+            client?: Array<{
+                oauth_client?: Array<{
+                    client_id?: string;
+                    client_type?: number;
+                }>;
+            }>;
+        };
+
+        for (const client of parsed.client ?? []) {
+            for (const oauthClient of client.oauth_client ?? []) {
+                if (oauthClient.client_type === 3 && oauthClient.client_id?.trim()) {
+                    return oauthClient.client_id.trim();
+                }
+            }
+        }
+    } catch {
+        return undefined;
+    }
+
+    return undefined;
+};
+
 export default ({ config }: ConfigContext): ExpoConfig => {
     const hasFirebaseApp = hasPackage('@react-native-firebase/app');
     const hasGoogleSignin = hasPackage('@react-native-google-signin/google-signin');
@@ -16,7 +45,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         process.env.GOOGLE_SERVICES_JSON?.trim() || './google-services.json';
     const iosGoogleServicesFile =
         process.env.GOOGLE_SERVICE_INFO_PLIST?.trim() || './GoogleService-Info.plist';
-    const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim();
+    const googleWebClientId =
+        process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() ||
+        readWebClientIdFromGoogleServices(androidGoogleServicesFile);
     const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
     const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim();
 
@@ -92,7 +123,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
         android: {
             package: 'com.uty',
-            versionCode: 31,
+            versionCode: 32,
             softwareKeyboardLayoutMode: 'resize',
             permissions: ['com.google.android.gms.permission.AD_ID'],
             ...(hasFirebaseApp ? { googleServicesFile: androidGoogleServicesFile } : {}),

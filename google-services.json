@@ -22,6 +22,14 @@
           }
         },
         {
+          "client_id": "456633127780-ju4sfkutid1knn83ja8t63bgp2587a7d.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.uty",
+            "certificate_hash": "cb128174585a509dafd55d2748e3755442549162"
+          }
+        },
+        {
           "client_id": "456633127780-m6aqa14bgnvv0eas5qo5us41n49lausq.apps.googleusercontent.com",
           "client_type": 3
         }
@@ -37,6 +45,14 @@
             {
               "client_id": "456633127780-m6aqa14bgnvv0eas5qo5us41n49lausq.apps.googleusercontent.com",
               "client_type": 3
+            },
+            {
+              "client_id": "456633127780-f5ejqoqsr5m33j23cuaa4efts6o5j4t2.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.gbh.uty",
+                "app_store_id": "6760828664"
+              }
             }
           ]
         }
