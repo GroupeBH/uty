@@ -167,7 +167,7 @@ const QUICK_ACTIONS = [
     { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
     { id: '2', title: 'Mes annonces', icon: 'list-outline', gradient: Gradients.primary, route: '/my-announcements' },
     { id: '3', title: 'Ma boutique', icon: 'storefront-outline', gradient: Gradients.cool, route: '/my-shop' },
-    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
+    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/favorites' },
 ];
 const SEARCH_HIDE_THRESHOLD = 64;
 const SEARCH_SHOW_THRESHOLD = 18;
@@ -450,7 +450,7 @@ export default function HomeScreen() {
                 return;
             }
 
-            if (action.route === '/profile' && !isAuthenticated) {
+            if (action.route === '/favorites' && !isAuthenticated) {
                 requireAuth('Connectez-vous pour acceder a vos favoris.');
                 return;
             }

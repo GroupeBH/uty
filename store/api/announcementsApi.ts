@@ -29,6 +29,21 @@ export interface UpdateAnnouncementDto {
     weightClass?: string[];
 }
 
+export interface AnnouncementViewByUserRow {
+    userId: string;
+    username?: string;
+    verifiedPhone?: string;
+    count: number;
+    lastViewedAt?: string;
+}
+
+export interface AnnouncementViewsByUserResponse {
+    announcementId: string;
+    totalViews: number;
+    uniqueViewers: number;
+    viewsByUser: AnnouncementViewByUserRow[];
+}
+
 export const announcementsApi = baseApi.injectEndpoints({
     overrideExisting: true,
     endpoints: (builder) => ({
@@ -44,6 +59,10 @@ export const announcementsApi = baseApi.injectEndpoints({
         }),
         getAnnouncementById: builder.query<Announcement, string>({
             query: (id) => `/announcements/${id}`,
+            providesTags: (result, error, id) => [{ type: 'Announcement', id }],
+        }),
+        getAnnouncementByIdWithTrackedView: builder.query<Announcement, string>({
+            query: (id) => `/announcements/${id}/view`,
             providesTags: (result, error, id) => [{ type: 'Announcement', id }],
         }),
         createAnnouncement: builder.mutation<Announcement, FormData>({
@@ -89,15 +108,32 @@ export const announcementsApi = baseApi.injectEndpoints({
                       ]
                     : ['Announcement'],
         }),
+        getMyFavorites: builder.query<Announcement[], void>({
+            query: () => '/announcements/favorites/me',
+            providesTags: (result) =>
+                result
+                    ? [
+                          'Announcement',
+                          ...result.map((item) => ({ type: 'Announcement' as const, id: item._id })),
+                      ]
+                    : ['Announcement'],
+        }),
+        getAnnouncementViewsByUser: builder.query<AnnouncementViewsByUserResponse, string>({
+            query: (id) => `/announcements/${id}/views/by-user`,
+            providesTags: (result, error, id) => [{ type: 'Announcement', id }],
+        }),
     }),
 });
 
 export const {
     useGetAnnouncementsQuery,
     useGetAnnouncementByIdQuery,
+    useGetAnnouncementByIdWithTrackedViewQuery,
     useCreateAnnouncementMutation,
     useUpdateAnnouncementMutation,
     useDeleteAnnouncementMutation,
     useToggleLikeMutation,
     useGetMyAnnouncementsQuery,
+    useGetMyFavoritesQuery,
+    useGetAnnouncementViewsByUserQuery,
 } = announcementsApi;
