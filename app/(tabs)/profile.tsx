@@ -8,7 +8,7 @@ import { CustomAlert } from '@/components/ui/CustomAlert';
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
+import { useGetMyAnnouncementsQuery, useGetMyFavoritesQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
 import { useGetMyShopQuery } from '@/store/api/shopsApi';
 import { Ionicons } from '@expo/vector-icons';
@@ -30,6 +30,9 @@ export default function ProfileScreen() {
     const { user, logout, isLoading, isAuthenticated } = useAuth();
     const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
     const { data: announcements } = useGetMyAnnouncementsQuery(undefined, {
+        skip: !isAuthenticated,
+    });
+    const { data: favorites } = useGetMyFavoritesQuery(undefined, {
         skip: !isAuthenticated,
     });
     const { data: orders } = useGetOrdersQuery(undefined, {
@@ -98,11 +101,11 @@ export default function ProfileScreen() {
         },
         {
             label: 'Favoris',
-            value: 0, // TODO: Récupérer depuis l'API
+            value: favorites?.length || 0,
             icon: 'heart-outline',
             color: Colors.error,
             gradient: Gradients.warm,
-            onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
+            onPress: () => router.push('/favorites'),
         },
     ];
 
@@ -599,4 +602,3 @@ const styles = StyleSheet.create({
         marginTop: Spacing.md,
     },
 });
-

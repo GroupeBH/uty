@@ -69,7 +69,14 @@ export default function SettingsScreen() {
                     label: 'Changer le code PIN',
                     subtitle: 'Modifier votre code de sécurité',
                     gradient: Gradients.accent,
-                    onPress: showComingSoon,
+                    onPress: () => router.push('/change-pin'),
+                },
+                {
+                    icon: 'help-circle-outline',
+                    label: 'PIN oublie',
+                    subtitle: 'Reinitialiser avec OTP',
+                    gradient: Gradients.cool,
+                    onPress: () => router.push('/forgot-pin'),
                 },
             ],
         },
@@ -320,4 +327,3 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
     },
 });
-

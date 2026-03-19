@@ -1,4 +1,4 @@
-import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { storage } from '@/utils/storage';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import {
+    Animated,
     StyleSheet,
     Text,
     TouchableOpacity,
@@ -16,11 +17,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 type OnboardingStep = 0 | 1 | 2;
 type AppSpace = 'client' | 'seller' | 'delivery-persons';
 
-const BLUE_CTA = '#4B73E6';
-const YELLOW_CTA = '#F8C527';
-const BG_TOP = '#0A1230';
-const BG_BOTTOM = '#050A1D';
-
 const SPACE_ROUTES: Record<AppSpace, string> = {
     client: '/(tabs)',
     seller: '/seller',
@@ -29,18 +25,25 @@ const SPACE_ROUTES: Record<AppSpace, string> = {
 
 const SLIDES = [
     {
-        titlePrefix: 'Tout ce dont vous avez besoin, ',
-        titleHighlight: 'livre chez vous',
+        badge: 'Acheter simplement',
+        title: 'Commandez tout ce dont vous avez besoin',
         subtitle:
-            "Decouvrez des millions de produits et profitez d'une livraison ultra-rapide.",
+            'Parcourez les annonces locales, comparez les offres et passez commande en quelques secondes.',
+        primaryIcon: 'bag-handle-outline' as const,
+        secondaryIcon: 'card-outline' as const,
     },
     {
-        titlePrefix: "Gagnez de l'argent en livrant ou ",
-        titleHighlight: 'boostez vos ventes',
+        badge: 'Vendre et livrer',
+        title: 'Developpez votre activite avec UTY',
         subtitle:
-            'Rejoignez notre reseau de partenaires dynamiques. Coursier ou commercant, nous vous aidons a grandir.',
+            'Vendeur ou livreur, suivez vos performances, gerez vos operations et augmentez vos revenus.',
+        primaryIcon: 'storefront-outline' as const,
+        secondaryIcon: 'bicycle-outline' as const,
     },
 ] as const;
+
+const BG_TOP = '#EAF1FF';
+const BG_BOTTOM = '#F8FAFF';
 
 export default function OnboardingScreen() {
     const router = useRouter();
@@ -48,6 +51,7 @@ export default function OnboardingScreen() {
     const [step, setStep] = React.useState<OnboardingStep>(0);
     const [selectedSpace, setSelectedSpace] = React.useState<AppSpace>('client');
     const [isSubmitting, setIsSubmitting] = React.useState(false);
+    const transition = React.useRef(new Animated.Value(1)).current;
 
     const canChoosePrivilegedSpace = isAuthenticated;
 
@@ -56,6 +60,22 @@ export default function OnboardingScreen() {
             setSelectedSpace('client');
         }
     }, [isAuthenticated, selectedSpace]);
+
+    React.useEffect(() => {
+        Animated.sequence([
+            Animated.timing(transition, {
+                toValue: 0,
+                duration: 80,
+                useNativeDriver: true,
+            }),
+            Animated.spring(transition, {
+                toValue: 1,
+                friction: 8,
+                tension: 60,
+                useNativeDriver: true,
+            }),
+        ]).start();
+    }, [step, transition]);
 
     const onChooseSpace = (space: AppSpace) => {
         if (!canChoosePrivilegedSpace && space !== 'client') return;
@@ -77,209 +97,186 @@ export default function OnboardingScreen() {
 
     const onNext = async () => {
         if (step < 2) {
-            setStep((value) => (Math.min(2, value + 1) as OnboardingStep));
+            setStep((value) => Math.min(2, value + 1) as OnboardingStep);
             return;
         }
         await finishOnboarding();
     };
 
-    const onSkip = () => {
-        setStep(2);
-    };
-
+    const onSkip = () => setStep(2);
     const onBack = () => {
         if (step === 0) return;
-        setStep((value) => (Math.max(0, value - 1) as OnboardingStep));
+        setStep((value) => Math.max(0, value - 1) as OnboardingStep);
     };
 
-    const slideIndex = Math.min(step, 1);
-    const slide = SLIDES[slideIndex];
+    const slide = SLIDES[Math.min(step, 1)];
+    const ctaLabel = isSubmitting ? 'Chargement...' : step < 2 ? 'Suivant' : 'Commencer';
 
-    const ctaLabel =
-        isSubmitting ? 'Chargement...' : step < 2 ? 'Suivant' : 'Continuer';
+    const animatedStyle = {
+        opacity: transition,
+        transform: [
+            {
+                translateY: transition.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [14, 0],
+                }),
+            },
+            {
+                scale: transition.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.985, 1],
+                }),
+            },
+        ],
+    };
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
             <LinearGradient colors={[BG_TOP, BG_BOTTOM]} style={styles.background}>
-                <View style={styles.bgHaloOne} />
-                <View style={styles.bgHaloTwo} />
+                <View style={styles.bgShapeOne} />
+                <View style={styles.bgShapeTwo} />
+                <View style={styles.bgShapeThree} />
 
                 <View style={styles.header}>
-                    {step === 2 ? (
-                        <TouchableOpacity style={styles.backCircle} onPress={onBack}>
-                            <Ionicons name="arrow-back" size={20} color={Colors.white} />
-                        </TouchableOpacity>
-                    ) : (
-                        <View style={styles.backPlaceholder} />
-                    )}
+                    <TouchableOpacity
+                        style={[styles.iconButton, step === 0 && styles.iconButtonGhost]}
+                        onPress={onBack}
+                        disabled={step === 0}
+                    >
+                        <Ionicons
+                            name="arrow-back"
+                            size={20}
+                            color={step === 0 ? Colors.gray300 : Colors.primary}
+                        />
+                    </TouchableOpacity>
 
-                    {step === 2 ? (
-                        <Text style={styles.stepCounter}>ETAPE 3 SUR 3</Text>
-                    ) : (
-                        <View style={styles.backPlaceholder} />
-                    )}
+                    <View style={styles.progressBarTrack}>
+                        <View style={[styles.progressBarFill, { width: `${((step + 1) / 3) * 100}%` }]} />
+                    </View>
 
                     {step < 2 ? (
-                        <TouchableOpacity onPress={onSkip} style={styles.skipButton}>
-                            <Text style={styles.skipText}>PASSER</Text>
+                        <TouchableOpacity style={styles.skipButton} onPress={onSkip}>
+                            <Text style={styles.skipText}>Passer</Text>
                         </TouchableOpacity>
                     ) : (
-                        <View style={styles.backPlaceholder} />
+                        <View style={styles.skipPlaceholder} />
                     )}
                 </View>
 
-                {step < 2 ? (
-                    <View style={styles.slideWrapper}>
-                        <View style={styles.dotRowTop}>
-                            {[0, 1, 2].map((dot) => (
-                                <View
-                                    key={`top-dot-${dot}`}
-                                    style={[
-                                        styles.dot,
-                                        step === dot && styles.dotActive,
-                                    ]}
-                                />
-                            ))}
-                        </View>
-
-                        <View style={[styles.visualCard, step === 0 ? styles.visualCardCream : styles.visualCardBlue]}>
-                            {step === 0 ? (
-                                <>
-                                    <Ionicons name="person-outline" size={130} color="#2B3E5A" style={styles.mainVisualIcon} />
-                                    <View style={[styles.floatingBubble, styles.floatLeftYellow]}>
-                                        <Ionicons name="bag-outline" size={18} color="#0A1230" />
+                <Animated.View style={[styles.body, animatedStyle]}>
+                    {step < 2 ? (
+                        <>
+                            <View style={styles.slideCard}>
+                                <View style={styles.slideTop}>
+                                    <View style={styles.badgePill}>
+                                        <Text style={styles.badgeText}>{slide.badge}</Text>
                                     </View>
-                                    <View style={[styles.floatingBubble, styles.floatMidDark]}>
-                                        <Ionicons name="heart" size={18} color={BLUE_CTA} />
-                                    </View>
-                                    <View style={[styles.floatingBubble, styles.floatRightBlue]}>
-                                        <Ionicons name="card-outline" size={18} color={Colors.white} />
-                                    </View>
-                                </>
-                            ) : (
-                                <>
-                                    <Ionicons name="bicycle-outline" size={132} color={YELLOW_CTA} style={styles.mainVisualIcon} />
-                                    <View style={[styles.floatingBubble, styles.floatPack]}>
-                                        <Ionicons name="cube-outline" size={18} color="#0A1230" />
-                                    </View>
-                                    <View style={[styles.smallPoint, styles.pointA]} />
-                                    <View style={[styles.smallPoint, styles.pointB]} />
-                                    <View style={[styles.smallRing, styles.ringA]} />
-                                </>
-                            )}
-                        </View>
+                                </View>
 
-                        <Text style={styles.slideTitle}>
-                            {slide.titlePrefix}
-                            <Text style={styles.slideTitleHighlight}>{slide.titleHighlight}</Text>
-                        </Text>
-                        <Text style={styles.slideSubtitle}>{slide.subtitle}</Text>
+                                <View style={styles.heroVisual}>
+                                    <LinearGradient colors={Gradients.primary} style={styles.heroOrbMain}>
+                                        <Ionicons name={slide.primaryIcon} size={66} color={Colors.white} />
+                                    </LinearGradient>
+                                    <LinearGradient colors={Gradients.accent} style={styles.heroOrbSecondary}>
+                                        <Ionicons name={slide.secondaryIcon} size={30} color={Colors.primary} />
+                                    </LinearGradient>
+                                    <View style={styles.heroDotOne} />
+                                    <View style={styles.heroDotTwo} />
+                                </View>
 
-                        <View style={styles.dotRowBottom}>
-                            {[0, 1, 2].map((dot) => (
-                                <View
-                                    key={`bottom-dot-${dot}`}
-                                    style={[
-                                        styles.dot,
-                                        step === dot && styles.dotActive,
-                                    ]}
-                                />
-                            ))}
-                        </View>
+                                <Text style={styles.slideTitle}>{slide.title}</Text>
+                                <Text style={styles.slideSubtitle}>{slide.subtitle}</Text>
 
-                        <View style={styles.metaRow}>
-                            <View style={styles.metaItem}>
-                                <Ionicons name="shield-checkmark-outline" size={14} color={Colors.gray400} />
-                                <Text style={styles.metaText}>Securise</Text>
+                                <View style={styles.slideIndicators}>
+                                    {[0, 1, 2].map((dot) => (
+                                        <View
+                                            key={`step-dot-${dot}`}
+                                            style={[styles.stepDot, dot === step && styles.stepDotActive]}
+                                        />
+                                    ))}
+                                </View>
                             </View>
-                            <View style={styles.metaItem}>
-                                <Ionicons name="flash-outline" size={14} color={Colors.gray400} />
-                                <Text style={styles.metaText}>Rapide</Text>
+
+                            <View style={styles.miniStatsRow}>
+                                <MiniStat icon="shield-checkmark-outline" label="Paiement securise" />
+                                <MiniStat icon="flash-outline" label="Execution rapide" />
                             </View>
+                        </>
+                    ) : (
+                        <View style={styles.spaceSection}>
+                            <Text style={styles.spaceTitle}>Choisissez votre espace</Text>
+                            <Text style={styles.spaceSubtitle}>
+                                UTY s adapte a votre profil: acheteur, vendeur ou livreur.
+                            </Text>
+
+                            <SpaceChoiceCard
+                                title="Espace Client"
+                                subtitle="Acheter, comparer et suivre vos commandes."
+                                icon="bag-handle-outline"
+                                selected={selectedSpace === 'client'}
+                                disabled={false}
+                                onPress={() => onChooseSpace('client')}
+                            />
+
+                            <SpaceChoiceCard
+                                title="Espace Vendeur"
+                                subtitle="Publier vos annonces, gerer vos ventes et votre boutique."
+                                icon="storefront-outline"
+                                selected={selectedSpace === 'seller'}
+                                disabled={!canChoosePrivilegedSpace}
+                                onPress={() => onChooseSpace('seller')}
+                            />
+
+                            <SpaceChoiceCard
+                                title="Espace Livreur"
+                                subtitle="Accepter des courses et developper vos revenus."
+                                icon="bicycle-outline"
+                                selected={selectedSpace === 'delivery-persons'}
+                                disabled={!canChoosePrivilegedSpace}
+                                onPress={() => onChooseSpace('delivery-persons')}
+                            />
+
+                            {!isAuthenticated ? (
+                                <TouchableOpacity
+                                    style={styles.loginHint}
+                                    onPress={() => router.push('/(auth)/login')}
+                                >
+                                    <Ionicons name="log-in-outline" size={14} color={Colors.primary} />
+                                    <Text style={styles.loginHintText}>
+                                        Connectez-vous pour debloquer vendeur/livreur
+                                    </Text>
+                                </TouchableOpacity>
+                            ) : null}
                         </View>
-                    </View>
-                ) : (
-                    <View style={styles.spaceStepWrapper}>
-                        <Text style={styles.spaceTitle}>Choisissez votre espace</Text>
-                        <Text style={styles.spaceSubtitle}>
-                            Selectionnez le profil qui correspond le mieux a votre utilisation.
-                        </Text>
-
-                        <SpaceChoiceCard
-                            title="Je suis un Client"
-                            subtitle="Achetez vos articles preferes et decouvrez des nouveautes."
-                            icon="bag-outline"
-                            selected={selectedSpace === 'client'}
-                            disabled={false}
-                            onPress={() => onChooseSpace('client')}
-                        />
-
-                        <SpaceChoiceCard
-                            title="Je suis un Vendeur"
-                            subtitle="Gerez votre boutique, vos stocks et vos ventes facilement."
-                            icon="storefront-outline"
-                            selected={selectedSpace === 'seller'}
-                            disabled={!canChoosePrivilegedSpace}
-                            onPress={() => onChooseSpace('seller')}
-                        />
-
-                        <SpaceChoiceCard
-                            title="Je suis un Livreur"
-                            subtitle="Gagnez de l'argent en livrant des colis dans votre zone."
-                            icon="bicycle-outline"
-                            selected={selectedSpace === 'delivery-persons'}
-                            disabled={!canChoosePrivilegedSpace}
-                            onPress={() => onChooseSpace('delivery-persons')}
-                        />
-
-                        {!isAuthenticated ? (
-                            <TouchableOpacity
-                                style={styles.loginBanner}
-                                onPress={() => router.push('/(auth)/login')}
-                            >
-                                <Ionicons name="log-in-outline" size={15} color={Colors.primary} />
-                                <Text style={styles.loginBannerText}>
-                                    Connectez-vous pour debloquer vendeur/livreur
-                                </Text>
-                            </TouchableOpacity>
-                        ) : null}
-
-                        <Text style={styles.termsText}>
-                            En continuant, vous acceptez nos Conditions
-                            {" d'Utilisation "}
-                            et notre Politique de Confidentialite.
-                        </Text>
-                    </View>
-                )}
+                    )}
+                </Animated.View>
 
                 <View style={styles.footer}>
                     <TouchableOpacity
-                        style={[
-                            styles.ctaButton,
-                            step === 2 ? styles.ctaYellow : styles.ctaBlue,
-                            isSubmitting && styles.ctaDisabled,
-                        ]}
+                        style={[styles.ctaButton, isSubmitting && styles.ctaButtonDisabled]}
                         onPress={() => void onNext()}
                         disabled={isSubmitting}
                         activeOpacity={0.9}
                     >
-                        <Text
-                            style={[
-                                styles.ctaText,
-                                step === 2 ? styles.ctaTextDark : styles.ctaTextLight,
-                            ]}
-                        >
-                            {ctaLabel}
-                        </Text>
-                        <Ionicons
-                            name="arrow-forward"
-                            size={22}
-                            color={step === 2 ? '#0B1128' : Colors.white}
-                        />
+                        <LinearGradient colors={Gradients.accent} style={styles.ctaGradient}>
+                            <Text style={styles.ctaText}>{ctaLabel}</Text>
+                            <View style={styles.ctaIconWrap}>
+                                <Ionicons name="arrow-forward" size={18} color={Colors.white} />
+                            </View>
+                        </LinearGradient>
                     </TouchableOpacity>
                 </View>
             </LinearGradient>
         </SafeAreaView>
+    );
+}
+
+function MiniStat({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+    return (
+        <View style={styles.miniStatCard}>
+            <Ionicons name={icon} size={14} color={Colors.primary} />
+            <Text style={styles.miniStatText}>{label}</Text>
+        </View>
     );
 }
 
@@ -304,20 +301,22 @@ function SpaceChoiceCard({
         <TouchableOpacity
             onPress={onPress}
             activeOpacity={disabled ? 1 : 0.9}
+            disabled={disabled}
             style={[
                 styles.spaceCard,
                 selected && styles.spaceCardSelected,
                 disabled && styles.spaceCardDisabled,
             ]}
-            disabled={disabled}
         >
-            <View style={styles.spaceIconBox}>
-                <Ionicons name={icon} size={22} color={BLUE_CTA} />
-            </View>
-            <View style={styles.spaceTextBox}>
+            <LinearGradient colors={Gradients.primary} style={styles.spaceIconWrap}>
+                <Ionicons name={icon} size={20} color={Colors.white} />
+            </LinearGradient>
+
+            <View style={styles.spaceTextWrap}>
                 <Text style={styles.spaceCardTitle}>{title}</Text>
                 <Text style={styles.spaceCardSubtitle}>{subtitle}</Text>
             </View>
+
             {disabled ? (
                 <View style={styles.lockBubble}>
                     <Ionicons name="lock-closed-outline" size={12} color={Colors.warning} />
@@ -341,338 +340,350 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.xl,
         paddingTop: Spacing.sm,
     },
-    bgHaloOne: {
+    bgShapeOne: {
         position: 'absolute',
-        width: 380,
-        height: 380,
-        borderRadius: 190,
-        backgroundColor: '#1F3B8C22',
+        width: 280,
+        height: 280,
+        borderRadius: 140,
+        backgroundColor: Colors.primary + '18',
         top: -120,
-        left: -90,
+        left: -60,
     },
-    bgHaloTwo: {
+    bgShapeTwo: {
         position: 'absolute',
-        width: 300,
-        height: 300,
-        borderRadius: 150,
-        backgroundColor: '#17326C33',
-        bottom: -110,
-        right: -80,
+        width: 240,
+        height: 240,
+        borderRadius: 120,
+        backgroundColor: Colors.accent + '22',
+        bottom: -100,
+        right: -70,
+    },
+    bgShapeThree: {
+        position: 'absolute',
+        width: 120,
+        height: 120,
+        borderRadius: 60,
+        backgroundColor: Colors.primary + '12',
+        top: 180,
+        right: -20,
     },
     header: {
-        minHeight: 46,
+        minHeight: 48,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.sm,
+        gap: Spacing.md,
+        marginBottom: Spacing.md,
     },
-    backCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#1A2547',
-    },
-    backPlaceholder: {
-        width: 44,
-        height: 44,
-    },
-    stepCounter: {
-        color: '#A9B7D1',
-        fontSize: Typography.fontSize.base,
-        fontWeight: Typography.fontWeight.bold,
-        letterSpacing: 0.7,
-    },
-    skipButton: {
-        minWidth: 68,
-        alignItems: 'flex-end',
-    },
-    skipText: {
-        color: '#A9B7D1',
-        fontSize: Typography.fontSize.base,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    slideWrapper: {
-        flex: 1,
-    },
-    dotRowTop: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: Spacing.sm,
-        marginTop: Spacing.sm,
-        marginBottom: Spacing.lg,
-    },
-    dot: {
-        width: 44,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#32456B',
-    },
-    dotActive: {
-        backgroundColor: BLUE_CTA,
-    },
-    visualCard: {
-        height: 330,
-        borderRadius: 34,
-        borderWidth: 1,
-        overflow: 'hidden',
-        alignItems: 'center',
-        justifyContent: 'center',
-        ...Shadows.lg,
-    },
-    visualCardCream: {
-        backgroundColor: '#ECE8E1',
-        borderColor: '#EDE4D8',
-    },
-    visualCardBlue: {
-        backgroundColor: '#2D4CB9',
-        borderColor: '#3F62D8',
-    },
-    mainVisualIcon: {
-        opacity: 0.95,
-    },
-    floatingBubble: {
-        position: 'absolute',
-        width: 52,
-        height: 52,
+    iconButton: {
+        width: 40,
+        height: 40,
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        ...Shadows.sm,
     },
-    floatLeftYellow: {
-        left: 22,
-        top: 24,
-        backgroundColor: YELLOW_CTA,
+    iconButtonGhost: {
+        opacity: 0.55,
     },
-    floatMidDark: {
-        right: 32,
-        top: 116,
-        borderRadius: 26,
-        backgroundColor: '#23355A',
+    progressBarTrack: {
+        flex: 1,
+        height: 8,
+        borderRadius: 999,
+        backgroundColor: Colors.gray200,
+        overflow: 'hidden',
     },
-    floatRightBlue: {
-        right: 18,
-        top: 182,
-        backgroundColor: BLUE_CTA,
+    progressBarFill: {
+        height: '100%',
+        backgroundColor: Colors.primary,
+        borderRadius: 999,
     },
-    floatPack: {
-        right: 38,
-        top: 82,
-        backgroundColor: YELLOW_CTA,
+    skipButton: {
+        minWidth: 58,
+        alignItems: 'flex-end',
     },
-    smallPoint: {
+    skipText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    skipPlaceholder: {
+        width: 58,
+    },
+    body: {
+        flex: 1,
+        justifyContent: 'center',
+    },
+    slideCard: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xxxl,
+        paddingHorizontal: Spacing.xl,
+        paddingTop: Spacing.lg,
+        paddingBottom: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
+    },
+    slideTop: {
+        alignItems: 'flex-start',
+        marginBottom: Spacing.md,
+    },
+    badgePill: {
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        backgroundColor: Colors.primary + '14',
+        borderWidth: 1,
+        borderColor: Colors.primary + '22',
+    },
+    badgeText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        letterSpacing: 0.4,
+    },
+    heroVisual: {
+        height: 240,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        marginBottom: Spacing.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    heroOrbMain: {
+        width: 170,
+        height: 170,
+        borderRadius: 85,
+        alignItems: 'center',
+        justifyContent: 'center',
+        ...Shadows.md,
+    },
+    heroOrbSecondary: {
+        position: 'absolute',
+        width: 68,
+        height: 68,
+        borderRadius: 34,
+        alignItems: 'center',
+        justifyContent: 'center',
+        bottom: 34,
+        right: 52,
+        ...Shadows.md,
+    },
+    heroDotOne: {
         position: 'absolute',
         width: 14,
         height: 14,
         borderRadius: 7,
+        backgroundColor: Colors.accent,
+        top: 50,
+        right: 46,
     },
-    pointA: {
-        left: 34,
-        top: 52,
-        backgroundColor: YELLOW_CTA,
-    },
-    pointB: {
-        right: 88,
-        bottom: 56,
-        backgroundColor: '#91A7DF',
-    },
-    smallRing: {
+    heroDotTwo: {
         position: 'absolute',
-        width: 22,
-        height: 22,
-        borderRadius: 11,
-        borderWidth: 3,
-        borderColor: '#DCE6FF',
-    },
-    ringA: {
-        right: 32,
-        top: 106,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: Colors.primaryLight,
+        bottom: 42,
+        left: 50,
     },
     slideTitle: {
-        marginTop: Spacing.xl,
-        color: Colors.white,
-        fontSize: 54 / 2,
-        lineHeight: 35,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.xxl,
+        lineHeight: 30,
         textAlign: 'center',
         fontWeight: Typography.fontWeight.extrabold,
-        paddingHorizontal: Spacing.md,
-    },
-    slideTitleHighlight: {
-        color: BLUE_CTA,
     },
     slideSubtitle: {
         marginTop: Spacing.md,
-        color: '#8FA0BF',
-        fontSize: Typography.fontSize.xl,
-        lineHeight: 38 / 2,
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.base,
+        lineHeight: 22,
         textAlign: 'center',
-        paddingHorizontal: Spacing.sm,
     },
-    dotRowBottom: {
+    slideIndicators: {
+        marginTop: Spacing.xl,
         flexDirection: 'row',
         justifyContent: 'center',
         gap: Spacing.sm,
-        marginTop: Spacing.xl,
     },
-    metaRow: {
-        marginTop: Spacing.xl,
+    stepDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: Colors.gray300,
+    },
+    stepDotActive: {
+        width: 24,
+        borderRadius: 999,
+        backgroundColor: Colors.primary,
+    },
+    miniStatsRow: {
+        marginTop: Spacing.lg,
         flexDirection: 'row',
-        justifyContent: 'center',
-        gap: Spacing.xl,
+        gap: Spacing.sm,
     },
-    metaItem: {
+    miniStatCard: {
+        flex: 1,
+        minHeight: 38,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 6,
+        ...Shadows.sm,
     },
-    metaText: {
-        color: '#8FA0BF',
-        fontSize: Typography.fontSize.md,
+    miniStatText: {
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
     },
-    spaceStepWrapper: {
+    spaceSection: {
         flex: 1,
-        paddingTop: Spacing.sm,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.xxxl,
+        padding: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.lg,
     },
     spaceTitle: {
-        color: Colors.white,
-        fontSize: 52 / 2,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.xxl,
         textAlign: 'center',
         fontWeight: Typography.fontWeight.extrabold,
     },
     spaceSubtitle: {
         marginTop: Spacing.sm,
-        color: '#8FA0BF',
+        marginBottom: Spacing.lg,
+        color: Colors.textSecondary,
         textAlign: 'center',
-        fontSize: Typography.fontSize.xl,
-        lineHeight: 38 / 2,
-        marginBottom: Spacing.xl,
-        paddingHorizontal: Spacing.sm,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
     },
     spaceCard: {
-        borderRadius: 26,
-        backgroundColor: '#1A2447',
-        borderWidth: 2,
-        borderColor: 'transparent',
+        minHeight: 96,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
         padding: Spacing.md,
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: Spacing.md,
-        minHeight: 132,
+        marginBottom: Spacing.sm,
+        gap: Spacing.md,
     },
     spaceCardSelected: {
-        borderColor: BLUE_CTA,
-        backgroundColor: '#111D42',
+        borderColor: Colors.primary + '70',
+        backgroundColor: Colors.primary + '10',
     },
     spaceCardDisabled: {
-        opacity: 0.78,
+        opacity: 0.68,
     },
-    spaceIconBox: {
-        width: 62,
-        height: 62,
-        borderRadius: 20,
-        backgroundColor: '#1E2F61',
+    spaceIconWrap: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         alignItems: 'center',
         justifyContent: 'center',
-        marginRight: Spacing.md,
     },
-    spaceTextBox: {
+    spaceTextWrap: {
         flex: 1,
-        paddingRight: Spacing.xs,
     },
     spaceCardTitle: {
-        color: Colors.white,
-        fontSize: 24 / 2,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
     },
     spaceCardSubtitle: {
-        marginTop: 4,
-        color: '#8FA0BF',
-        fontSize: Typography.fontSize.xl,
-        lineHeight: 18 + 2,
+        marginTop: 2,
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 19,
     },
     radioOuter: {
-        width: 32,
-        height: 32,
-        borderRadius: 16,
-        borderWidth: 3,
-        borderColor: '#455A7D',
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: Colors.gray300,
         alignItems: 'center',
         justifyContent: 'center',
     },
     radioOuterSelected: {
-        borderColor: BLUE_CTA,
+        borderColor: Colors.primary,
     },
     radioInner: {
-        width: 14,
-        height: 14,
-        borderRadius: 7,
-        backgroundColor: BLUE_CTA,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: Colors.primary,
     },
     lockBubble: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        backgroundColor: '#2C3551',
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: Colors.warning + '20',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    loginBanner: {
+    loginHint: {
         marginTop: Spacing.xs,
         borderRadius: BorderRadius.full,
-        backgroundColor: '#111D42',
+        minHeight: 38,
         borderWidth: 1,
-        borderColor: BLUE_CTA + '70',
-        minHeight: 40,
+        borderColor: Colors.primary + '35',
         alignItems: 'center',
         justifyContent: 'center',
         flexDirection: 'row',
         gap: 6,
+        backgroundColor: Colors.primary + '10',
     },
-    loginBannerText: {
-        color: '#C9D6F5',
-        fontSize: Typography.fontSize.sm,
+    loginHintText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
     },
-    termsText: {
-        marginTop: Spacing.sm,
-        color: '#6F7F9E',
-        textAlign: 'center',
-        fontSize: Typography.fontSize.sm,
-        lineHeight: 20,
-        paddingHorizontal: Spacing.xs,
-    },
     footer: {
+        paddingTop: Spacing.lg,
         paddingBottom: Spacing.md,
-        paddingTop: Spacing.md,
     },
     ctaButton: {
-        minHeight: 68,
         borderRadius: BorderRadius.xxl,
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'row',
-        gap: Spacing.sm,
+        overflow: 'hidden',
         ...Shadows.lg,
     },
-    ctaBlue: {
-        backgroundColor: BLUE_CTA,
+    ctaButtonDisabled: {
+        opacity: 0.68,
     },
-    ctaYellow: {
-        backgroundColor: YELLOW_CTA,
-    },
-    ctaDisabled: {
-        opacity: 0.72,
+    ctaGradient: {
+        minHeight: 60,
+        paddingHorizontal: Spacing.xl,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
     },
     ctaText: {
-        fontSize: Typography.fontSize.xxxl,
+        color: Colors.primaryDark,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
     },
-    ctaTextLight: {
-        color: Colors.white,
-    },
-    ctaTextDark: {
-        color: '#0B1128',
+    ctaIconWrap: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

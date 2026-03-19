@@ -28,6 +28,16 @@ export interface GoogleMobileAuthDto {
     idToken: string;
 }
 
+export interface ChangePinDto {
+    currentPin: string;
+    newPin: string;
+}
+
+export interface ResetPinDto {
+    phone: string;
+    newPin: string;
+}
+
 export interface AuthResponse {
     access_token: string;
     refresh_token: string;
@@ -93,6 +103,20 @@ export const authApi = baseApi.injectEndpoints({
                 body: dto,
             }),
         }),
+        changePin: builder.mutation<{ message: string }, ChangePinDto>({
+            query: (dto) => ({
+                url: '/auth/pin',
+                method: 'PATCH',
+                body: dto,
+            }),
+        }),
+        resetPin: builder.mutation<{ message: string }, ResetPinDto>({
+            query: (dto) => ({
+                url: '/auth/pin/reset',
+                method: 'POST',
+                body: dto,
+            }),
+        }),
         googleMobile: builder.mutation<GoogleMobileAuthResponse, GoogleMobileAuthDto>({
             query: (dto) => ({
                 url: '/auth/google/mobile',
@@ -132,6 +156,8 @@ export const {
     useVerifyOtpMutation,
     useRegisterMutation,
     useLoginMutation,
+    useChangePinMutation,
+    useResetPinMutation,
     useGoogleMobileMutation,
     useLogoutMutation,
     useGetProfileQuery,

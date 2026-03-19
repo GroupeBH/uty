@@ -7,7 +7,11 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetAnnouncementByIdQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
+import {
+    useGetAnnouncementByIdQuery,
+    useGetAnnouncementByIdWithTrackedViewQuery,
+    useToggleLikeMutation,
+} from '@/store/api/announcementsApi';
 import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import {
     AnnouncementComment,
@@ -109,9 +113,20 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const { data: product, isLoading } = useGetAnnouncementByIdQuery(announcementId, {
-        skip: !announcementId,
+    const {
+        data: trackedProduct,
+        isLoading: isLoadingTrackedProduct,
+    } = useGetAnnouncementByIdWithTrackedViewQuery(announcementId, {
+        skip: !announcementId || !isAuthenticated,
     });
+    const {
+        data: publicProduct,
+        isLoading: isLoadingPublicProduct,
+    } = useGetAnnouncementByIdQuery(announcementId, {
+        skip: !announcementId || isAuthenticated,
+    });
+    const product = trackedProduct ?? publicProduct;
+    const isLoading = isAuthenticated ? isLoadingTrackedProduct : isLoadingPublicProduct;
     const {
         data: comments = [],
         isLoading: isLoadingComments,

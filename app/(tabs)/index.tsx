@@ -167,7 +167,7 @@ const QUICK_ACTIONS = [
     { id: '1', title: 'Publier', icon: 'add-circle-outline', gradient: Gradients.accent, route: '/publish' },
     { id: '2', title: 'Mes annonces', icon: 'list-outline', gradient: Gradients.primary, route: '/my-announcements' },
     { id: '3', title: 'Ma boutique', icon: 'storefront-outline', gradient: Gradients.cool, route: '/my-shop' },
-    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/profile' },
+    { id: '4', title: 'Favoris', icon: 'heart-outline', gradient: Gradients.warm, route: '/favorites' },
 ];
 const SEARCH_HIDE_THRESHOLD = 64;
 const SEARCH_SHOW_THRESHOLD = 18;
@@ -443,6 +443,23 @@ export default function HomeScreen() {
         router.push('/search');
     };
 
+    const handleQuickActionPress = React.useCallback(
+        (action: (typeof QUICK_ACTIONS)[number]) => {
+            if (action.route === '/my-announcements' && !isAuthenticated) {
+                requireAuth('Connectez-vous pour acceder a vos annonces.');
+                return;
+            }
+
+            if (action.route === '/favorites' && !isAuthenticated) {
+                requireAuth('Connectez-vous pour acceder a vos favoris.');
+                return;
+            }
+
+            router.push(action.route as any);
+        },
+        [isAuthenticated, requireAuth, router],
+    );
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* Header moderne avec animations */}
@@ -695,7 +712,7 @@ export default function HomeScreen() {
                                 <TouchableOpacity
                                     key={action.id}
                                     style={styles.actionCard}
-                                    onPress={() => router.push(action.route as any)}
+                                    onPress={() => handleQuickActionPress(action)}
                                     accessibilityLabel={action.title}
                                     activeOpacity={0.7}
                                 >
