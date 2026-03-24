@@ -79,6 +79,18 @@ const resolveAnnouncementSellerId = (product: Announcement | undefined): string 
     );
 };
 
+const USD_TO_CDF_RATE = 2300;
+const TAX_RATE = 0.01;
+const SELLER_BASE_DELIVERY_FEE_CDF = 1000;
+const DEFAULT_ITEM_DELIVERY_FEE_CDF = 2000;
+const DELIVERY_FEE_BY_WEIGHT_CLASS_CDF: Record<string, number> = {
+    light: 1200,
+    medium: 2000,
+    heavy: 3500,
+    bulky: 5000,
+    fragile: 2500,
+};
+
 export default function CartScreen() {
     const router = useRouter();
     const { data: cart, isLoading, isFetching, refetch } = useGetCartQuery();
@@ -465,29 +477,82 @@ export default function CartScreen() {
     const resolveCurrency = React.useCallback((currency: any) => {
         return resolveCurrencyDisplay(currency, { currencies });
     }, [currencies]);
+    const resolveCurrencyCode = React.useCallback((currency: any): string => {
+        if (!currency) return 'CDF';
 
-    const currencySymbols = React.useMemo(() => {
-        const symbols = new Set<string>();
-        cartItems.forEach((item) => {
-            const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
-            symbols.add(resolveCurrency(product?.currency));
-        });
-        return symbols;
-    }, [cartItems, resolveCurrency]);
+        if (typeof currency === 'object') {
+            const code = typeof currency.code === 'string' ? currency.code.trim().toUpperCase() : '';
+            if (code) return code;
+            const symbol = typeof currency.symbol === 'string' ? currency.symbol.trim() : '';
+            if (symbol === '$') return 'USD';
+            const id = typeof currency._id === 'string' ? currency._id.trim() : '';
+            if (id) {
+                const byId = currencies.find((entry) => entry?._id === id);
+                if (byId?.code) return byId.code.trim().toUpperCase();
+                if (byId?.symbol === '$') return 'USD';
+            }
+            return 'CDF';
+        }
 
-    const currencySymbol = currencySymbols.size === 1
-        ? Array.from(currencySymbols)[0]
-        : resolveCurrency(undefined);
-    const currencyNote = currencySymbols.size > 1
-        ? 'Plusieurs devises detectees. Total affiche en devise par defaut.'
+        if (typeof currency === 'string') {
+            const raw = currency.trim();
+            if (!raw) return 'CDF';
+            if (raw === '$') return 'USD';
+
+            const byId = currencies.find((entry) => entry?._id === raw);
+            if (byId?.code) return byId.code.trim().toUpperCase();
+            if (byId?.symbol === '$') return 'USD';
+
+            const normalized = raw.toUpperCase();
+            if (/^[A-Z]{2,6}$/.test(normalized)) return normalized;
+        }
+
+        return 'CDF';
+    }, [currencies]);
+    const convertAmountToCdf = React.useCallback(
+        (amount: number, currency: any): number => {
+            const safeAmount = Number.isFinite(amount) ? amount : 0;
+            const code = resolveCurrencyCode(currency);
+            if (code === 'USD') {
+                return safeAmount * USD_TO_CDF_RATE;
+            }
+            return safeAmount;
+        },
+        [resolveCurrencyCode],
+    );
+    const estimateLineDeliveryCostCdf = React.useCallback(
+        (product: Announcement | undefined, quantity: number): number => {
+            if (product?.isDeliverable === false) return 0;
+            const safeQuantity = Math.max(1, Number(quantity) || 1);
+            const weightClasses = Array.isArray(product?.weightClass) ? product.weightClass : [];
+            const perItemFee = weightClasses.reduce((maxFee, className) => {
+                const nextFee = DELIVERY_FEE_BY_WEIGHT_CLASS_CDF[String(className)] || 0;
+                return Math.max(maxFee, nextFee);
+            }, 0);
+            const effectivePerItemFee = perItemFee || DEFAULT_ITEM_DELIVERY_FEE_CDF;
+            return effectivePerItemFee * safeQuantity;
+        },
+        [],
+    );
+
+    const containsUsdItem = React.useMemo(
+        () =>
+            cartItems.some((item) => {
+                const product = (typeof item.productId === 'object' ? item.productId : undefined) as Announcement | undefined;
+                return resolveCurrencyCode(product?.currency) === 'USD';
+            }),
+        [cartItems, resolveCurrencyCode],
+    );
+    const currencyNote = containsUsdItem
+        ? `Les montants en USD sont convertis en CDF au taux fixe 1 USD = ${USD_TO_CDF_RATE} CDF.`
         : '';
     const formatAmount = React.useCallback(
         (value: number) =>
-            formatCurrencyAmount(value, currencySymbol, {
+            formatCurrencyAmount(value, 'CDF', {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
             }),
-        [currencySymbol],
+        [],
     );
 
     const groupedSections = React.useMemo(() => {
@@ -496,7 +561,9 @@ export default function CartScreen() {
             title: string;
             data: CartItemType[];
             subtotal: number;
+            deliveryCost: number;
             totalQuantity: number;
+            hasDeliverableProduct: boolean;
         }>();
 
         cartItems.forEach((item) => {
@@ -507,7 +574,10 @@ export default function CartScreen() {
                 typeof seller === 'object' && seller?.firstName
                     ? seller.firstName
                     : 'Vendeur inconnu';
-            const price = product?.price || 0;
+            const quantity = Math.max(1, Number(item.quantity) || 1);
+            const unitPrice = Number(product?.price) || 0;
+            const lineSubtotal = convertAmountToCdf(unitPrice * quantity, product?.currency);
+            const lineDeliveryCost = estimateLineDeliveryCostCdf(product, quantity);
 
             if (!groups.has(sellerId)) {
                 groups.set(sellerId, {
@@ -515,32 +585,34 @@ export default function CartScreen() {
                     title: sellerName,
                     data: [],
                     subtotal: 0,
+                    deliveryCost: 0,
                     totalQuantity: 0,
+                    hasDeliverableProduct: false,
                 });
             }
 
             const group = groups.get(sellerId);
             if (group) {
                 group.data.push(item);
-                group.subtotal += price * item.quantity;
-                group.totalQuantity += item.quantity;
+                group.subtotal += lineSubtotal;
+                group.totalQuantity += quantity;
+                group.deliveryCost += lineDeliveryCost;
+                if (lineDeliveryCost > 0) {
+                    group.hasDeliverableProduct = true;
+                }
             }
         });
 
-        return Array.from(groups.values());
-    }, [cartItems]);
+        return Array.from(groups.values()).map((group) => ({
+            ...group,
+            deliveryCost:
+                group.hasDeliverableProduct
+                    ? group.deliveryCost + SELLER_BASE_DELIVERY_FEE_CDF
+                    : 0,
+        }));
+    }, [cartItems, convertAmountToCdf, estimateLineDeliveryCostCdf]);
 
     const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-    const subtotal = groupedSections.reduce((sum, section) => sum + section.subtotal, 0);
-    const tax = subtotal * 0.2;
-    const deliveryCost = cart?.deliveryCost ?? 0;
-    const deliveryMode = cart?.deliveryMode ?? 'pending';
-    const total = subtotal + tax + deliveryCost;
-    const deliveryExplanation = deliveryMode === 'pending'
-        ? 'Definis une adresse de livraison pour obtenir le cout.'
-        : deliveryMode === 'none'
-            ? 'Aucun article livrable dans ce panier.'
-            : 'Cout calcule par le backend selon distance et classe de poids.';
     const deliveryCoords = cart?.deliveryLocation?.coordinates;
     const normalizedDeliveryAddress = deliveryAddress.trim();
     const deliveryLng = deliveryCoords?.[0];
@@ -550,6 +622,18 @@ export default function CartScreen() {
             ? `${deliveryLat.toFixed(6)},${deliveryLng.toFixed(6)}`
             : '';
     const hasDeliveryCoordinates = Boolean(deliveryCoordsKey);
+    const subtotal = groupedSections.reduce((sum, section) => sum + section.subtotal, 0);
+    const tax = subtotal * TAX_RATE;
+    const estimatedDeliveryCost = groupedSections.reduce((sum, section) => sum + section.deliveryCost, 0);
+    const deliveryCost = hasDeliveryCoordinates ? estimatedDeliveryCost : 0;
+    const deliveryMode = cart?.deliveryMode ?? 'pending';
+    const total = subtotal + tax + deliveryCost;
+    const sellersWithDelivery = groupedSections.filter((section) => section.deliveryCost > 0).length;
+    const deliveryExplanation = !hasDeliveryCoordinates
+        ? 'Definis une adresse de livraison pour obtenir le cout.'
+        : estimatedDeliveryCost <= 0
+            ? 'Aucun article livrable dans ce panier.'
+            : `Livraison calculee selon chaque produit et vendeur (${sellersWithDelivery} vendeur(s)).`;
     const initialMapLocation =
         typeof deliveryLat === 'number' && typeof deliveryLng === 'number'
             ? { latitude: deliveryLat, longitude: deliveryLng, address: normalizedDeliveryAddress || undefined }
@@ -732,6 +816,9 @@ export default function CartScreen() {
                             <Text style={styles.sellerSubtotal}>
                                 {formatAmount(section.subtotal)}
                             </Text>
+                            <Text style={styles.sellerDeliveryFee}>
+                                Livraison: {formatAmount(section.deliveryCost)}
+                            </Text>
                         </View>
                     </View>
                 )}
@@ -848,7 +935,7 @@ export default function CartScreen() {
                         <View style={styles.summaryRow}>
                             <View style={styles.summaryLabelRow}>
                                 <Ionicons name="document-text-outline" size={14} color={Colors.gray400} />
-                                <Text style={styles.summaryLabel}>TVA (20%)</Text>
+                                <Text style={styles.summaryLabel}>TVA (1%)</Text>
                             </View>
                             <Text style={styles.summaryValue}>{formatAmount(tax)}</Text>
                         </View>
@@ -1230,6 +1317,12 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.extrabold,
+    },
+    sellerDeliveryFee: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     sellerSummary: {
         backgroundColor: Colors.primary + '08',

@@ -3,6 +3,7 @@
  */
 
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import {
     Order,
     getOrderItemCurrency,
@@ -40,12 +41,17 @@ const getOrderCurrency = (order: Order) => {
             return currency;
         }
     }
+    const orderAsRecord = order as Record<string, any>;
+    if (orderAsRecord?.currency) return orderAsRecord.currency;
+    if (orderAsRecord?.totalCurrency) return orderAsRecord.totalCurrency;
     return undefined;
 };
 
 export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
     const router = useRouter();
+    const { data: currencies = [] } = useGetCurrenciesQuery();
     const orderCurrency = getOrderCurrency(order);
+    const actionLabel = perspective === 'seller' ? 'Gerer' : 'Voir details';
     const counterpartyLabel =
         perspective === 'seller'
             ? `Client: ${getOrderPartyName(order.userId, 'Client inconnu')}`
@@ -68,7 +74,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
             <View style={styles.header}>
                 <View style={styles.headerLeft}>
                     <Text style={styles.orderNumber}>Commande #{order._id.slice(-8).toUpperCase()}</Text>
-                    <Text style={styles.date}>{formatDate(order.createdAt)}</Text>
+                    <View style={styles.dateRow}>
+                        <Ionicons name="calendar-outline" size={13} color={Colors.gray500} />
+                        <Text style={styles.date}>{formatDate(order.createdAt)}</Text>
+                    </View>
                 </View>
                 <StatusBadge status={order.status} />
             </View>
@@ -97,10 +106,13 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
                 <View style={styles.totalContainer}>
                     <Text style={styles.totalLabel}>Total</Text>
                     <Text style={styles.totalAmount}>
-                        {formatCurrencyAmount(order.totalAmount, orderCurrency)}
+                        {formatCurrencyAmount(order.totalAmount, orderCurrency, { currencies })}
                     </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={Colors.gray400} />
+                <View style={styles.actionPill}>
+                    <Text style={styles.actionPillText}>{actionLabel}</Text>
+                    <Ionicons name="chevron-forward" size={16} color={Colors.white} />
+                </View>
             </View>
         </TouchableOpacity>
     );
@@ -112,6 +124,8 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         padding: Spacing.xl,
         marginBottom: Spacing.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
         ...Shadows.md,
     },
     header: {
@@ -133,6 +147,11 @@ const styles = StyleSheet.create({
     date: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
+    },
+    dateRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
     },
     counterpartyText: {
         fontSize: Typography.fontSize.sm,
@@ -184,5 +203,20 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
+    },
+    actionPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        backgroundColor: Colors.primary,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs + 2,
+        borderRadius: BorderRadius.full,
+        ...Shadows.sm,
+    },
+    actionPillText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
 });

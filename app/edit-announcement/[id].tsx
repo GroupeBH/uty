@@ -4,6 +4,7 @@
  */
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
+import { AnnouncementStepHeader } from '@/components/forms/AnnouncementStepHeader';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
@@ -44,6 +45,45 @@ const BASE_STEPS = [
     { key: 'photos', title: 'Photos', icon: 'images-outline' as const },
 ];
 
+const STEP_COPY: Record<string, { title: string; subtitle: string; tip: string }> = {
+    category: {
+        title: 'Verifiez la categorie',
+        subtitle: "Confirmez que l'annonce reste dans la bonne section.",
+        tip: "La categorie est conservee apres publication et ne peut plus etre modifiee.",
+    },
+    details: {
+        title: "Mettez a jour les informations essentielles",
+        subtitle: 'Gardez un titre clair, un bon prix et une description simple a comprendre.',
+        tip: 'Les informations les plus utiles doivent rester visibles en un coup d oeil.',
+    },
+    delivery: {
+        title: 'Precisez la livraison',
+        subtitle: 'Indiquez clairement si la livraison est disponible et d ou se fait le retrait.',
+        tip: 'Activez la livraison seulement si le point de recuperation est fiable.',
+    },
+    attributes: {
+        title: 'Ajustez les caracteristiques utiles',
+        subtitle: 'Ces details aident les acheteurs a mieux filtrer votre annonce.',
+        tip: 'Renseignez surtout les champs qui influencent la recherche.',
+    },
+    photos: {
+        title: 'Gardez des photos claires',
+        subtitle: 'Ajoutez, retirez ou remplacez des images pour mieux presenter votre annonce.',
+        tip: 'La premiere photo reste celle que les acheteurs verront en premier.',
+    },
+};
+
+const BASE_FORM_FIELDS = [
+    'name',
+    'description',
+    'price',
+    'quantity',
+    'currency',
+    'isDeliverable',
+    'pickupLocation',
+    'weightClass',
+];
+
 export default function EditAnnouncementScreen() {
     const router = useRouter();
     const { id } = useLocalSearchParams<{ id: string }>();
@@ -72,7 +112,7 @@ export default function EditAnnouncementScreen() {
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [existingImages, setExistingImages] = useState<string[]>([]);
-    const [images, setImages] = useState<Array<{ uri: string; name: string; type: string }>>([]);
+    const [images, setImages] = useState<{ uri: string; name: string; type: string }[]>([]);
     const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -148,19 +188,9 @@ export default function EditAnnouncementScreen() {
     );
 
     // Filtrer les attributs qui entrent en conflit avec les champs de base
-    const baseFormFields = [
-        'name',
-        'description',
-        'price',
-        'quantity',
-        'currency',
-        'isDeliverable',
-        'pickupLocation',
-        'weightClass',
-    ];
     const filteredAttributes = React.useMemo(() => {
         if (!categoryAttributes) return [];
-        return categoryAttributes.filter(attr => !baseFormFields.includes(attr.name));
+        return categoryAttributes.filter(attr => !BASE_FORM_FIELDS.includes(attr.name));
     }, [categoryAttributes]);
 
     // Calculer les étapes dynamiquement
@@ -179,13 +209,17 @@ export default function EditAnnouncementScreen() {
         (key: string) => STEPS.find((step) => step.key === key)?.id ?? -1,
         [STEPS]
     );
+    const activeStep = React.useMemo(
+        () => STEPS.find((step) => step.id === currentStep) || STEPS[0],
+        [STEPS, currentStep]
+    );
 
     // Check authentication
     useEffect(() => {
         if (!requireAuth('Vous devez être connecté pour modifier une annonce')) {
             router.back();
         }
-    }, [requireAuth]);
+    }, [requireAuth, router]);
 
     // Initialize form with announcement data
     useEffect(() => {
@@ -588,7 +622,7 @@ export default function EditAnnouncementScreen() {
         return (
             <View style={styles.errorContainer}>
                 <Ionicons name="alert-circle-outline" size={64} color={Colors.error} />
-                <Text style={styles.errorText}>Annonce introuvable</Text>
+                <Text style={styles.screenErrorText}>Annonce introuvable</Text>
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <Text style={styles.backButtonText}>Retour</Text>
                 </TouchableOpacity>
@@ -606,12 +640,21 @@ export default function EditAnnouncementScreen() {
                 <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
                     <Ionicons name="close" size={24} color={Colors.textPrimary} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Modifier l'annonce</Text>
+                <Text style={styles.headerTitle}>Modifier l&apos;annonce</Text>
                 <View style={{ width: 40 }} />
             </View>
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
+                <View style={styles.progressSummary}>
+                    <View style={styles.progressTextBlock}>
+                        <Text style={styles.progressEyebrow}>Etape {currentStep} sur {STEPS.length}</Text>
+                        <Text style={styles.progressTitle}>{activeStep?.title || 'Annonce'}</Text>
+                    </View>
+                    <Text style={styles.progressPercent}>
+                        {Math.round(((currentStep - 1) / Math.max(STEPS.length - 1, 1)) * 100)}%
+                    </Text>
+                </View>
                 <View style={styles.progressTrack}>
                     <Animated.View
                         style={[
@@ -654,7 +697,7 @@ export default function EditAnnouncementScreen() {
             </View>
 
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.keyboardView}
                 keyboardVerticalOffset={100}
             >
@@ -662,14 +705,17 @@ export default function EditAnnouncementScreen() {
                     style={styles.scrollView}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
                 >
                     {/* Step 1: Catégorie */}
                     {currentStep === getStepId('category') && (
                         <View style={styles.stepContainer}>
-                            <Text style={styles.stepTitle}>Catégorie</Text>
-                            <Text style={styles.stepSubtitle}>
-                                La catégorie de votre annonce
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="grid-outline"
+                                title={STEP_COPY.category.title}
+                                subtitle={STEP_COPY.category.subtitle}
+                                tip={STEP_COPY.category.tip}
+                            />
 
                             {announcement.category && (
                                 <View style={styles.categoryCard}>
@@ -697,19 +743,18 @@ export default function EditAnnouncementScreen() {
                                 </View>
                             )}
 
-                            <Text style={styles.infoText}>
-                                La catégorie ne peut pas être modifiée après la publication.
-                            </Text>
                         </View>
                     )}
 
                     {/* Step 2: Détails */}
                     {currentStep === getStepId('details') && (
                         <View style={styles.stepContainer}>
-                            <Text style={styles.stepTitle}>Détails de l'annonce</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Remplissez les informations de base
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="document-text-outline"
+                                title={STEP_COPY.details.title}
+                                subtitle={STEP_COPY.details.subtitle}
+                                tip={STEP_COPY.details.tip}
+                            />
 
                             <View style={styles.inputContainer}>
                                 <Text style={styles.inputLabel}>
@@ -818,10 +863,12 @@ export default function EditAnnouncementScreen() {
                     {/* Step 3: Livraison */}
                     {currentStep === getStepId('delivery') && (
                         <View style={styles.stepContainer}>
-                            <Text style={styles.stepTitle}>Livraison</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Précisez si l'annonce est livrable et le point de récupération
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="location-outline"
+                                title={STEP_COPY.delivery.title}
+                                subtitle={STEP_COPY.delivery.subtitle}
+                                tip={STEP_COPY.delivery.tip}
+                            />
 
                             <View style={styles.deliveryCard}>
                                 <View style={styles.deliveryHeader}>
@@ -969,10 +1016,12 @@ export default function EditAnnouncementScreen() {
                     {/* Step 4: Caractéristiques */}
                     {currentStep === getStepId('attributes') && filteredAttributes.length > 0 && (
                         <View style={styles.stepContainer}>
-                            <Text style={styles.stepTitle}>Caractéristiques</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Ajoutez les détails spécifiques à la catégorie
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="list-outline"
+                                title={STEP_COPY.attributes.title}
+                                subtitle={STEP_COPY.attributes.subtitle}
+                                tip={STEP_COPY.attributes.tip}
+                            />
 
                             {attributesLoading ? (
                                 <View style={styles.loadingContainer}>
@@ -1004,10 +1053,12 @@ export default function EditAnnouncementScreen() {
                     {/* Step 5: Photos */}
                     {currentStep === getStepId('photos') && (
                         <View style={styles.stepContainer}>
-                            <Text style={styles.stepTitle}>Photos</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Ajoutez jusqu'à 10 photos de qualité ({totalImages}/10)
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="images-outline"
+                                title={STEP_COPY.photos.title}
+                                subtitle={`Ajoutez jusqu'a 10 photos de qualite (${totalImages}/10).`}
+                                tip={STEP_COPY.photos.tip}
+                            />
 
                             <View style={styles.imagesGrid}>
                                 {existingImages.map((imageUrl, index) => (
@@ -1200,7 +1251,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         padding: Spacing.xl,
     },
-    errorText: {
+    screenErrorText: {
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.error,
@@ -1229,49 +1280,86 @@ const styles = StyleSheet.create({
     },
     progressContainer: {
         backgroundColor: Colors.white,
-        paddingVertical: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        borderRadius: BorderRadius.xl,
         ...Shadows.sm,
     },
+    progressSummary: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    progressTextBlock: {
+        flex: 1,
+    },
+    progressEyebrow: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
+        textTransform: 'uppercase',
+    },
+    progressTitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+    },
+    progressPercent: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.accentDark,
+    },
     progressTrack: {
-        height: 4,
+        height: 8,
         backgroundColor: Colors.gray100,
-        marginHorizontal: Spacing.xl,
         borderRadius: BorderRadius.full,
         overflow: 'hidden',
+        marginBottom: Spacing.md,
     },
     progressFill: {
         height: '100%',
         backgroundColor: Colors.primary,
+        borderRadius: BorderRadius.full,
     },
     stepsIndicator: {
         flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingHorizontal: Spacing.lg,
-        marginTop: Spacing.lg,
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
     },
     stepIndicator: {
         alignItems: 'center',
         flex: 1,
+        paddingHorizontal: 2,
     },
     stepIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
+        width: 38,
+        height: 38,
+        borderRadius: 19,
         backgroundColor: Colors.gray100,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: Spacing.xs,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     stepIconActive: {
         backgroundColor: Colors.primary,
     },
     stepText: {
-        fontSize: Typography.fontSize.xs,
+        fontSize: 11,
         color: Colors.gray400,
         fontWeight: Typography.fontWeight.semibold,
+        textAlign: 'center',
     },
     stepTextActive: {
-        color: Colors.primary,
+        color: Colors.textPrimary,
     },
     keyboardView: {
         flex: 1,
@@ -1287,26 +1375,18 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
         padding: Spacing.xl,
-        ...Shadows.md,
-    },
-    stepTitle: {
-        fontSize: Typography.fontSize.xxl,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.xs,
-    },
-    stepSubtitle: {
-        fontSize: Typography.fontSize.base,
-        color: Colors.textSecondary,
-        marginBottom: Spacing.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
     },
     categoryCard: {
         flexDirection: 'row',
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray50,
         borderRadius: BorderRadius.xl,
         padding: Spacing.lg,
-        marginBottom: Spacing.lg,
-        ...Shadows.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        ...Shadows.sm,
     },
     categoryGradient: {
         width: 64,
@@ -1335,13 +1415,6 @@ const styles = StyleSheet.create({
     categoryDescription: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
-    },
-    infoText: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.textSecondary,
-        fontStyle: 'italic',
-        textAlign: 'center',
-        marginTop: Spacing.md,
     },
     inputContainer: {
         marginBottom: Spacing.lg,

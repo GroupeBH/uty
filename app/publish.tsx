@@ -4,6 +4,7 @@
  */
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
+import { AnnouncementStepHeader } from '@/components/forms/AnnouncementStepHeader';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { CustomAlert } from '@/components/ui/CustomAlert';
@@ -14,7 +15,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
-import { Category } from '@/types/category';
+import { Category, CategoryAttribute } from '@/types/category';
 import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,6 +73,159 @@ const STEP_COPY: Record<string, { title: string; subtitle: string; tip: string }
         subtitle: 'Les annonces avec images claires convertissent mieux.',
         tip: 'Mettez la meilleure photo en premier, elle sera principale.',
     },
+};
+
+const ATTRIBUTE_LABEL_TRANSLATIONS: Record<string, string> = {
+    year: 'Annee',
+    mileage: 'Kilometrage',
+    fuel: 'Carburant',
+    gearbox: 'Boite de vitesse',
+    transmission: 'Transmission',
+    condition: 'Etat',
+    color: 'Couleur',
+    size: 'Taille',
+    brand: 'Marque',
+    model: 'Modele',
+    material: 'Matiere',
+    weight: 'Poids',
+    weight_class: 'Classe de poids',
+    dimensions: 'Dimensions',
+    capacity: 'Capacite',
+    stock: 'Stock',
+    quantity: 'Quantite',
+    warranty: 'Garantie',
+    availability: 'Disponibilite',
+    service_area: 'Zone de service',
+    payment_frequency: 'Frequence de paiement',
+    rooms: 'Nombre de pieces',
+    area: 'Surface',
+    rent: 'Loyer',
+    battery: 'Batterie',
+    battery_health: 'Etat de la batterie',
+    storage: 'Stockage',
+    ram: 'Memoire RAM',
+    memory: 'Memoire',
+    processor: 'Processeur',
+    screen_size: "Taille d'ecran",
+    operating_system: "Systeme d'exploitation",
+    resolution: 'Resolution',
+    camera: 'Camera',
+    origin: 'Origine',
+    expiration_date: "Date d'expiration",
+    manufacture_date: 'Date de fabrication',
+};
+
+const ATTRIBUTE_OPTION_TRANSLATIONS: Record<string, string> = {
+    yes: 'Oui',
+    no: 'Non',
+    true: 'Oui',
+    false: 'Non',
+    new: 'Neuf',
+    used: 'Occasion',
+    refurbished: 'Reconditionne',
+    excellent: 'Excellent',
+    good: 'Bon',
+    fair: 'Correct',
+    poor: 'Mauvais',
+    manual: 'Manuelle',
+    automatic: 'Automatique',
+    petrol: 'Essence',
+    gasoline: 'Essence',
+    diesel: 'Diesel',
+    electric: 'Electrique',
+    hybrid: 'Hybride',
+};
+
+const ATTRIBUTE_WORD_TRANSLATIONS: Record<string, string> = {
+    year: 'annee',
+    mileage: 'kilometrage',
+    fuel: 'carburant',
+    gearbox: 'boite',
+    transmission: 'transmission',
+    condition: 'etat',
+    color: 'couleur',
+    size: 'taille',
+    brand: 'marque',
+    model: 'modele',
+    material: 'matiere',
+    weight: 'poids',
+    class: 'classe',
+    dimensions: 'dimensions',
+    capacity: 'capacite',
+    stock: 'stock',
+    quantity: 'quantite',
+    warranty: 'garantie',
+    availability: 'disponibilite',
+    service: 'service',
+    area: 'zone',
+    payment: 'paiement',
+    frequency: 'frequence',
+    rooms: 'pieces',
+    rent: 'loyer',
+    battery: 'batterie',
+    health: 'sante',
+    storage: 'stockage',
+    memory: 'memoire',
+    processor: 'processeur',
+    screen: 'ecran',
+    operating: 'systeme',
+    system: "d'exploitation",
+    resolution: 'resolution',
+    camera: 'camera',
+    origin: 'origine',
+    expiration: 'expiration',
+    manufacture: 'fabrication',
+    date: 'date',
+};
+
+const normalizeAttributeKey = (value: unknown): string =>
+    (typeof value === 'string' ? value : '')
+        .trim()
+        .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+        .replace(/[\s\-]+/g, '_')
+        .toLowerCase();
+
+const toTitleCase = (value: string): string =>
+    value.replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1));
+
+const localizeAttributeLabel = (attribute: CategoryAttribute): string => {
+    const normalizedName = normalizeAttributeKey(attribute?.name);
+    if (ATTRIBUTE_LABEL_TRANSLATIONS[normalizedName]) {
+        return ATTRIBUTE_LABEL_TRANSLATIONS[normalizedName];
+    }
+
+    const sourceLabel =
+        (typeof attribute?.label === 'string' && attribute.label.trim()) ||
+        (typeof attribute?.name === 'string' && attribute.name.trim()) ||
+        '';
+    if (!sourceLabel) return 'Caracteristique';
+
+    const normalizedLabel = normalizeAttributeKey(sourceLabel);
+    if (ATTRIBUTE_LABEL_TRANSLATIONS[normalizedLabel]) {
+        return ATTRIBUTE_LABEL_TRANSLATIONS[normalizedLabel];
+    }
+
+    const translated = normalizedLabel
+        .split('_')
+        .filter(Boolean)
+        .map((token) => ATTRIBUTE_WORD_TRANSLATIONS[token] || token)
+        .join(' ');
+
+    const humanized = translated || normalizedLabel.replace(/_/g, ' ');
+    return toTitleCase(humanized.trim());
+};
+
+const localizeAttributeOption = (value: string): string => {
+    const normalized = normalizeAttributeKey(value);
+    if (!normalized) return value;
+    return ATTRIBUTE_OPTION_TRANSLATIONS[normalized] || toTitleCase(normalized.replace(/_/g, ' '));
+};
+
+const isAttributeValueEmpty = (value: any): boolean => {
+    if (value === undefined || value === null) return true;
+    if (typeof value === 'string') return value.trim().length === 0;
+    if (Array.isArray(value)) return value.length === 0;
+    return false;
 };
 
 const BASE_FORM_FIELDS = [
@@ -201,6 +355,37 @@ export default function PublishScreen() {
         if (!categoryAttributes) return [];
         return categoryAttributes.filter(attr => !BASE_FORM_FIELDS.includes(attr.name));
     }, [categoryAttributes]);
+    const localizedAttributes = React.useMemo(
+        () =>
+            filteredAttributes.map((attr) => ({
+                ...attr,
+                label: localizeAttributeLabel(attr),
+                options: Array.isArray(attr.options)
+                    ? attr.options.map((option: string) => localizeAttributeOption(String(option)))
+                    : attr.options,
+            })),
+        [filteredAttributes],
+    );
+    const requiredAttributesCount = React.useMemo(
+        () => localizedAttributes.filter((attr) => attr.required).length,
+        [localizedAttributes],
+    );
+    const completedAttributesCount = React.useMemo(
+        () =>
+            localizedAttributes.filter((attr) => !isAttributeValueEmpty(dynamicAttributes[attr.name])).length,
+        [dynamicAttributes, localizedAttributes],
+    );
+    const completedRequiredAttributesCount = React.useMemo(
+        () =>
+            localizedAttributes.filter(
+                (attr) => attr.required && !isAttributeValueEmpty(dynamicAttributes[attr.name]),
+            ).length,
+        [dynamicAttributes, localizedAttributes],
+    );
+    const attributesCompletionRate = React.useMemo(() => {
+        if (localizedAttributes.length === 0) return 0;
+        return Math.round((completedAttributesCount / localizedAttributes.length) * 100);
+    }, [completedAttributesCount, localizedAttributes.length]);
 
     // Calculer les étapes dynamiquement en fonction des attributs
     const STEPS = React.useMemo(() => {
@@ -223,7 +408,6 @@ export default function PublishScreen() {
         () => STEPS.find((step) => step.id === currentStep) || STEPS[0],
         [STEPS, currentStep]
     );
-    const activeStepCopy = STEP_COPY[activeStep?.key || 'details'] || STEP_COPY.details;
 
     // Debug: Log category attributes when they change
     React.useEffect(() => {
@@ -359,7 +543,7 @@ export default function PublishScreen() {
             setIsConvertingImages(true);
             try {
                 const newImages = result.assets.map((asset) =>
-                    buildImageFile(asset.uri, asset.fileName)
+                    buildImageFile(asset.uri, asset.fileName ?? undefined)
                 );
                 setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
@@ -388,7 +572,7 @@ export default function PublishScreen() {
             const asset = result.assets[0];
             setIsConvertingImages(true);
             try {
-                const newImage = buildImageFile(asset.uri, asset.fileName);
+                const newImage = buildImageFile(asset.uri, asset.fileName ?? undefined);
                 setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
@@ -468,16 +652,20 @@ export default function PublishScreen() {
         }
 
         // Étape 4: Attributs dynamiques (seulement si présents)
-        if (step === attributesStepId && filteredAttributes.length > 0) {
-            for (const attr of filteredAttributes) {
-                if (attr.required && !dynamicAttributes[attr.name]) {
-                    newErrors[attr.name] = `${attr.label || attr.name} est obligatoire`;
+        if (step === attributesStepId && localizedAttributes.length > 0) {
+            for (const attr of localizedAttributes) {
+                if (attr.required && isAttributeValueEmpty(dynamicAttributes[attr.name])) {
+                    newErrors[attr.name] = `${attr.label || 'Ce champ'} est obligatoire`;
                 }
             }
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
-                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
+                showAlert({
+                    title: 'Erreur',
+                    message: 'Veuillez completer les caracteristiques obligatoires',
+                    variant: 'error',
+                });
                 return false;
             }
         }
@@ -625,6 +813,15 @@ export default function PublishScreen() {
 
             {/* Progress Bar */}
             <View style={styles.progressContainer}>
+                <View style={styles.progressSummary}>
+                    <View style={styles.progressTextBlock}>
+                        <Text style={styles.progressEyebrow}>Etape {currentStep} sur {STEPS.length}</Text>
+                        <Text style={styles.progressTitle}>{activeStep?.title || 'Annonce'}</Text>
+                    </View>
+                    <Text style={styles.progressPercent}>
+                        {Math.round(((currentStep - 1) / Math.max(STEPS.length - 1, 1)) * 100)}%
+                    </Text>
+                </View>
                 <View style={styles.progressTrack}>
                     <Animated.View
                         style={[
@@ -669,54 +866,24 @@ export default function PublishScreen() {
 
             {/* Content */}
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.content}
             >
                 <ScrollView
                     style={styles.scrollView}
                     contentContainerStyle={styles.scrollContent}
                     showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
                 >
-                    <View style={styles.stepHeroContainer}>
-                        <LinearGradient colors={Gradients.primaryVertical} style={styles.stepHeroGradient}>
-                            <View style={styles.stepHeroTopRow}>
-                                <View style={styles.stepHeroBadge}>
-                                    <Ionicons name="sparkles-outline" size={14} color={Colors.accent} />
-                                    <Text style={styles.stepHeroBadgeText}>Etape {currentStep} / {STEPS.length}</Text>
-                                </View>
-                                <Text style={styles.stepHeroCounter}>
-                                    {Math.round(((currentStep - 1) / Math.max(STEPS.length - 1, 1)) * 100)}%
-                                </Text>
-                            </View>
-
-                            <View style={styles.stepHeroMainRow}>
-                                <View style={styles.stepHeroIcon}>
-                                    <Ionicons
-                                        name={(activeStep?.icon || 'sparkles-outline') as any}
-                                        size={22}
-                                        color={Colors.white}
-                                    />
-                                </View>
-                                <View style={styles.stepHeroTextBlock}>
-                                    <Text style={styles.stepHeroTitle}>{activeStepCopy.title}</Text>
-                                    <Text style={styles.stepHeroSubtitle}>{activeStepCopy.subtitle}</Text>
-                                </View>
-                            </View>
-
-                            <View style={styles.stepHeroTip}>
-                                <Ionicons name="checkmark-circle-outline" size={16} color={Colors.accent} />
-                                <Text style={styles.stepHeroTipText}>{activeStepCopy.tip}</Text>
-                            </View>
-                        </LinearGradient>
-                    </View>
-
                     {/* Step 1: Sélection Catégorie */}
                     {currentStep === getStepId('category') && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>📂 Choisissez une catégorie</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Sélectionnez la catégorie qui correspond le mieux à votre annonce
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="grid-outline"
+                                title={STEP_COPY.category.title}
+                                subtitle={STEP_COPY.category.subtitle}
+                                tip={STEP_COPY.category.tip}
+                            />
 
                             {/* Breadcrumb */}
                             {categoryPath.length > 0 && (
@@ -842,10 +1009,12 @@ export default function PublishScreen() {
                     {/* Step 2: Détails du Produit */}
                     {currentStep === getStepId('details') && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>📝 Détails de l&apos;annonce</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Remplissez les informations sur votre produit ou service
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="document-text-outline"
+                                title={STEP_COPY.details.title}
+                                subtitle={STEP_COPY.details.subtitle}
+                                tip={STEP_COPY.details.tip}
+                            />
 
                             {/* Nom */}
                             <View style={styles.inputGroup}>
@@ -961,10 +1130,12 @@ export default function PublishScreen() {
                     {/* Step 3: Livraison */}
                     {currentStep === getStepId('delivery') && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>🚚 Livraison</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Définissez si l&apos;annonce est livrable et le point de récupération
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="location-outline"
+                                title={STEP_COPY.delivery.title}
+                                subtitle={STEP_COPY.delivery.subtitle}
+                                tip={STEP_COPY.delivery.tip}
+                            />
 
                             <View style={styles.deliveryCard}>
                                 <View style={styles.deliveryHeader}>
@@ -1100,29 +1271,61 @@ export default function PublishScreen() {
                     )}
 
                     {/* Step 4: Caractéristiques spécifiques (seulement si présents) */}
-                    {currentStep === getStepId('attributes') && filteredAttributes.length > 0 && (
+                    {currentStep === getStepId('attributes') && localizedAttributes.length > 0 && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>🎯 Caractéristiques spécifiques</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Précisez les détails importants pour votre {selectedLeafCategory?.name?.toLowerCase() || 'produit'}
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="list-outline"
+                                title={STEP_COPY.attributes.title}
+                                subtitle={`Precisez les details importants pour votre ${selectedLeafCategory?.name?.toLowerCase() || 'produit'}.`}
+                                tip={STEP_COPY.attributes.tip}
+                            />
 
                             {attributesLoading ? (
                                 <View style={styles.loadingContainer}>
                                     <LoadingSpinner size="small" />
-                                    <Text style={styles.loadingText}>Chargement des caractéristiques...</Text>
+                                    <Text style={styles.loadingText}>Chargement des caracteristiques...</Text>
                                 </View>
                             ) : (
-                                <View style={styles.attributesContainer}>
-                                    {filteredAttributes.map((attr: any, index: number) => (
-                                        <DynamicAttributeField
-                                            key={attr._id || attr.name || `attr-${index}`}
-                                            attribute={attr}
-                                            value={dynamicAttributes[attr.name]}
-                                            onChange={(value) => handleAttributeChange(attr.name, value)}
-                                        />
-                                    ))}
-                                </View>
+                                <>
+                                    <View style={styles.attributesSummaryCard}>
+                                        <View style={styles.attributesSummaryHeader}>
+                                            <View style={styles.attributesSummaryTitleRow}>
+                                                <Ionicons name="sparkles-outline" size={16} color={Colors.primary} />
+                                                <Text style={styles.attributesSummaryTitle}>Caracteristiques specifiques</Text>
+                                            </View>
+                                            <View style={styles.attributesProgressChip}>
+                                                <Text style={styles.attributesProgressChipText}>
+                                                    {attributesCompletionRate}%
+                                                </Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.attributesSummaryText}>
+                                            {completedAttributesCount}/{localizedAttributes.length} champs remplis
+                                        </Text>
+                                        <Text style={styles.attributesSummaryHint}>
+                                            Obligatoires: {completedRequiredAttributesCount}/{requiredAttributesCount}
+                                        </Text>
+                                    </View>
+
+                                    <View style={styles.attributesContainer}>
+                                        {localizedAttributes.map((attr: any, index: number) => (
+                                            <View
+                                                key={attr._id || attr.name || `attr-${index}`}
+                                                style={[
+                                                    styles.attributeFieldCard,
+                                                    errors[attr.name] && styles.attributeFieldCardError,
+                                                ]}
+                                            >
+                                                <DynamicAttributeField
+                                                    attribute={attr}
+                                                    value={dynamicAttributes[attr.name]}
+                                                    onChange={(value) => handleAttributeChange(attr.name, value)}
+                                                    error={errors[attr.name]}
+                                                />
+                                            </View>
+                                        ))}
+                                    </View>
+                                </>
                             )}
                         </View>
                     )}
@@ -1130,10 +1333,12 @@ export default function PublishScreen() {
                     {/* Step 5: Photos */}
                     {currentStep === getStepId('photos') && (
                         <View style={styles.stepContent}>
-                            <Text style={styles.stepTitle}>📸 Ajoutez des photos</Text>
-                            <Text style={styles.stepSubtitle}>
-                                Ajoutez jusqu&apos;a 10 photos de qualite ({images.length}/10)
-                            </Text>
+                            <AnnouncementStepHeader
+                                icon="images-outline"
+                                title={STEP_COPY.photos.title}
+                                subtitle={`Ajoutez jusqu'a 10 photos de qualité (${images.length}/10).`}
+                                tip={STEP_COPY.photos.tip}
+                            />
 
                             {/* Grid des images */}
                             <View style={styles.imagesGrid}>
@@ -1324,6 +1529,33 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.xl,
         ...Shadows.sm,
     },
+    progressSummary: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    progressTextBlock: {
+        flex: 1,
+    },
+    progressEyebrow: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
+        textTransform: 'uppercase',
+    },
+    progressTitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.textPrimary,
+    },
+    progressPercent: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.accentDark,
+    },
     progressTrack: {
         height: 8,
         backgroundColor: Colors.gray100,
@@ -1392,96 +1624,6 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: Colors.gray100,
         ...Shadows.sm,
-    },
-    stepTitle: {
-        fontSize: Typography.fontSize.xl,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.textPrimary,
-        marginBottom: Spacing.xs,
-    },
-    stepSubtitle: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.textSecondary,
-        marginBottom: Spacing.lg,
-        lineHeight: 20,
-    },
-    stepHeroContainer: {
-        marginHorizontal: Spacing.lg,
-        marginTop: Spacing.md,
-        borderRadius: BorderRadius.xl,
-        overflow: 'hidden',
-        ...Shadows.md,
-    },
-    stepHeroGradient: {
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
-        gap: Spacing.md,
-    },
-    stepHeroTopRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    stepHeroBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs,
-        borderRadius: BorderRadius.full,
-        backgroundColor: 'rgba(255, 255, 255, 0.14)',
-    },
-    stepHeroBadgeText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.white,
-    },
-    stepHeroCounter: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.accent,
-    },
-    stepHeroMainRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.md,
-    },
-    stepHeroIcon: {
-        width: 42,
-        height: 42,
-        borderRadius: 21,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.18)',
-    },
-    stepHeroTextBlock: {
-        flex: 1,
-    },
-    stepHeroTitle: {
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.white,
-    },
-    stepHeroSubtitle: {
-        marginTop: 2,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.medium,
-        color: Colors.white + 'DD',
-        lineHeight: 19,
-    },
-    stepHeroTip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-        borderTopWidth: 1,
-        borderTopColor: 'rgba(255, 255, 255, 0.16)',
-        paddingTop: Spacing.sm,
-    },
-    stepHeroTipText: {
-        flex: 1,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.white + 'E6',
     },
     breadcrumb: {
         flexDirection: 'row',
@@ -1762,8 +1904,67 @@ const styles = StyleSheet.create({
         marginTop: Spacing.xs,
         textAlign: 'center',
     },
+    attributesSummaryCard: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    attributesSummaryHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.xs,
+        gap: Spacing.sm,
+    },
+    attributesSummaryTitleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+    },
+    attributesSummaryTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    attributesProgressChip: {
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary + '15',
+    },
+    attributesProgressChipText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.primary,
+    },
+    attributesSummaryText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    attributesSummaryHint: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+    },
     attributesContainer: {
         gap: Spacing.sm,
+    },
+    attributeFieldCard: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        ...Shadows.sm,
+    },
+    attributeFieldCardError: {
+        borderColor: Colors.error + '80',
+        backgroundColor: Colors.error + '08',
     },
     imagesGrid: {
         flexDirection: 'row',
