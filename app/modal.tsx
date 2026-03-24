@@ -9,8 +9,6 @@ import { authFlowService } from '@/services/authFlowService';
 import {
     useLoginMutation,
     useRegisterMutation,
-    useRequestOtpMutation,
-    useVerifyOtpMutation,
 } from '@/store/api/authApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useAppDispatch } from '@/store/hooks';
@@ -33,11 +31,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 type AuthMode = 'register' | 'login';
 type LoginStep = 'phone' | 'pin';
-type RegisterStep = 'phone' | 'otp' | 'identity' | 'security' | 'preferences';
+type RegisterStep = 'phone' | 'identity' | 'security' | 'preferences';
 
 const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
-    { step: 'otp', label: 'OTP' },
     { step: 'identity', label: 'Profil' },
     { step: 'security', label: 'PIN' },
     { step: 'preferences', label: 'Preferences' },
@@ -45,7 +42,6 @@ const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
 
 const GOOGLE_REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
-    { step: 'otp', label: 'OTP' },
     { step: 'preferences', label: 'Preferences' },
 ];
 
@@ -54,12 +50,11 @@ const LOGIN_PROGRESS: { step: LoginStep; label: string }[] = [
     { step: 'pin', label: 'PIN' },
 ];
 
-const createEmptyOtp = () => ['', '', '', '', ''];
 const isPinValid = (value: string) => /^\d{4}$/.test(value);
 const generateFourDigitPin = () => String(Math.floor(1000 + Math.random() * 9000));
 const GOOGLE_REGISTRATION_INFO_MESSAGE =
     'Pour une utilisation optimale et fluide de l application, completez ces 2 etapes:\n' +
-    '1. Ajoutez votre numero de telephone (validation OTP).\n' +
+    '1. Ajoutez votre numero de telephone.\n' +
     '2. Choisissez vos preferences.';
 
 const toNormalizedMessage = (message: string) =>
@@ -119,7 +114,10 @@ export default function AuthModal() {
     const [loginStep, setLoginStep] = useState<LoginStep>('phone');
     const [registerStep, setRegisterStep] = useState<RegisterStep>(() => {
         const step = readParam(params.registerStep);
-        if (step === 'otp' || step === 'identity' || step === 'security' || step === 'preferences') {
+        if (step === 'otp') {
+            return 'identity';
+        }
+        if (step === 'identity' || step === 'security' || step === 'preferences') {
             return step;
         }
         return 'phone';
@@ -127,7 +125,6 @@ export default function AuthModal() {
     const [phone, setPhone] = useState(readParam(params.phone));
     const [pin, setPin] = useState('');
     const [showPin, setShowPin] = useState(false);
-    const [otp, setOtp] = useState<string[]>(createEmptyOtp());
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [confirmPin, setConfirmPin] = useState('');
@@ -163,10 +160,7 @@ export default function AuthModal() {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(50)).current;
     const scrollRef = useRef<ScrollView | null>(null);
-    const otpRefs = useRef<(TextInput | null)[]>([]);
 
-    const [requestOtp, { isLoading: isRequestingOtp }] = useRequestOtpMutation();
-    const [verifyOtp, { isLoading: isVerifyingOtp }] = useVerifyOtpMutation();
     const [register, { isLoading: isRegistering }] = useRegisterMutation();
     const [login, { isLoading: isLoggingIn }] = useLoginMutation();
     const { data: categories, isFetching: isFetchingCategories } = useGetCategoriesQuery();
@@ -180,7 +174,6 @@ export default function AuthModal() {
     const isLoginPhoneStep = isLoginMode && loginStep === 'phone';
     const isLoginPinStep = isLoginMode && loginStep === 'pin';
     const isRegisterPhoneStep = !isLoginMode && registerStep === 'phone';
-    const isRegisterOtpStep = !isLoginMode && registerStep === 'otp';
     const isRegisterIdentityStep = !isLoginMode && registerStep === 'identity';
     const isRegisterSecurityStep = !isLoginMode && registerStep === 'security';
     const isRegisterPreferencesStep = !isLoginMode && registerStep === 'preferences';
@@ -281,7 +274,6 @@ export default function AuthModal() {
 
     const resetRegisterData = () => {
         setRegisterStep('phone');
-        setOtp(createEmptyOtp());
         setFirstName('');
         setLastName('');
         setPin('');
@@ -335,64 +327,9 @@ export default function AuthModal() {
         return true;
     };
 
-    const handleRequestOtp = async () => {
+    const handleContinueToRegisterStep = () => {
         if (!validatePhone()) return;
-
-        const trimmedPhone = phone.trim();
-
-        try {
-            await requestOtp({ phone: trimmedPhone }).unwrap();
-            setOtp(createEmptyOtp());
-            setRegisterStep('otp');
-            setTimeout(() => {
-                otpRefs.current[0]?.focus();
-            }, 120);
-        } catch (error: any) {
-            console.error('OTP request error:', error);
-            showAlert(
-                'Erreur',
-                error?.data?.message || 'Erreur lors de l envoi du code OTP',
-                'error'
-            );
-        }
-    };
-
-    const handleOtpChange = (text: string, index: number) => {
-        const value = text.slice(-1);
-        if (value && !/^\d$/.test(value)) {
-            return;
-        }
-
-        const next = [...otp];
-        next[index] = value;
-        setOtp(next);
-
-        if (value && index < otpRefs.current.length - 1) {
-            otpRefs.current[index + 1]?.focus();
-        }
-    };
-
-    const handleOtpKeyPress = (key: string, index: number) => {
-        if (key !== 'Backspace' || otp[index] || index === 0) {
-            return;
-        }
-        otpRefs.current[index - 1]?.focus();
-    };
-
-    const handleVerifyOtp = async () => {
-        const code = otp.join('');
-        if (code.length !== 5) {
-            showAlert('Erreur', 'Le code OTP doit contenir 5 chiffres', 'error');
-            return;
-        }
-
-        try {
-            await verifyOtp({ phone: phone.trim(), otp: code }).unwrap();
-            setRegisterStep(isGoogleRegistrationFlow ? 'preferences' : 'identity');
-        } catch (error: any) {
-            console.error('OTP verify error:', error);
-            showAlert('Erreur', error?.data?.message || 'Code OTP invalide', 'error');
-        }
+        setRegisterStep(isGoogleRegistrationFlow ? 'preferences' : 'identity');
     };
 
     const toggleCategory = (categoryId: string) => {
@@ -516,7 +453,6 @@ export default function AuthModal() {
                 setMode('register');
                 setLoginStep('phone');
                 setRegisterStep('phone');
-                setOtp(createEmptyOtp());
                 setSelectedCategories([]);
                 setPin('');
                 setConfirmPin('');
@@ -624,12 +560,7 @@ export default function AuthModal() {
 
         if (isGoogleRegistrationFlow) {
             if (registerStep === 'preferences') {
-                setRegisterStep('otp');
-                return;
-            }
-            if (registerStep === 'otp') {
                 setRegisterStep('phone');
-                setOtp(createEmptyOtp());
                 return;
             }
             closeModal();
@@ -645,12 +576,7 @@ export default function AuthModal() {
             return;
         }
         if (registerStep === 'identity') {
-            setRegisterStep('otp');
-            return;
-        }
-        if (registerStep === 'otp') {
             setRegisterStep('phone');
-            setOtp(createEmptyOtp());
             return;
         }
         closeModal();
@@ -668,11 +594,7 @@ export default function AuthModal() {
 
         if (isGoogleRegistrationFlow) {
             if (isRegisterPhoneStep) {
-                void handleRequestOtp();
-                return;
-            }
-            if (isRegisterOtpStep) {
-                void handleVerifyOtp();
+                handleContinueToRegisterStep();
                 return;
             }
             if (isRegisterPreferencesStep) {
@@ -682,11 +604,7 @@ export default function AuthModal() {
         }
 
         if (isRegisterPhoneStep) {
-            void handleRequestOtp();
-            return;
-        }
-        if (isRegisterOtpStep) {
-            void handleVerifyOtp();
+            handleContinueToRegisterStep();
             return;
         }
         if (isRegisterIdentityStep) {
@@ -704,8 +622,7 @@ export default function AuthModal() {
         }
     };
 
-    const isSubmitting =
-        isRequestingOtp || isVerifyingOtp || isRegistering || isLoggingIn;
+    const isSubmitting = isRegistering || isLoggingIn;
     const isBusy = isSubmitting || isGoogleLoading;
 
     const keyboardVerticalOffset = Platform.select({
@@ -726,15 +643,11 @@ export default function AuthModal() {
             : 'Verification PIN'
         : isGoogleRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Verification du numero'
-            : isRegisterOtpStep
-              ? 'Verification OTP'
-              : 'Choisissez vos preferences'
+            ? 'Ajoutez votre numero'
+            : 'Choisissez vos preferences'
         : isRegisterPhoneStep
           ? 'Demarrage'
-          : isRegisterOtpStep
-            ? 'Verification OTP'
-            : isRegisterIdentityStep
+          : isRegisterIdentityStep
               ? 'Completez votre profil'
               : isRegisterSecurityStep
                 ? 'Securisez votre compte'
@@ -747,14 +660,10 @@ export default function AuthModal() {
         : isGoogleRegistrationFlow
           ? isRegisterPhoneStep
             ? 'Entrez votre numero pour finaliser votre compte Google.'
-            : isRegisterOtpStep
-              ? `Entrez le code recu au ${phone.trim() || 'numero renseigne'}.`
-              : 'Selectionnez les categories qui vous interessent.'
+            : 'Selectionnez les categories qui vous interessent.'
         : isRegisterPhoneStep
-          ? 'Entrez votre numero pour recevoir un code OTP.'
-          : isRegisterOtpStep
-            ? `Entrez le code recu au ${phone.trim() || 'numero renseigne'}.`
-            : isRegisterIdentityStep
+          ? 'Entrez votre numero pour commencer votre inscription.'
+          : isRegisterIdentityStep
               ? 'Renseignez vos informations personnelles.'
               : isRegisterSecurityStep
                 ? 'Creez un code PIN pour proteger votre compte.'
@@ -767,16 +676,12 @@ export default function AuthModal() {
         : isGoogleRegistrationFlow
           ? isRegisterPhoneStep
             ? 'Numero requis pour verifier et lier votre compte Google.'
-            : isRegisterOtpStep
-              ? 'Le code OTP contient 5 chiffres.'
-              : 'Selectionnez au moins une categorie pour terminer.'
+            : 'Selectionnez au moins une categorie pour terminer.'
         : isRegisterPhoneStep
           ? googleRegistrationToken
             ? 'Compte Google detecte. Finalisez l inscription avec votre numero de telephone.'
-            : 'Code OTP envoye en quelques secondes, ou connexion rapide via Google.'
-        : isRegisterOtpStep
-            ? 'Le code OTP contient 5 chiffres.'
-            : isRegisterIdentityStep
+            : 'Continuez avec vos informations, ou utilisez Google.'
+        : isRegisterIdentityStep
               ? 'Utilisez vos vraies informations pour faciliter le support.'
               : isRegisterSecurityStep
                 ? 'Votre PIN doit contenir exactement 4 chiffres.'
@@ -803,9 +708,7 @@ export default function AuthModal() {
             : 'lock-closed-outline'
         : isRegisterPhoneStep
           ? 'person-add-outline'
-          : isRegisterOtpStep
-            ? 'shield-checkmark-outline'
-            : isRegisterIdentityStep
+          : isRegisterIdentityStep
               ? 'person-outline'
               : isRegisterSecurityStep
                 ? 'key-outline'
@@ -822,24 +725,16 @@ export default function AuthModal() {
         : isGoogleRegistrationFlow
           ? isRegisterPhoneStep
             ? isSubmitting
-              ? 'Envoi...'
-              : 'Recevoir le code'
-            : isRegisterOtpStep
-              ? isSubmitting
-                ? 'Verification...'
-                : 'Verifier'
-              : isSubmitting
+              ? 'Traitement...'
+              : 'Continuer'
+            : isSubmitting
                 ? 'Creation...'
                 : 'Finaliser mon compte'
         : isRegisterPhoneStep
           ? isSubmitting
-              ? 'Envoi...'
-              : 'Recevoir le code'
-          : isRegisterOtpStep
-            ? isSubmitting
-                ? 'Verification...'
-                : 'Verifier'
-            : isRegisterIdentityStep || isRegisterSecurityStep
+              ? 'Traitement...'
+              : 'Continuer'
+          : isRegisterIdentityStep || isRegisterSecurityStep
               ? 'Continuer'
               : isSubmitting
                 ? 'Inscription...'
@@ -1029,7 +924,7 @@ export default function AuthModal() {
                                                 returnKeyType={isRegisterPhoneStep ? 'send' : 'next'}
                                                 onSubmitEditing={() => {
                                                     if (isRegisterPhoneStep) {
-                                                        void handleRequestOtp();
+                                                        handleContinueToRegisterStep();
                                                         return;
                                                     }
                                                     handleContinueToPin();
@@ -1045,7 +940,11 @@ export default function AuthModal() {
                                             <TouchableOpacity
                                                 style={styles.phoneSummaryEditButton}
                                                 onPress={() => {
-                                                    setLoginStep('phone');
+                                                    if (isLoginMode) {
+                                                        setLoginStep('phone');
+                                                    } else {
+                                                        setRegisterStep('phone');
+                                                    }
                                                     setShowPin(false);
                                                     setIsPinFocused(false);
                                                 }}
@@ -1101,34 +1000,6 @@ export default function AuthModal() {
                                         <TouchableOpacity onPress={handleForgotPin} style={styles.forgotPinButton}>
                                             <Text style={styles.forgotPinText}>PIN oublie ? Reinitialiser</Text>
                                         </TouchableOpacity>
-                                    </View>
-                                )}
-
-                                {isRegisterOtpStep && (
-                                    <View style={styles.inputGroup}>
-                                        <Text style={styles.label}>Code OTP (5 chiffres)</Text>
-                                        <View style={styles.otpRow}>
-                                            {otp.map((digit, index) => (
-                                                <TextInput
-                                                    key={`otp-${index}`}
-                                                    ref={(ref) => {
-                                                        otpRefs.current[index] = ref;
-                                                    }}
-                                                    style={[
-                                                        styles.otpInput,
-                                                        digit ? styles.otpInputFilled : undefined,
-                                                    ]}
-                                                    value={digit}
-                                                    onChangeText={(text) => handleOtpChange(text, index)}
-                                                    onKeyPress={(event) =>
-                                                        handleOtpKeyPress(event.nativeEvent.key, index)
-                                                    }
-                                                    keyboardType="number-pad"
-                                                    maxLength={1}
-                                                    selectTextOnFocus
-                                                />
-                                            ))}
-                                        </View>
                                     </View>
                                 )}
 
@@ -1740,28 +1611,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.semibold,
-    },
-    otpRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        gap: Spacing.xs,
-    },
-    otpInput: {
-        width: 50,
-        height: 58,
-        borderRadius: BorderRadius.xl,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        textAlign: 'center',
-        fontSize: Typography.fontSize.xxl,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.textPrimary,
-        backgroundColor: Colors.white,
-        ...Shadows.sm,
-    },
-    otpInputFilled: {
-        borderColor: Colors.accentDark,
-        backgroundColor: Colors.accent + '16',
     },
     phoneSummaryCard: {
         backgroundColor: Colors.white,

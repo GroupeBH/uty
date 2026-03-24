@@ -28,14 +28,22 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STATUS_ACTION_LABELS: Record<OrderStatusValue, string> = {
-    pending: 'Mettre en attente',
-    confirmed: 'Confirmer',
-    shipped: 'Expedier',
-    delivered: 'Livrer',
+    pending: 'Remettre en attente',
+    confirmed: 'Confirmer la commande',
+    shipped: 'Marquer comme expediee',
+    delivered: 'Marquer comme livree',
     cancelled: 'Annuler la commande',
+};
+
+const STATUS_ACTION_ICONS: Record<OrderStatusValue, keyof typeof Ionicons.glyphMap> = {
+    pending: 'time-outline',
+    confirmed: 'checkmark-circle-outline',
+    shipped: 'cube-outline',
+    delivered: 'checkmark-done-outline',
+    cancelled: 'close-circle-outline',
 };
 
 const formatAmount = (value: number | undefined, currency?: unknown) =>
@@ -71,6 +79,7 @@ const parseCoordinateLabel = (
 export default function OrderDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const { user } = useAuth();
     const [updateOrderStatus, { isLoading: isUpdatingStatus }] = useUpdateOrderStatusMutation();
     const [requestDelivery, { isLoading: isRequestingDelivery }] = useRequestDeliveryMutation();
@@ -231,15 +240,28 @@ export default function OrderDetailScreen() {
                     try {
                         await updateOrderStatus({ id: order._id, status: nextStatus }).unwrap();
                         await refetch();
-                        const successTitle = nextStatus === 'confirmed' ? 'Commande confirmee' : 'Statut mis a jour';
+                        const isOrderConfirmed = nextStatus === 'confirmed';
+                        const successTitle = isOrderConfirmed ? 'Commande confirmee' : 'Statut mis a jour';
                         const successMessage =
-                            nextStatus === 'confirmed'
-                                ? 'La commande a ete confirmee avec succes.'
+                            isOrderConfirmed
+                                ? 'La commande est acceptee. Prochaine etape: commander une livraison.'
                                 : 'Le statut de la commande a ete modifie avec succes.';
                         showAlert({
                             title: successTitle,
                             message: successMessage,
                             type: 'success',
+                            showCancel: isOrderConfirmed && !deliveryId,
+                            confirmText:
+                                isOrderConfirmed && !deliveryId
+                                    ? 'Commander la livraison'
+                                    : 'OK',
+                            cancelText: 'Plus tard',
+                            onConfirm:
+                                isOrderConfirmed && !deliveryId
+                                    ? () => {
+                                          void onRequestDelivery();
+                                      }
+                                    : undefined,
                         });
                     } catch (error: any) {
                         const apiMessage =
@@ -353,6 +375,21 @@ export default function OrderDetailScreen() {
     const orderCurrency = order.items
         .map((item) => getOrderItemProduct(item)?.currency)
         .find(Boolean);
+    const showSellerActionsDock = isSeller;
+    const canRequestDeliveryNow = isSeller && order.status === 'confirmed' && !deliveryId;
+    const canTrackDeliveryNow = isSeller && Boolean(deliveryId);
+    const hasSellerStatusActions = nextStatuses.length > 0;
+    const sellerDockBottomInset = Math.max(insets.bottom, Spacing.sm);
+    const sellerDockEstimatedHeight = hasSellerStatusActions
+        ? 176
+        : canRequestDeliveryNow
+            ? 188
+            : canTrackDeliveryNow
+                ? 156
+                : 122;
+    const contentBottomPadding = showSellerActionsDock
+        ? sellerDockEstimatedHeight + sellerDockBottomInset + Spacing.lg
+        : Spacing.xxxl;
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -367,7 +404,10 @@ export default function OrderDetailScreen() {
                 <StatusBadge status={order.status} />
             </View>
 
-            <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
+            <ScrollView
+                style={styles.scroll}
+                contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}
+            >
                 <View style={styles.card}>
                     <Text style={styles.cardTitle}>Resume</Text>
                     <View style={styles.rowBetween}>
@@ -503,6 +543,7 @@ export default function OrderDetailScreen() {
                                             onPress={onRequestDelivery}
                                             disabled={isRequestingDelivery}
                                         >
+                                            <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
                                             <Text style={styles.deliveryRequestButtonText}>
                                                 {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
                                             </Text>
@@ -538,44 +579,7 @@ export default function OrderDetailScreen() {
                     )}
                 </View>
 
-                {isSeller ? (
-                    <View style={styles.card}>
-                        <Text style={styles.cardTitle}>Actions vendeur</Text>
-                        {nextStatuses.length === 0 ? (
-                            <Text style={styles.mutedText}>
-                                Cette commande est finalisee. Aucun changement possible.
-                            </Text>
-                        ) : (
-                            <View style={styles.actionsRow}>
-                                {nextStatuses.map((status) => (
-                                    <TouchableOpacity
-                                        key={status}
-                                        style={[
-                                            styles.statusActionButton,
-                                            status === 'cancelled'
-                                                ? styles.statusActionCancelButton
-                                                : styles.statusActionPrimaryButton,
-                                            isUpdatingStatus && styles.disabledButton,
-                                        ]}
-                                        onPress={() => changeStatus(status)}
-                                        disabled={isUpdatingStatus}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.statusActionText,
-                                                status === 'cancelled'
-                                                    ? styles.statusActionCancelText
-                                                    : styles.statusActionPrimaryText,
-                                            ]}
-                                        >
-                                            {STATUS_ACTION_LABELS[status]}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        )}
-                    </View>
-                ) : isBuyer ? (
+                {isBuyer ? (
                     <View style={styles.card}>
                         <Text style={styles.cardTitle}>Suivi client</Text>
                         <Text style={styles.mutedText}>
@@ -584,6 +588,93 @@ export default function OrderDetailScreen() {
                     </View>
                 ) : null}
             </ScrollView>
+
+            {showSellerActionsDock ? (
+                <View style={[styles.sellerActionsDockWrap, { paddingBottom: sellerDockBottomInset }]}>
+                        <View style={styles.sellerActionsDock}>
+                        <View style={styles.sellerActionsDockHeader}>
+                            <Text style={styles.sellerActionsDockTitle}>Actions vendeur</Text>
+                            {isUpdatingStatus || isRequestingDelivery ? (
+                                <Text style={styles.sellerActionsDockMeta}>
+                                    {isUpdatingStatus ? 'Mise a jour...' : 'Demande livraison...'}
+                                </Text>
+                            ) : null}
+                        </View>
+                        <Text style={styles.sellerActionsDockHint}>
+                            {canRequestDeliveryNow
+                                ? 'Commande acceptee. Etape suivante: commander une livraison.'
+                                : canTrackDeliveryNow
+                                    ? 'Livraison creee. Suivez son avancement.'
+                                    : 'Choisissez la prochaine etape de la commande.'}
+                        </Text>
+                        {hasSellerStatusActions ? (
+                            <View style={styles.actionsRow}>
+                                {nextStatuses.map((status) => (
+                                    <TouchableOpacity
+                                        key={status}
+                                        style={[
+                                            styles.statusActionButton,
+                                            styles.sellerActionsDockButton,
+                                            status === 'cancelled'
+                                                ? styles.statusActionCancelButton
+                                                : styles.statusActionPrimaryButton,
+                                            isUpdatingStatus && styles.disabledButton,
+                                        ]}
+                                        onPress={() => changeStatus(status)}
+                                        disabled={isUpdatingStatus}
+                                    >
+                                        <View style={styles.statusActionContent}>
+                                            <Ionicons
+                                                name={STATUS_ACTION_ICONS[status]}
+                                                size={14}
+                                                color={Colors.white}
+                                            />
+                                            <Text
+                                                style={[
+                                                    styles.statusActionText,
+                                                    status === 'cancelled'
+                                                        ? styles.statusActionCancelText
+                                                        : styles.statusActionPrimaryText,
+                                                ]}
+                                            >
+                                                {STATUS_ACTION_LABELS[status]}
+                                            </Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        ) : canRequestDeliveryNow ? (
+                            <>
+                                <TouchableOpacity
+                                    style={[styles.deliveryRequestButton, styles.sellerDockPrimaryButton]}
+                                    onPress={onRequestDelivery}
+                                    disabled={isRequestingDelivery}
+                                >
+                                    <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
+                                    <Text style={styles.deliveryRequestButtonText}>
+                                        {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
+                                    </Text>
+                                </TouchableOpacity>
+                                <Text style={styles.sellerDockHelperText}>
+                                    Le livreur sera assigne apres validation de la demande.
+                                </Text>
+                            </>
+                        ) : canTrackDeliveryNow ? (
+                            <TouchableOpacity
+                                style={[styles.deliveryTrackButton, styles.sellerDockPrimaryButton]}
+                                onPress={() => router.push(resolveDeliveryRoute(deliveryId as string) as any)}
+                            >
+                                <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                                <Text style={styles.deliveryTrackButtonText}>Suivre la livraison</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <Text style={styles.sellerActionsDockEmptyText}>
+                                Cette commande est finalisee. Aucun changement possible.
+                            </Text>
+                        )}
+                    </View>
+                </View>
+            ) : null}
 
             <CustomAlert
                 visible={alertState.visible}
@@ -656,7 +747,7 @@ const styles = StyleSheet.create({
     },
     content: {
         padding: Spacing.xl,
-        paddingBottom: 100,
+        paddingBottom: Spacing.xxxl,
         gap: Spacing.md,
     },
     card: {
@@ -702,20 +793,21 @@ const styles = StyleSheet.create({
     },
     mapSelectButton: {
         marginTop: Spacing.xs,
-        alignSelf: 'flex-start',
+        alignSelf: 'stretch',
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: Spacing.xs,
-        borderRadius: BorderRadius.full,
+        borderRadius: BorderRadius.md,
         borderWidth: 1,
         borderColor: Colors.primary + '40',
-        backgroundColor: Colors.primary + '10',
+        backgroundColor: Colors.primary + '0D',
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs + 2,
+        paddingVertical: Spacing.sm,
     },
     mapSelectButtonText: {
         color: Colors.primary,
-        fontSize: Typography.fontSize.xs,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
     },
     valueText: {
@@ -810,7 +902,7 @@ const styles = StyleSheet.create({
     },
     deliveryRequestButton: {
         marginTop: Spacing.md,
-        borderRadius: BorderRadius.full,
+        borderRadius: BorderRadius.md,
         paddingVertical: Spacing.sm,
         paddingHorizontal: Spacing.md,
         alignItems: 'center',
@@ -818,6 +910,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primary,
         flexDirection: 'row',
         gap: Spacing.xs,
+        minHeight: 44,
+        ...Shadows.sm,
     },
     deliveryRequestButtonText: {
         color: Colors.white,
@@ -826,7 +920,7 @@ const styles = StyleSheet.create({
     },
     deliveryTrackButton: {
         marginTop: Spacing.md,
-        borderRadius: BorderRadius.full,
+        borderRadius: BorderRadius.md,
         paddingVertical: Spacing.sm,
         paddingHorizontal: Spacing.md,
         alignItems: 'center',
@@ -834,6 +928,8 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primary,
         flexDirection: 'row',
         gap: Spacing.xs,
+        minHeight: 44,
+        ...Shadows.sm,
     },
     deliveryTrackButtonText: {
         color: Colors.white,
@@ -844,33 +940,102 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: Spacing.sm,
+        alignItems: 'stretch',
     },
     statusActionButton: {
-        borderRadius: BorderRadius.full,
+        borderRadius: BorderRadius.md,
         paddingHorizontal: Spacing.md,
         paddingVertical: Spacing.sm,
         borderWidth: 1,
+        minHeight: 44,
+        justifyContent: 'center',
     },
     statusActionPrimaryButton: {
         borderColor: Colors.primary,
-        backgroundColor: Colors.primary + '12',
+        backgroundColor: Colors.primary,
     },
     statusActionCancelButton: {
         borderColor: Colors.error,
-        backgroundColor: Colors.error + '10',
+        backgroundColor: Colors.error,
+    },
+    statusActionContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs / 2,
     },
     statusActionText: {
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
     },
     statusActionPrimaryText: {
-        color: Colors.primary,
+        color: Colors.white,
     },
     statusActionCancelText: {
-        color: Colors.error,
+        color: Colors.white,
     },
     disabledButton: {
         opacity: 0.65,
+    },
+    sellerActionsDockWrap: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        backgroundColor: Colors.backgroundSecondary,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+    },
+    sellerActionsDock: {
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.borderLight,
+        padding: Spacing.md,
+        ...Shadows.md,
+    },
+    sellerActionsDockHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+        marginBottom: Spacing.sm,
+    },
+    sellerActionsDockTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.primary,
+    },
+    sellerActionsDockMeta: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.gray500,
+    },
+    sellerActionsDockHint: {
+        marginBottom: Spacing.sm,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+    },
+    sellerActionsDockEmptyText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+    },
+    sellerActionsDockButton: {
+        flexBasis: '48%',
+        flexGrow: 1,
+        alignItems: 'center',
+    },
+    sellerDockPrimaryButton: {
+        marginTop: 0,
+        width: '100%',
+    },
+    sellerDockHelperText: {
+        marginTop: Spacing.xs,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        textAlign: 'center',
     },
     emptyContainer: {
         flex: 1,

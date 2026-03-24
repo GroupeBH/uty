@@ -24,13 +24,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 type ViewMode = 'buyer' | 'seller';
 type StatusFilter = 'all' | OrderStatusValue;
 
-const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
-    { value: 'all', label: 'Toutes' },
-    { value: 'pending', label: 'En attente' },
-    { value: 'confirmed', label: 'Confirmees' },
-    { value: 'shipped', label: 'Expediees' },
-    { value: 'delivered', label: 'Livrees' },
-    { value: 'cancelled', label: 'Annulees' },
+const STATUS_FILTERS: { value: StatusFilter; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+    { value: 'all', label: 'Toutes', icon: 'apps-outline' },
+    { value: 'pending', label: 'En attente', icon: 'time-outline' },
+    { value: 'confirmed', label: 'Confirmees', icon: 'checkmark-circle-outline' },
+    { value: 'shipped', label: 'Expediees', icon: 'cube-outline' },
+    { value: 'delivered', label: 'Livrees', icon: 'checkmark-done-outline' },
+    { value: 'cancelled', label: 'Annulees', icon: 'close-circle-outline' },
 ];
 
 const normalizeViewQuery = (viewParam: unknown): ViewMode | null => {
@@ -189,22 +189,61 @@ export default function OrdersScreen() {
                     style={[styles.tabChip, activeView === 'buyer' && styles.tabChipActive]}
                     onPress={selectBuyerView}
                 >
-                    <Text style={[styles.tabChipText, activeView === 'buyer' && styles.tabChipTextActive]}>
-                        Commandes passees
-                    </Text>
+                    <View style={[styles.tabChipIconWrap, activeView === 'buyer' && styles.tabChipIconWrapActive]}>
+                        <Ionicons
+                            name="cart-outline"
+                            size={14}
+                            color={activeView === 'buyer' ? Colors.primary : Colors.gray500}
+                        />
+                    </View>
+                    <View style={styles.tabChipCopy}>
+                        <Text style={[styles.tabChipText, activeView === 'buyer' && styles.tabChipTextActive]}>
+                            Commandes passees
+                        </Text>
+                        <Text
+                            style={[
+                                styles.tabChipSubtext,
+                                activeView === 'buyer' && styles.tabChipSubtextActive,
+                            ]}
+                        >
+                            {buyerOrders.length} commande(s)
+                        </Text>
+                    </View>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.tabChip, activeView === 'seller' && !hasShop && styles.tabChipActive]}
                     onPress={selectReceivedView}
                 >
-                    <Text
+                    <View
                         style={[
-                            styles.tabChipText,
-                            activeView === 'seller' && !hasShop && styles.tabChipTextActive,
+                            styles.tabChipIconWrap,
+                            activeView === 'seller' && !hasShop && styles.tabChipIconWrapActive,
                         ]}
                     >
-                        Commandes recues
-                    </Text>
+                        <Ionicons
+                            name="storefront-outline"
+                            size={14}
+                            color={activeView === 'seller' && !hasShop ? Colors.primary : Colors.gray500}
+                        />
+                    </View>
+                    <View style={styles.tabChipCopy}>
+                        <Text
+                            style={[
+                                styles.tabChipText,
+                                activeView === 'seller' && !hasShop && styles.tabChipTextActive,
+                            ]}
+                        >
+                            Commandes recues
+                        </Text>
+                        <Text
+                            style={[
+                                styles.tabChipSubtext,
+                                activeView === 'seller' && !hasShop && styles.tabChipSubtextActive,
+                            ]}
+                        >
+                            {receivedOrders.length} commande(s)
+                        </Text>
+                    </View>
                     {hasShop ? (
                         <Ionicons name="open-outline" size={13} color={Colors.primary} />
                     ) : null}
@@ -232,6 +271,11 @@ export default function OrdersScreen() {
                             ]}
                             onPress={() => setSelectedStatus(filter.value)}
                         >
+                            <Ionicons
+                                name={filter.icon}
+                                size={13}
+                                color={selectedStatus === filter.value ? Colors.primary : Colors.gray500}
+                            />
                             <Text
                                 style={[
                                     styles.filterText,
@@ -243,6 +287,12 @@ export default function OrdersScreen() {
                         </TouchableOpacity>
                     ))}
                 </ScrollView>
+            </View>
+            <View style={styles.uxHintCard}>
+                <Ionicons name="information-circle-outline" size={15} color={Colors.primary} />
+                <Text style={styles.uxHintText}>
+                    Touchez une commande pour voir ses details et actions disponibles.
+                </Text>
             </View>
 
             <FlatList
@@ -373,8 +423,8 @@ const styles = StyleSheet.create({
     },
     tabChip: {
         flex: 1,
-        minHeight: 42,
-        borderRadius: BorderRadius.full,
+        minHeight: 52,
+        borderRadius: BorderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.gray200,
         backgroundColor: Colors.white,
@@ -382,11 +432,25 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         flexDirection: 'row',
-        gap: 6,
+        gap: Spacing.sm,
     },
     tabChipActive: {
         borderColor: Colors.primary,
         backgroundColor: Colors.primary + '14',
+    },
+    tabChipIconWrap: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: Colors.gray100,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tabChipIconWrapActive: {
+        backgroundColor: Colors.primary + '18',
+    },
+    tabChipCopy: {
+        flex: 1,
     },
     tabChipText: {
         color: Colors.gray600,
@@ -396,6 +460,16 @@ const styles = StyleSheet.create({
     tabChipTextActive: {
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
+    },
+    tabChipSubtext: {
+        marginTop: 1,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    tabChipSubtextActive: {
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.semibold,
     },
     redirectBanner: {
         marginHorizontal: Spacing.lg,
@@ -428,6 +502,9 @@ const styles = StyleSheet.create({
         marginRight: Spacing.sm,
         borderWidth: 1,
         borderColor: Colors.gray200,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
     },
     filterChipActive: {
         backgroundColor: Colors.accent + '25',
@@ -441,6 +518,25 @@ const styles = StyleSheet.create({
     filterTextActive: {
         color: Colors.primary,
         fontWeight: Typography.fontWeight.bold,
+    },
+    uxHintCard: {
+        marginHorizontal: Spacing.lg,
+        marginBottom: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '22',
+        backgroundColor: Colors.primary + '10',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+    },
+    uxHintText: {
+        flex: 1,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     listContent: {
         paddingHorizontal: Spacing.lg,

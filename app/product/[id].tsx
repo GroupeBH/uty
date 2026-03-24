@@ -3,8 +3,9 @@
  * Avec ajout au panier, contact vendeur et avis
  */
 
-import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { CategoryIcon } from '@/components/CategoryIcon';
 import { CustomAlert } from '@/components/ui/CustomAlert';
+import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
@@ -18,11 +19,11 @@ import {
     useCreateCommentMutation,
     useGetCommentsForAnnouncementQuery,
 } from '@/store/api/commentsApi';
+import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     useCreateConversationMutation,
     useSendMessageMutation as useSendChatMessageMutation,
 } from '@/store/api/messagingApi';
-import { CategoryIcon } from '@/components/CategoryIcon';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -141,6 +142,7 @@ export default function ProductDetailScreen() {
     const [updateCartItem] = useUpdateCartItemMutation();
     const [createConversation, { isLoading: isCreatingConversation }] = useCreateConversationMutation();
     const [sendChatMessage, { isLoading: isSendingChatMessage }] = useSendChatMessageMutation();
+    const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -148,6 +150,8 @@ export default function ProductDetailScreen() {
     const [showContactModal, setShowContactModal] = useState(false);
     const [showReviewModal, setShowReviewModal] = useState(false);
     const [quantity, setQuantity] = useState(1);
+    const [resolvedPickupLocationAddress, setResolvedPickupLocationAddress] = useState('');
+    const [isResolvingPickupLocation, setIsResolvingPickupLocation] = useState(false);
     
     // Review form states
     const [rating, setRating] = useState(5);
@@ -349,26 +353,83 @@ export default function ProductDetailScreen() {
         () => toSafeArray(product?.address).map(anonymizeAddress).filter(Boolean),
         [product?.address],
     );
-    const pickupLocationLabel = React.useMemo(() => {
+    const pickupAddressFromApi = React.useMemo(() => {
         const pickupLocation = product?.pickupLocation;
         if (!pickupLocation) return '';
-
-        const maskedAddress =
-            typeof pickupLocation.address === 'string' ? anonymizeAddress(pickupLocation.address) : '';
-        if (maskedAddress) {
-            return maskedAddress;
-        }
-
-        if (Array.isArray(pickupLocation.coordinates) && pickupLocation.coordinates.length >= 2) {
-            const longitude = Number(pickupLocation.coordinates[0]);
-            const latitude = Number(pickupLocation.coordinates[1]);
-            if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-                return `Lat ${latitude.toFixed(2)}, Lng ${longitude.toFixed(2)} (approx.)`;
-            }
-        }
-
-        return '';
+        return typeof pickupLocation.address === 'string' ? anonymizeAddress(pickupLocation.address) : '';
     }, [product?.pickupLocation]);
+    const pickupCoordinates = React.useMemo(() => {
+        const coordinates = product?.pickupLocation?.coordinates;
+        if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+        const longitude = Number(coordinates[0]);
+        const latitude = Number(coordinates[1]);
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+        return { latitude, longitude };
+    }, [product?.pickupLocation?.coordinates]);
+    const pickupLatitude = pickupCoordinates?.latitude ?? null;
+    const pickupLongitude = pickupCoordinates?.longitude ?? null;
+
+    React.useEffect(() => {
+        if (pickupAddressFromApi) {
+            setResolvedPickupLocationAddress('');
+            setIsResolvingPickupLocation(false);
+            return;
+        }
+        if (pickupLatitude === null || pickupLongitude === null) {
+            setResolvedPickupLocationAddress('');
+            setIsResolvingPickupLocation(false);
+            return;
+        }
+
+        let isActive = true;
+        setIsResolvingPickupLocation(true);
+        setResolvedPickupLocationAddress('');
+
+        const resolvePickupAddress = async () => {
+            try {
+                const response = await triggerReverseGeocode({
+                    lat: pickupLatitude,
+                    lng: pickupLongitude,
+                    language: 'fr',
+                }).unwrap();
+                const formattedAddress =
+                    typeof response?.formattedAddress === 'string'
+                        ? anonymizeAddress(response.formattedAddress)
+                        : '';
+                if (isActive && formattedAddress) {
+                    setResolvedPickupLocationAddress(formattedAddress);
+                }
+            } catch {
+                if (isActive) {
+                    setResolvedPickupLocationAddress('');
+                }
+            } finally {
+                if (isActive) {
+                    setIsResolvingPickupLocation(false);
+                }
+            }
+        };
+
+        void resolvePickupAddress();
+        return () => {
+            isActive = false;
+        };
+    }, [pickupAddressFromApi, pickupLatitude, pickupLongitude, triggerReverseGeocode]);
+
+    const pickupLocationLabel = React.useMemo(() => {
+        if (pickupAddressFromApi) return pickupAddressFromApi;
+        if (resolvedPickupLocationAddress) return resolvedPickupLocationAddress;
+        if (pickupLatitude !== null && pickupLongitude !== null) {
+            return isResolvingPickupLocation ? "Recherche de l'adresse..." : 'Adresse de retrait indisponible';
+        }
+        return '';
+    }, [
+        isResolvingPickupLocation,
+        pickupAddressFromApi,
+        pickupLatitude,
+        pickupLongitude,
+        resolvedPickupLocationAddress,
+    ]);
     const detailRows = React.useMemo(() => {
         if (!product) return [];
 
@@ -863,99 +924,7 @@ export default function ProductDetailScreen() {
                         </View>
                     )}
 
-                    {/* Quantite */}
-                    <View style={styles.purchasePanel}>
-                        <View style={styles.quantitySection}>
-                            <View>
-                                <Text style={styles.sectionLabel}>Quantite a ajouter</Text>
-                                <Text style={styles.quantityHint}>
-                                    {remainingStock === undefined
-                                        ? 'Stock non precise par le vendeur.'
-                                        : remainingStock > 0
-                                            ? `${remainingStock} article(s) encore disponible(s)`
-                                            : 'Stock maximal deja dans le panier'}
-                                </Text>
-                            </View>
-                            <View style={styles.quantityControls}>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.quantityButton,
-                                        quantity <= 1 && styles.quantityButtonDisabled,
-                                    ]}
-                                    onPress={() => setQuantity(Math.max(1, quantity - 1))}
-                                    disabled={quantity <= 1}
-                                >
-                                    <Ionicons
-                                        name="remove"
-                                        size={20}
-                                        color={quantity <= 1 ? Colors.gray300 : Colors.primary}
-                                    />
-                                </TouchableOpacity>
-                                <Text style={styles.quantityText}>{quantity}</Text>
-                                <TouchableOpacity
-                                    style={[
-                                        styles.quantityButton,
-                                        (!hasStockLeft ||
-                                            (remainingStock !== undefined && quantity >= remainingStock)) &&
-                                            styles.quantityButtonDisabled,
-                                    ]}
-                                    onPress={() =>
-                                        setQuantity((prev) => {
-                                            const next = prev + 1;
-                                            if (remainingStock === undefined) return next;
-                                            return Math.min(next, Math.max(remainingStock, 1));
-                                        })
-                                    }
-                                    disabled={!hasStockLeft || (remainingStock !== undefined && quantity >= remainingStock)}
-                                >
-                                    <Ionicons
-                                        name="add"
-                                        size={20}
-                                        color={
-                                            !hasStockLeft || (remainingStock !== undefined && quantity >= remainingStock)
-                                                ? Colors.gray300
-                                                : Colors.primary
-                                        }
-                                    />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-
-                        {/* Panier */}
-                        <View style={styles.cartStatusCard}>
-                            <View style={styles.cartStatusCopy}>
-                                <Text style={styles.sectionLabel}>Panier</Text>
-                                <Text style={styles.cartStatusText}>
-                                    {inCartQuantity > 0
-                                        ? `Deja dans le panier: ${inCartQuantity}`
-                                        : 'Pas encore dans le panier'}
-                                </Text>
-                                <Text style={styles.cartStatusHint}>
-                                    {hasStockLeft
-                                        ? 'Ajoute en un clic, la quantite se cumule automatiquement.'
-                                        : 'Aucun ajout possible tant qu il n y a pas de stock.'}
-                                </Text>
-                            </View>
-                            <View style={styles.cartActions}>
-                                {inCartQuantity > 0 && (
-                                    <TouchableOpacity
-                                        style={styles.cartRemoveButton}
-                                        onPress={handleRemoveFromCart}
-                                    >
-                                        <Ionicons name="trash-outline" size={16} color={Colors.error} />
-                                        <Text style={styles.cartRemoveText}>Retirer</Text>
-                                    </TouchableOpacity>
-                                )}
-                                <TouchableOpacity
-                                    style={styles.cartViewButton}
-                                    onPress={() => router.push('/(tabs)/cart')}
-                                >
-                                    <Ionicons name="cart-outline" size={16} color={Colors.white} />
-                                    <Text style={styles.cartViewText}>Voir panier</Text>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
+                 
 
                     {/* Description */}
                     <View style={styles.section}>
@@ -991,31 +960,28 @@ export default function ProductDetailScreen() {
 
                     <View style={styles.section}>
                         <Text style={styles.sectionTitle}>Details de l annonce</Text>
-                        <View style={styles.detailsList}>
+                        <View style={styles.detailsGrid}>
                             {detailRows.map((row, index) => (
                                 <View
                                     key={`${row.label}-${index}`}
-                                    style={[
-                                        styles.detailRow,
-                                        index === detailRows.length - 1 && styles.detailRowLast,
-                                    ]}
+                                    style={styles.detailCard}
                                 >
-                                    <View style={styles.detailIconWrap}>
-                                        {row.categoryIcon ? (
-                                            <CategoryIcon
-                                                icon={row.categoryIcon}
-                                                size={13}
-                                                textStyle={styles.detailEmoji}
-                                                imageStyle={styles.detailIconImage}
-                                            />
-                                        ) : (
-                                            <Ionicons name={row.icon as any} size={14} color={Colors.primary} />
-                                        )}
-                                    </View>
-                                    <View style={styles.detailTextWrap}>
+                                    <View style={styles.detailCardHeader}>
+                                        <View style={styles.detailIconWrap}>
+                                            {row.categoryIcon ? (
+                                                <CategoryIcon
+                                                    icon={row.categoryIcon}
+                                                    size={13}
+                                                    textStyle={styles.detailEmoji}
+                                                    imageStyle={styles.detailIconImage}
+                                                />
+                                            ) : (
+                                                <Ionicons name={row.icon as any} size={14} color={Colors.primary} />
+                                            )}
+                                        </View>
                                         <Text style={styles.detailLabel}>{row.label}</Text>
-                                        <Text style={styles.detailValue}>{row.value}</Text>
                                     </View>
+                                    <Text style={styles.detailValue}>{row.value}</Text>
                                 </View>
                             ))}
                         </View>
@@ -1784,20 +1750,25 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         lineHeight: 24,
     },
-    detailsList: {
-        gap: Spacing.sm,
-    },
-    detailRow: {
+    detailsGrid: {
         flexDirection: 'row',
-        alignItems: 'flex-start',
+        flexWrap: 'wrap',
         gap: Spacing.sm,
-        paddingVertical: Spacing.sm,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.gray100,
     },
-    detailRowLast: {
-        borderBottomWidth: 0,
-        paddingBottom: 0,
+    detailCard: {
+        width: '48%',
+        minHeight: 92,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+        ...Shadows.sm,
+    },
+    detailCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
     },
     detailIconWrap: {
         width: 24,
@@ -1814,19 +1785,17 @@ const styles = StyleSheet.create({
     detailIconImage: {
         borderRadius: 6.5,
     },
-    detailTextWrap: {
-        flex: 1,
-    },
     detailLabel: {
         fontSize: Typography.fontSize.xs,
         color: Colors.textSecondary,
         fontWeight: Typography.fontWeight.semibold,
+        flex: 1,
     },
     detailValue: {
         fontSize: Typography.fontSize.sm,
         color: Colors.textPrimary,
         fontWeight: Typography.fontWeight.bold,
-        marginTop: 2,
+        marginTop: Spacing.sm,
     },
     securityHintCard: {
         marginTop: Spacing.md,

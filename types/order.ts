@@ -202,8 +202,30 @@ export const getOrderItemCurrency = (item: OrderItem): string | undefined => {
     ];
 
     for (const candidate of candidates) {
-        const normalized = (candidate || '').toString().trim();
-        if (normalized) return normalized;
+        if (!candidate) continue;
+
+        if (typeof candidate === 'string') {
+            const normalized = candidate.trim();
+            if (normalized) return normalized;
+            continue;
+        }
+
+        if (typeof candidate === 'object') {
+            const asRecord = candidate as Record<string, any>;
+            const code = typeof asRecord.code === 'string' ? asRecord.code.trim() : '';
+            if (code) return code;
+
+            const symbol = typeof asRecord.symbol === 'string' ? asRecord.symbol.trim() : '';
+            if (symbol) return symbol;
+
+            const id =
+                typeof asRecord._id === 'string'
+                    ? asRecord._id.trim()
+                    : typeof asRecord.id === 'string'
+                        ? asRecord.id.trim()
+                        : '';
+            if (id) return id;
+        }
     }
 
     return undefined;

@@ -8,26 +8,34 @@ interface DynamicAttributeFieldProps {
     attribute: CategoryAttribute;
     value: any;
     onChange: (value: any) => void;
+    error?: string;
 }
 
 export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
     attribute,
     value,
     onChange,
+    error,
 }) => {
+    const displayLabel =
+        (typeof attribute?.label === 'string' && attribute.label.trim()) ||
+        (typeof attribute?.name === 'string' && attribute.name.trim()) ||
+        'Caracteristique';
+    const placeholderLabel = displayLabel.toLowerCase();
+
     const renderField = () => {
         const type = attribute?.type?.toLowerCase() || 'string';
         switch (type) {
             case 'string':
             case 'text':
                 return (
-                    <View style={styles.inputContainer}>
+                    <View style={[styles.inputContainer, error && styles.inputContainerError]}>
                         <Ionicons name="text-outline" size={20} color={Colors.gray400} />
                         <TextInput
                             style={styles.input}
                             value={value || ''}
                             onChangeText={onChange}
-                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholder={`Entrez ${placeholderLabel}`}
                             placeholderTextColor={Colors.gray400}
                         />
                     </View>
@@ -35,7 +43,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
 
             case 'number':
                 return (
-                    <View style={styles.inputContainer}>
+                    <View style={[styles.inputContainer, error && styles.inputContainerError]}>
                         <Ionicons name="calculator-outline" size={20} color={Colors.gray400} />
                         <TextInput
                             style={styles.input}
@@ -44,7 +52,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
                                 const num = parseFloat(text);
                                 onChange(isNaN(num) ? undefined : num);
                             }}
-                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholder={`Entrez ${placeholderLabel}`}
                             placeholderTextColor={Colors.gray400}
                             keyboardType="numeric"
                         />
@@ -60,7 +68,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
                     );
                 }
                 return (
-                    <View style={styles.pickerContainer}>
+                    <View style={[styles.pickerContainer, error && styles.inputContainerError]}>
                         {attribute?.options?.map((option) => (
                             <TouchableOpacity
                                 key={option}
@@ -123,13 +131,13 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
 
             default:
                 return (
-                    <View style={styles.inputContainer}>
+                    <View style={[styles.inputContainer, error && styles.inputContainerError]}>
                         <Ionicons name="create-outline" size={20} color={Colors.gray400} />
                         <TextInput
                             style={styles.input}
                             value={value || ''}
                             onChangeText={onChange}
-                            placeholder={`Entrez ${(attribute?.label || attribute?.name)?.toLowerCase()}`}
+                            placeholder={`Entrez ${placeholderLabel}`}
                             placeholderTextColor={Colors.gray400}
                         />
                     </View>
@@ -139,27 +147,69 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
 
     return (
         <View style={styles.inputGroup}>
-            <Text style={styles.label}>
-                {attribute?.label || attribute?.name}
-                {attribute?.required && <Text style={styles.required}> *</Text>}
-            </Text>
+            <View style={styles.labelRow}>
+                <Text style={styles.label}>{displayLabel}</Text>
+                <View
+                    style={[
+                        styles.requirementBadge,
+                        attribute?.required ? styles.requirementBadgeRequired : styles.requirementBadgeOptional,
+                    ]}
+                >
+                    <Text
+                        style={[
+                            styles.requirementBadgeText,
+                            attribute?.required
+                                ? styles.requirementBadgeTextRequired
+                                : styles.requirementBadgeTextOptional,
+                        ]}
+                    >
+                        {attribute?.required ? 'Obligatoire' : 'Optionnel'}
+                    </Text>
+                </View>
+            </View>
             {renderField()}
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
         </View>
     );
 };
 
 const styles = StyleSheet.create({
     inputGroup: {
-        marginBottom: Spacing.xl,
+        marginBottom: Spacing.md,
+    },
+    labelRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+        marginBottom: Spacing.sm,
     },
     label: {
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.semibold,
         color: Colors.textPrimary,
-        marginBottom: Spacing.sm,
+        flex: 1,
     },
-    required: {
+    requirementBadge: {
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 4,
+    },
+    requirementBadgeRequired: {
+        backgroundColor: Colors.error + '12',
+    },
+    requirementBadgeOptional: {
+        backgroundColor: Colors.gray100,
+    },
+    requirementBadgeText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    requirementBadgeTextRequired: {
         color: Colors.error,
+    },
+    requirementBadgeTextOptional: {
+        color: Colors.textSecondary,
     },
     inputContainer: {
         flexDirection: 'row',
@@ -172,6 +222,9 @@ const styles = StyleSheet.create({
         borderColor: Colors.gray100,
         ...Shadows.sm,
     },
+    inputContainerError: {
+        borderColor: Colors.error + '80',
+    },
     input: {
         flex: 1,
         height: 50,
@@ -181,26 +234,27 @@ const styles = StyleSheet.create({
     },
     pickerContainer: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+        padding: Spacing.sm,
         borderWidth: 2,
         borderColor: Colors.gray100,
         borderRadius: BorderRadius.lg,
-        overflow: 'hidden',
-        flexWrap: 'wrap',
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray50,
     },
     pickerOption: {
-        flex: 1,
         minWidth: '30%',
-        padding: Spacing.md,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
         alignItems: 'center',
         backgroundColor: Colors.white,
-        borderRightWidth: 1,
-        borderRightColor: Colors.gray100,
-        borderBottomWidth: 1,
-        borderBottomColor: Colors.gray100,
+        borderWidth: 1,
+        borderRadius: BorderRadius.full,
+        borderColor: Colors.gray200,
     },
     selectedPickerOption: {
         backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
     },
     pickerText: {
         color: Colors.textSecondary,
@@ -214,5 +268,6 @@ const styles = StyleSheet.create({
     errorText: {
         color: Colors.error,
         fontSize: Typography.fontSize.sm,
+        marginTop: Spacing.xs,
     },
 });

@@ -54,12 +54,12 @@ const styles = StyleSheet.create({
         color: Colors.white,
     },
     iconImage: {
-        borderRadius: 17,
+        borderRadius: 0,
     },
     iconContainer: {
         width: 72,
         height: 72,
-        borderRadius: BorderRadius.full,
+        borderRadius: 0,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: Spacing.sm,

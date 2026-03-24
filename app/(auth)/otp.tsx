@@ -16,7 +16,7 @@ export default function OtpScreenRedirect() {
     const redirectParams = React.useMemo(() => {
         const nextParams: Record<string, string> = {
             mode: 'register',
-            registerStep: 'otp',
+            registerStep: 'identity',
         };
         if (phone) {
             nextParams.phone = phone;

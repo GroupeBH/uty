@@ -1065,7 +1065,7 @@ const styles = StyleSheet.create({
     categoryLoadingPill: {
         width: 82,
         height: 100,
-        borderRadius: BorderRadius.lg,
+        borderRadius: 0,
         backgroundColor: Colors.gray100,
         borderWidth: 1,
         borderColor: Colors.gray200,
