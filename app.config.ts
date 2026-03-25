@@ -38,6 +38,18 @@ const readWebClientIdFromGoogleServices = (filePath: string): string | undefined
     return undefined;
 };
 
+const readPackageVersion = (): string | undefined => {
+    try {
+        const resolvedPath = path.resolve(process.cwd(), 'package.json');
+        const raw = fs.readFileSync(resolvedPath, 'utf-8');
+        const parsed = JSON.parse(raw) as { version?: string };
+        const version = parsed.version?.trim();
+        return version || undefined;
+    } catch {
+        return undefined;
+    }
+};
+
 export default ({ config }: ConfigContext): ExpoConfig => {
     const hasFirebaseApp = hasPackage('@react-native-firebase/app');
     const hasGoogleSignin = hasPackage('@react-native-google-signin/google-signin');
@@ -50,6 +62,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         readWebClientIdFromGoogleServices(androidGoogleServicesFile);
     const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
     const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim();
+    const appVersion =
+        process.env.EXPO_APP_VERSION?.trim() ||
+        process.env.npm_package_version?.trim() ||
+        readPackageVersion() ||
+        config.version ||
+        '1.0.0';
 
     const plugins: NonNullable<ExpoConfig['plugins']> = [
         'expo-router',
@@ -108,7 +126,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ...config,
         name: 'uty',
         slug: 'uty',
-        version: '1.0.0',
+        version: appVersion,
         orientation: 'portrait',
         icon: './assets/images/uty-transparent.png',
         scheme: 'uty',
