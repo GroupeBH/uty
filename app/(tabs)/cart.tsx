@@ -3,17 +3,22 @@
  */
 
 import { CartItem } from '@/components/CartItem';
+import { KinshasaAddressForm } from '@/components/forms/KinshasaAddressForm';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { CustomAlert } from '@/components/ui/CustomAlert';
+import { KINSHASA_ADDRESS_HELP_TEXT } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useGetAppConfigQuery } from '@/store/api/appConfigApi';
 import { useAddToCartMutation, useCheckoutCartMutation, useClearCartMutation, useGetCartQuery, useSetDeliveryLocationMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Announcement } from '@/types/announcement';
 import { CartProduct as CartItemType, Cart as CartType } from '@/types/cart';
 import { formatCurrencyAmount, resolveCurrencyDisplay } from '@/utils/currency';
+import { localDrafts } from '@/utils/localDrafts';
+import { formatKinshasaAddress, hasKinshasaAddressValue, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -79,8 +84,8 @@ const resolveAnnouncementSellerId = (product: Announcement | undefined): string 
     );
 };
 
-const USD_TO_CDF_RATE = 2300;
-const TAX_RATE = 0.01;
+const DEFAULT_USD_TO_CDF_RATE = 2300;
+const DEFAULT_TAX_RATE = 0.01;
 const SELLER_BASE_DELIVERY_FEE_CDF = 1000;
 const DEFAULT_ITEM_DELIVERY_FEE_CDF = 2000;
 const DELIVERY_FEE_BY_WEIGHT_CLASS_CDF: Record<string, number> = {
@@ -91,10 +96,33 @@ const DELIVERY_FEE_BY_WEIGHT_CLASS_CDF: Record<string, number> = {
     fragile: 2500,
 };
 
+type DeliveryInputMode = 'guided' | 'map';
+
+const DELIVERY_INPUT_MODE_OPTIONS: {
+    id: DeliveryInputMode;
+    label: string;
+    description: string;
+    badge?: string;
+}[] = [
+    {
+        id: 'guided',
+        label: 'Adresse guidee',
+        description: 'Commune, quartier, avenue et repere',
+        badge: 'Plus detaillee',
+    },
+    {
+        id: 'map',
+        label: 'Carte',
+        description: 'Point GPS exact sur la carte',
+        badge: 'Plus precise',
+    },
+];
+
 export default function CartScreen() {
     const router = useRouter();
     const { data: cart, isLoading, isFetching, refetch } = useGetCartQuery();
     const { data: currencies = [] } = useGetCurrenciesQuery();
+    const { data: appConfig } = useGetAppConfigQuery();
     const [addToCart] = useAddToCartMutation();
     const [clearCart] = useClearCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
@@ -104,6 +132,12 @@ export default function CartScreen() {
     const [mapVisible, setMapVisible] = React.useState(false);
     const [checkoutModalVisible, setCheckoutModalVisible] = React.useState(false);
     const [deliveryAddress, setDeliveryAddress] = React.useState('');
+    const [deliveryInputMode, setDeliveryInputMode] = React.useState<DeliveryInputMode | null>(null);
+    const [deliveryAddressFields, setDeliveryAddressFields] = React.useState<KinshasaAddressFields>(
+        () => parseKinshasaAddress(''),
+    );
+    const [deliveryDraftReady, setDeliveryDraftReady] = React.useState(false);
+    const deliveryDraftTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isSanitizingCart, setIsSanitizingCart] = React.useState(false);
     const lastSanitizedSignatureRef = React.useRef<string | null>(null);
     const [alertState, setAlertState] = React.useState<{
@@ -400,10 +434,30 @@ export default function CartScreen() {
         });
     };
 
+    const handleStructuredDeliveryAddressChange = React.useCallback(
+        (fields: KinshasaAddressFields) => {
+            const formattedAddress = formatKinshasaAddress(fields);
+            setDeliveryAddressFields(fields);
+            setDeliveryAddress(formattedAddress);
+        },
+        [],
+    );
+
+    const handleDeliveryInputModeChange = React.useCallback((mode: DeliveryInputMode) => {
+        setDeliveryInputMode(mode);
+    }, []);
+
     const handleDeliveryConfirm = async (location: { latitude: number; longitude: number; address?: string }) => {
         try {
-            await setDeliveryLocation({ coordinates: [location.longitude, location.latitude] }).unwrap();
+            await setDeliveryLocation({
+                coordinates: [location.longitude, location.latitude],
+                address: (location.address || '').trim() || undefined,
+            }).unwrap();
+            setDeliveryInputMode('map');
             setDeliveryAddress((location.address || '').trim());
+            if (location.address) {
+                setDeliveryAddressFields(parseKinshasaAddress(location.address));
+            }
             setMapVisible(false);
         } catch (error) {
             showAlert({
@@ -462,10 +516,10 @@ export default function CartScreen() {
             return;
         }
 
-        if (!hasDeliveryCoordinates) {
+        if (!normalizedDeliveryAddress) {
             showAlert({
                 title: 'Adresse requise',
-                message: 'Choisissez une adresse de livraison avant de valider votre panier.',
+                message: 'Renseignez au moins une adresse de livraison avant de valider votre panier.',
                 type: 'warning',
             });
             return;
@@ -509,16 +563,39 @@ export default function CartScreen() {
 
         return 'CDF';
     }, [currencies]);
+    const derivedUsdToCdfRate = React.useMemo(() => {
+        const usdCurrency = currencies.find((entry) => entry?.code?.trim?.().toUpperCase() === 'USD');
+        const cdfCurrency = currencies.find((entry) => entry?.code?.trim?.().toUpperCase() === 'CDF');
+        if (!usdCurrency) {
+            return undefined;
+        }
+
+        if (usdCurrency.exchangeRate > 1 && (!cdfCurrency || cdfCurrency.exchangeRate === 1)) {
+            return usdCurrency.exchangeRate;
+        }
+
+        if (cdfCurrency && usdCurrency.exchangeRate > 0 && cdfCurrency.exchangeRate > 0) {
+            const ratio = usdCurrency.exchangeRate / cdfCurrency.exchangeRate;
+            if (Number.isFinite(ratio) && ratio > 1) {
+                return ratio;
+            }
+        }
+
+        return undefined;
+    }, [currencies]);
+    const usdToCdfRate = appConfig?.checkout?.usdToCdfRate || derivedUsdToCdfRate || DEFAULT_USD_TO_CDF_RATE;
+    const taxRate = appConfig?.checkout?.taxRate ?? DEFAULT_TAX_RATE;
+    const deliveryHints = appConfig?.checkout?.deliveryHints || [];
     const convertAmountToCdf = React.useCallback(
         (amount: number, currency: any): number => {
             const safeAmount = Number.isFinite(amount) ? amount : 0;
             const code = resolveCurrencyCode(currency);
             if (code === 'USD') {
-                return safeAmount * USD_TO_CDF_RATE;
+                return safeAmount * usdToCdfRate;
             }
             return safeAmount;
         },
-        [resolveCurrencyCode],
+        [resolveCurrencyCode, usdToCdfRate],
     );
     const estimateLineDeliveryCostCdf = React.useCallback(
         (product: Announcement | undefined, quantity: number): number => {
@@ -544,7 +621,7 @@ export default function CartScreen() {
         [cartItems, resolveCurrencyCode],
     );
     const currencyNote = containsUsdItem
-        ? `Les montants en USD sont convertis en CDF au taux fixe 1 USD = ${USD_TO_CDF_RATE} CDF.`
+        ? `Les montants en USD sont convertis en CDF au taux 1 USD = ${Math.round(usdToCdfRate).toLocaleString('fr-FR')} CDF.`
         : '';
     const formatAmount = React.useCallback(
         (value: number) =>
@@ -614,7 +691,8 @@ export default function CartScreen() {
 
     const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
     const deliveryCoords = cart?.deliveryLocation?.coordinates;
-    const normalizedDeliveryAddress = deliveryAddress.trim();
+    const persistedDeliveryAddress = (cart?.deliveryAddress || '').trim();
+    const normalizedDeliveryAddress = deliveryAddress.trim() || persistedDeliveryAddress;
     const deliveryLng = deliveryCoords?.[0];
     const deliveryLat = deliveryCoords?.[1];
     const deliveryCoordsKey =
@@ -623,14 +701,17 @@ export default function CartScreen() {
             : '';
     const hasDeliveryCoordinates = Boolean(deliveryCoordsKey);
     const subtotal = groupedSections.reduce((sum, section) => sum + section.subtotal, 0);
-    const tax = subtotal * TAX_RATE;
+    const tax = subtotal * taxRate;
     const estimatedDeliveryCost = groupedSections.reduce((sum, section) => sum + section.deliveryCost, 0);
-    const deliveryCost = hasDeliveryCoordinates ? estimatedDeliveryCost : 0;
+    const serverDeliveryCost = Number.isFinite(Number(cart?.deliveryCost)) ? Number(cart?.deliveryCost) : undefined;
+    const deliveryCost = hasDeliveryCoordinates ? (serverDeliveryCost ?? estimatedDeliveryCost) : 0;
     const deliveryMode = cart?.deliveryMode ?? 'pending';
     const total = subtotal + tax + deliveryCost;
     const sellersWithDelivery = groupedSections.filter((section) => section.deliveryCost > 0).length;
-    const deliveryExplanation = !hasDeliveryCoordinates
-        ? 'Definis une adresse de livraison pour obtenir le cout.'
+    const deliveryExplanation = !normalizedDeliveryAddress
+        ? 'Definis une adresse de livraison pour continuer.'
+        : !hasDeliveryCoordinates
+            ? 'Adresse enregistree sans carte. Le cout exact sera confirme apres validation.'
         : estimatedDeliveryCost <= 0
             ? 'Aucun article livrable dans ce panier.'
             : `Livraison calculee selon chaque produit et vendeur (${sellersWithDelivery} vendeur(s)).`;
@@ -660,12 +741,16 @@ export default function CartScreen() {
                 : deliveryMode === 'none'
                     ? 'Aucune livraison'
                     : 'En attente';
+    const checkoutModeLabel = hasDeliveryCoordinates
+        ? deliveryModeLabel
+        : deliveryInputMode === 'map'
+            ? 'Adresse via carte'
+            : deliveryInputMode === 'guided'
+                ? 'Adresse guidee'
+                : 'Adresse manuelle';
 
     React.useEffect(() => {
         if (!deliveryCoordsKey) {
-            if (deliveryAddress) {
-                setDeliveryAddress('');
-            }
             return;
         }
 
@@ -710,6 +795,81 @@ export default function CartScreen() {
         normalizedDeliveryAddress,
         triggerReverseGeocode,
     ]);
+    React.useEffect(() => {
+        if (persistedDeliveryAddress) {
+            setDeliveryAddress((prev) => prev || persistedDeliveryAddress);
+        }
+    }, [persistedDeliveryAddress]);
+
+    React.useEffect(() => {
+        let cancelled = false;
+
+        (async () => {
+            const draft = await localDrafts.getCartDeliveryDraft();
+            if (cancelled) {
+                return;
+            }
+
+            if (!persistedDeliveryAddress && draft?.deliveryAddress) {
+                setDeliveryAddress((prev) => prev || draft.deliveryAddress);
+            }
+
+            if (draft?.deliveryInputMode) {
+                setDeliveryInputMode(draft.deliveryInputMode);
+            }
+
+            if (persistedDeliveryAddress) {
+                setDeliveryAddressFields(parseKinshasaAddress(persistedDeliveryAddress));
+            } else if (draft?.deliveryAddressFields && hasKinshasaAddressValue(draft.deliveryAddressFields)) {
+                setDeliveryAddressFields(draft.deliveryAddressFields);
+            }
+
+            setDeliveryDraftReady(true);
+        })();
+
+        return () => {
+            cancelled = true;
+            if (deliveryDraftTimerRef.current) {
+                clearTimeout(deliveryDraftTimerRef.current);
+            }
+        };
+    }, [hasDeliveryCoordinates, persistedDeliveryAddress]);
+
+    React.useEffect(() => {
+            if (!deliveryDraftReady) {
+                return;
+            }
+
+        if (deliveryDraftTimerRef.current) {
+            clearTimeout(deliveryDraftTimerRef.current);
+        }
+
+        deliveryDraftTimerRef.current = setTimeout(() => {
+            if (!normalizedDeliveryAddress && !hasKinshasaAddressValue(deliveryAddressFields)) {
+                void localDrafts.clearCartDeliveryDraft();
+                return;
+            }
+
+            void localDrafts.saveCartDeliveryDraft({
+                deliveryAddress: normalizedDeliveryAddress,
+                deliveryAddressFields,
+                deliveryInputMode: deliveryInputMode || undefined,
+                savedAt: new Date().toISOString(),
+            });
+        }, 300);
+
+        return () => {
+            if (deliveryDraftTimerRef.current) {
+                clearTimeout(deliveryDraftTimerRef.current);
+            }
+        };
+    }, [deliveryAddressFields, deliveryDraftReady, deliveryInputMode, normalizedDeliveryAddress]);
+
+    React.useEffect(() => {
+        if (normalizedDeliveryAddress) {
+            setDeliveryAddressFields(parseKinshasaAddress(normalizedDeliveryAddress));
+        }
+    }, [normalizedDeliveryAddress]);
 
     const handleCheckoutConfirm = async () => {
         try {
@@ -726,6 +886,7 @@ export default function CartScreen() {
                 ? { deliveryAddress: normalizedDeliveryAddress }
                 : {};
             const orders = await checkoutCart(payload).unwrap();
+            await localDrafts.clearCartDeliveryDraft();
             setCheckoutModalVisible(false);
 
             const orderCount = Array.isArray(orders) ? orders.length : 1;
@@ -892,19 +1053,96 @@ export default function CartScreen() {
                                     </View>
                                     <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
                                 </View>
-                                <TouchableOpacity
-                                    style={styles.deliveryButton}
-                                    onPress={() => setMapVisible(true)}
-                                >
-                                    <Ionicons name="map-outline" size={14} color={Colors.white} />
-                                    <Text style={styles.deliveryButtonText}>
-                                        {deliveryDisplayLabel ? 'Modifier' : 'Choisir'}
-                                    </Text>
-                                </TouchableOpacity>
                             </View>
                             <Text style={styles.deliveryAddressText}>
                                 {deliveryDisplayLabel || 'Aucune adresse selectionnee'}
                             </Text>
+                            <View style={styles.deliveryInputSelector}>
+                                <Text style={styles.deliverySelectorTitle}>Choisissez comment entrer votre adresse</Text>
+                                <Text style={styles.deliverySelectorSubtitle}>
+                                    L adresse guidee donne le plus de details au livreur. La carte sert surtout a placer le point exact.
+                                </Text>
+                                <View style={styles.deliveryInputChips}>
+                                    {DELIVERY_INPUT_MODE_OPTIONS.map((option) => {
+                                        const isActive = deliveryInputMode === option.id;
+                                        return (
+                                            <TouchableOpacity
+                                                key={option.id}
+                                                style={[
+                                                    styles.deliveryInputChip,
+                                                    isActive && styles.deliveryInputChipActive,
+                                                ]}
+                                                onPress={() => handleDeliveryInputModeChange(option.id)}
+                                                activeOpacity={0.85}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.deliveryInputChipLabel,
+                                                        isActive && styles.deliveryInputChipLabelActive,
+                                                    ]}
+                                                >
+                                                    {option.label}
+                                                </Text>
+                                                {option.badge ? (
+                                                    <View
+                                                        style={[
+                                                            styles.deliveryInputChipBadge,
+                                                            isActive && styles.deliveryInputChipBadgeActive,
+                                                        ]}
+                                                    >
+                                                        <Text
+                                                            style={[
+                                                                styles.deliveryInputChipBadgeText,
+                                                                isActive && styles.deliveryInputChipBadgeTextActive,
+                                                            ]}
+                                                        >
+                                                            {option.badge}
+                                                        </Text>
+                                                    </View>
+                                                ) : null}
+                                                <Text
+                                                    style={[
+                                                        styles.deliveryInputChipDescription,
+                                                        isActive && styles.deliveryInputChipDescriptionActive,
+                                                    ]}
+                                                >
+                                                    {option.description}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            </View>
+                            {!deliveryInputMode ? (
+                                <View style={styles.deliveryChoiceNotice}>
+                                    <Ionicons name="information-circle-outline" size={16} color={Colors.primary} />
+                                    <Text style={styles.deliveryChoiceNoticeText}>
+                                        Choisissez d abord une methode pour ajouter ou modifier votre adresse de livraison.
+                                    </Text>
+                                </View>
+                            ) : deliveryInputMode === 'guided' ? (
+                                <KinshasaAddressForm
+                                    fields={deliveryAddressFields}
+                                    onChange={handleStructuredDeliveryAddressChange}
+                                    helperText="Methode recommandee si vous voulez donner plus de details: commune, quartier, avenue et repere."
+                                />
+                            ) : (
+                                <View style={styles.deliveryMapSection}>
+                                    <TouchableOpacity
+                                        style={styles.deliveryButton}
+                                        onPress={() => setMapVisible(true)}
+                                        activeOpacity={0.85}
+                                    >
+                                        <Ionicons name="map-outline" size={14} color={Colors.white} />
+                                        <Text style={styles.deliveryButtonText}>
+                                            {hasDeliveryCoordinates ? 'Mettre a jour sur carte' : 'Choisir sur carte'}
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <Text style={styles.deliveryHint}>
+                                        Utilisez la carte si vous voulez surtout montrer le point exact de livraison.
+                                    </Text>
+                                </View>
+                            )}
                             {hasDeliveryCoordinates && deliveryModeLabel !== 'En attente' ? (
                                 <View style={styles.deliveryModeBadge}>
                                     <Ionicons name={deliveryMode === 'walking' ? 'walk-outline' : 'car-outline'} size={12} color={Colors.primary} />
@@ -912,7 +1150,12 @@ export default function CartScreen() {
                                 </View>
                             ) : null}
                             <Text style={styles.deliveryHint}>
-                                Le cout est calcule automatiquement selon la distance et la classe de poids.
+                                {hasDeliveryCoordinates
+                                    ? 'Le cout est calcule automatiquement selon la distance et la classe de poids.'
+                                    : 'La carte reste utile pour obtenir un cout de livraison plus precis.'}
+                            </Text>
+                            <Text style={styles.deliveryHintSecondary}>
+                                {deliveryHints[0] || KINSHASA_ADDRESS_HELP_TEXT}
                             </Text>
                         </View>
                     </View>
@@ -957,7 +1200,9 @@ export default function CartScreen() {
                         <View style={styles.divider} />
 
                         <View style={styles.totalRow}>
-                            <Text style={styles.totalLabel}>Total a payer</Text>
+                            <Text style={styles.totalLabel}>
+                                {hasDeliveryCoordinates ? 'Total a payer' : 'Total provisoire'}
+                            </Text>
                             <View style={styles.totalValueBadge}>
                                 <Text style={styles.totalValue}>{formatAmount(total)}</Text>
                             </View>
@@ -995,10 +1240,17 @@ export default function CartScreen() {
                             </View>
                             <View style={styles.checkoutModalRow}>
                                 <Text style={styles.checkoutModalLabel}>Mode</Text>
-                                <Text style={styles.checkoutModalValue}>{deliveryModeLabel}</Text>
+                                <Text style={styles.checkoutModalValue}>{checkoutModeLabel}</Text>
                             </View>
+                            {!hasDeliveryCoordinates ? (
+                                <Text style={styles.checkoutManualNotice}>
+                                    Le cout de livraison sera confirme apres contact avec le vendeur ou le support.
+                                </Text>
+                            ) : null}
                             <View style={styles.checkoutModalRow}>
-                                <Text style={styles.checkoutModalTotalLabel}>Total a payer</Text>
+                                <Text style={styles.checkoutModalTotalLabel}>
+                                    {hasDeliveryCoordinates ? 'Total a payer' : 'Total provisoire'}
+                                </Text>
                                 <Text style={styles.checkoutModalTotalValue}>
                                     {formatAmount(total)}
                                 </Text>
@@ -1212,6 +1464,96 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
     },
+    deliveryInputSelector: {
+        marginBottom: Spacing.md,
+    },
+    deliverySelectorTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.gray800,
+        marginBottom: 4,
+    },
+    deliverySelectorSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        lineHeight: 18,
+        marginBottom: Spacing.sm,
+    },
+    deliveryInputChips: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+    },
+    deliveryInputChip: {
+        flex: 1,
+        borderRadius: BorderRadius.lg,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+        backgroundColor: Colors.gray50,
+    },
+    deliveryInputChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+        ...Shadows.sm,
+    },
+    deliveryInputChipLabel: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.primary,
+        marginBottom: 2,
+    },
+    deliveryInputChipLabelActive: {
+        color: Colors.white,
+    },
+    deliveryInputChipBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: Colors.primary + '10',
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.xs + 2,
+        paddingVertical: 3,
+        marginBottom: 6,
+    },
+    deliveryInputChipBadgeActive: {
+        backgroundColor: Colors.white + '24',
+    },
+    deliveryInputChipBadgeText: {
+        fontSize: 10,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    deliveryInputChipBadgeTextActive: {
+        color: Colors.white,
+    },
+    deliveryInputChipDescription: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        lineHeight: 16,
+    },
+    deliveryInputChipDescriptionActive: {
+        color: Colors.white + 'DD',
+    },
+    deliveryMapSection: {
+        gap: Spacing.sm,
+        marginBottom: Spacing.xs,
+    },
+    deliveryChoiceNotice: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.xs,
+        backgroundColor: Colors.primary + '0D',
+        borderRadius: BorderRadius.md,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        marginBottom: Spacing.xs,
+    },
+    deliveryChoiceNoticeText: {
+        flex: 1,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     deliveryButton: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1253,6 +1595,13 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         color: Colors.gray400,
         lineHeight: 16,
+    },
+    deliveryHintSecondary: {
+        marginTop: 6,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.semibold,
     },
     sellerNote: {
         fontSize: Typography.fontSize.xs,
@@ -1521,6 +1870,16 @@ const styles = StyleSheet.create({
         textAlign: 'right',
         flex: 1.4,
         lineHeight: 20,
+    },
+    checkoutManualNotice: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        backgroundColor: Colors.primary + '0D',
+        borderRadius: BorderRadius.md,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.medium,
     },
     checkoutModalTotalLabel: {
         fontSize: Typography.fontSize.lg,

@@ -1,5 +1,6 @@
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { KycFlowModal } from '@/components/kyc/KycFlowModal';
+import { KINSHASA_KYC_ID_EXAMPLE, KINSHASA_PLATE_EXAMPLE, KINSHASA_VEHICLE_MODEL_EXAMPLE } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useBecomeDeliveryPersonMutation } from '@/store/api/deliveryPersonsApi';
@@ -521,7 +522,7 @@ export default function BecomeDeliveryScreen() {
                             value={kycIdNumber}
                             onChangeText={setKycIdNumber}
                             style={styles.input}
-                            placeholder="Ex: CI-1234-5678"
+                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
                             placeholderTextColor={Colors.gray400}
                             autoCapitalize="characters"
                         />
@@ -648,7 +649,7 @@ export default function BecomeDeliveryScreen() {
                     value={model}
                     onChangeText={setModel}
                     style={styles.input}
-                    placeholder="Ex: Yamaha NMAX 155"
+                    placeholder={KINSHASA_VEHICLE_MODEL_EXAMPLE}
                     placeholderTextColor={Colors.gray400}
                 />
 
@@ -657,7 +658,7 @@ export default function BecomeDeliveryScreen() {
                     value={licensePlate}
                     onChangeText={setLicensePlate}
                     style={styles.input}
-                    placeholder="Ex: AB-123-CD"
+                    placeholder={KINSHASA_PLATE_EXAMPLE}
                     autoCapitalize="characters"
                     placeholderTextColor={Colors.gray400}
                 />

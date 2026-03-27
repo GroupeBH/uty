@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
 import { useGetMyShopQuery } from '@/store/api/shopsApi';
-import { getOrderPartyId } from '@/types/order';
+import { isOrderSellerForUser } from '@/types/order';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -36,7 +36,7 @@ export default function SellerDashboardTab() {
     }
 
     const hasRole = hasSellerRole(user?.roles);
-    const sellerOrders = orders.filter((order) => getOrderPartyId(order.sellerId) === currentUserId);
+    const sellerOrders = orders.filter((order) => isOrderSellerForUser(order, currentUserId));
     const activeOrders = sellerOrders.filter((order) =>
         ['pending', 'confirmed', 'shipped'].includes(order.status),
     );

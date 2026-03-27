@@ -3,7 +3,7 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
-import { getOrderPartyId } from '@/types/order';
+import { isOrderSellerForUser } from '@/types/order';
 import React from 'react';
 import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -27,7 +27,7 @@ export default function SellerOrdersTab() {
     }
 
     const sellerOrders = orders
-        .filter((order) => getOrderPartyId(order.sellerId) === currentUserId)
+        .filter((order) => isOrderSellerForUser(order, currentUserId))
         .sort(
             (a, b) =>
                 new Date(b.createdAt || b.updatedAt || 0).getTime() -

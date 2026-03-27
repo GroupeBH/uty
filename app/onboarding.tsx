@@ -110,7 +110,7 @@ export default function OnboardingScreen() {
     };
 
     const slide = SLIDES[Math.min(step, 1)];
-    const ctaLabel = isSubmitting ? 'Chargement...' : step < 2 ? 'Suivant' : 'Commencer';
+    const ctaLabel = isSubmitting ? 'Chargement...' : step < 2 ? 'Suivant' : "Entrer dans l'app";
 
     const animatedStyle = {
         opacity: transition,
@@ -204,9 +204,9 @@ export default function OnboardingScreen() {
                         </>
                     ) : (
                         <View style={styles.spaceSection}>
-                            <Text style={styles.spaceTitle}>Choisissez votre espace</Text>
+                            <Text style={styles.spaceTitle}>Commencez simplement</Text>
                             <Text style={styles.spaceSubtitle}>
-                                UTY s adapte a votre profil: acheteur, vendeur ou livreur.
+                                Commencez comme client. Vous pourrez activer vendeur ou livreur plus tard depuis votre profil.
                             </Text>
 
                             <SpaceChoiceCard
@@ -218,35 +218,37 @@ export default function OnboardingScreen() {
                                 onPress={() => onChooseSpace('client')}
                             />
 
-                            <SpaceChoiceCard
-                                title="Espace Vendeur"
-                                subtitle="Publier vos annonces, gerer vos ventes et votre boutique."
-                                icon="storefront-outline"
-                                selected={selectedSpace === 'seller'}
-                                disabled={!canChoosePrivilegedSpace}
-                                onPress={() => onChooseSpace('seller')}
-                            />
+                            {isAuthenticated ? (
+                                <>
+                                    <SpaceChoiceCard
+                                        title="Espace Vendeur"
+                                        subtitle="Publier vos annonces, gerer vos ventes et votre boutique."
+                                        icon="storefront-outline"
+                                        selected={selectedSpace === 'seller'}
+                                        disabled={!canChoosePrivilegedSpace}
+                                        onPress={() => onChooseSpace('seller')}
+                                    />
 
-                            <SpaceChoiceCard
-                                title="Espace Livreur"
-                                subtitle="Accepter des courses et developper vos revenus."
-                                icon="bicycle-outline"
-                                selected={selectedSpace === 'delivery-persons'}
-                                disabled={!canChoosePrivilegedSpace}
-                                onPress={() => onChooseSpace('delivery-persons')}
-                            />
-
-                            {!isAuthenticated ? (
+                                    <SpaceChoiceCard
+                                        title="Espace Livreur"
+                                        subtitle="Accepter des courses et developper vos revenus."
+                                        icon="bicycle-outline"
+                                        selected={selectedSpace === 'delivery-persons'}
+                                        disabled={!canChoosePrivilegedSpace}
+                                        onPress={() => onChooseSpace('delivery-persons')}
+                                    />
+                                </>
+                            ) : (
                                 <TouchableOpacity
                                     style={styles.loginHint}
                                     onPress={() => router.push('/(auth)/login')}
                                 >
                                     <Ionicons name="log-in-outline" size={14} color={Colors.primary} />
                                     <Text style={styles.loginHintText}>
-                                        Connectez-vous pour debloquer vendeur/livreur
+                                        Vendeur ou livreur ? Activez-le plus tard depuis votre profil
                                     </Text>
                                 </TouchableOpacity>
-                            ) : null}
+                            )}
                         </View>
                     )}
                 </Animated.View>

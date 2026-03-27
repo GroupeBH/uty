@@ -1,4 +1,7 @@
+import { KINSHASA_ADDRESS_EXAMPLES, KINSHASA_DEFAULT_CENTER, KINSHASA_FEATURED_COMMUNES, KINSHASA_FEATURED_LANDMARKS } from '@/constants/kinshasa';
+import { useGetAppConfigQuery } from '@/store/api/appConfigApi';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BottomActionBar } from '@/components/ui/BottomActionBar';
 import {
     useLazyGeocodeQuery,
     useLazyPlacesAutocompleteQuery,
@@ -14,6 +17,7 @@ import {
     FlatList,
     Modal,
     Platform,
+    ScrollView,
     StyleSheet,
     Text,
     TextInput,
@@ -44,11 +48,6 @@ type MapPickerModalProps = {
     onConfirm: (location: MapPickerLocation) => void;
 };
 
-const DEFAULT_CENTER: MapPickerLocation = {
-    latitude: 5.3365,
-    longitude: -4.0244,
-};
-
 export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     visible,
     initialLocation,
@@ -56,6 +55,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     onConfirm,
 }) => {
     const googleMapsKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
+    const { data: appConfig } = useGetAppConfigQuery();
     const [searchQuery, setSearchQuery] = useState('');
     const [selected, setSelected] = useState<MapPickerLocation | null>(null);
     const [isLocating, setIsLocating] = useState(false);
@@ -79,6 +79,22 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     const suggestions = useMemo(() => {
         return Array.isArray(autocompleteData) ? autocompleteData : [];
     }, [autocompleteData]);
+    const defaultCenter = useMemo(
+        () => ({
+            latitude: appConfig?.geography?.defaultCenter?.latitude ?? KINSHASA_DEFAULT_CENTER.latitude,
+            longitude: appConfig?.geography?.defaultCenter?.longitude ?? KINSHASA_DEFAULT_CENTER.longitude,
+        }),
+        [appConfig?.geography?.defaultCenter?.latitude, appConfig?.geography?.defaultCenter?.longitude],
+    );
+    const featuredHints = useMemo(() => {
+        const configHints = [
+            ...(appConfig?.geography?.featuredLandmarks || []),
+            ...(appConfig?.geography?.featuredCommunes || []),
+        ];
+        const fallbackHints = [...KINSHASA_FEATURED_LANDMARKS, ...KINSHASA_FEATURED_COMMUNES];
+        return Array.from(new Set([...configHints, ...fallbackHints])).slice(0, 10);
+    }, [appConfig?.geography?.featuredCommunes, appConfig?.geography?.featuredLandmarks]);
+    const addressExample = appConfig?.geography?.addressExamples?.[0] || KINSHASA_ADDRESS_EXAMPLES[0];
 
     useEffect(() => {
         if (!visible) {
@@ -107,16 +123,16 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                     };
                     scheduleReverseGeocode(location.latitude, location.longitude);
                 } catch (error) {
-                    setSelected(DEFAULT_CENTER);
+                    setSelected(defaultCenter);
                 }
             } else {
-                setSelected(DEFAULT_CENTER);
+                setSelected(defaultCenter);
             }
             setIsLocating(false);
         };
 
         fetchCurrentLocation();
-    }, [visible, initialLocation]);
+    }, [visible, initialLocation, defaultCenter]);
 
     useEffect(() => {
         if (!selected) return;
@@ -281,8 +297,8 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         setSuggestionsVisible(false);
     };
 
-    const handleSearchSubmit = async () => {
-        const query = searchQuery.trim();
+    const handleSearchSubmit = async (forcedQuery?: string) => {
+        const query = (forcedQuery ?? searchQuery).trim();
         if (!query) {
             setSearchResults([]);
             setSuggestionsVisible(false);
@@ -319,6 +335,16 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         }
     };
 
+    const handleSearchSubmitEditing = () => {
+        void handleSearchSubmit();
+    };
+
+    const handleHintPress = (value: string) => {
+        setSearchQuery(value);
+        setSuggestionsVisible(false);
+        void handleSearchSubmit(value);
+    };
+
     const handleConfirm = () => {
         if (selected) {
             onConfirm(selected);
@@ -328,7 +354,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
 
     const centerCoordinate = selected
         ? [selected.longitude, selected.latitude]
-        : [DEFAULT_CENTER.longitude, DEFAULT_CENTER.latitude];
+        : [defaultCenter.longitude, defaultCenter.latitude];
 
     const showGoogleKeyWarning =
         Platform.OS === 'android' &&
@@ -352,7 +378,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                         <Ionicons name="search" size={18} color={Colors.gray400} />
                         <TextInput
                             style={styles.searchInput}
-                            placeholder="Rechercher une adresse"
+                            placeholder={addressExample}
                             placeholderTextColor={Colors.gray400}
                             value={searchQuery}
                             onChangeText={(value) => {
@@ -363,7 +389,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                                 }
                             }}
                             returnKeyType="search"
-                            onSubmitEditing={handleSearchSubmit}
+                            onSubmitEditing={handleSearchSubmitEditing}
                             onFocus={() => setIsEditingSearch(true)}
                             onBlur={() => {
                                 setIsEditingSearch(false);
@@ -374,6 +400,26 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                             <ActivityIndicator size="small" color={Colors.primary} />
                         )}
                     </View>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.hintsScrollContent}
+                    >
+                        {featuredHints.map((hint) => (
+                            <TouchableOpacity
+                                key={hint}
+                                style={styles.hintChip}
+                                onPress={() => handleHintPress(hint)}
+                                activeOpacity={0.85}
+                            >
+                                <Ionicons name="navigate-outline" size={14} color={Colors.primary} />
+                                <Text style={styles.hintChipText}>{hint}</Text>
+                            </TouchableOpacity>
+                        ))}
+                    </ScrollView>
+                    <Text style={styles.searchHelpText}>
+                        Commencez par un repere connu de Kinshasa si vous ne connaissez pas l adresse exacte.
+                    </Text>
                     {suggestionsVisible && suggestions.length > 0 && (
                         <View style={styles.suggestions}>
                             <FlatList
@@ -487,7 +533,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                 </View>
 
                 {selected && (
-                    <View style={styles.footer}>
+                    <BottomActionBar style={styles.footer}>
                         <View style={styles.footerInfo}>
                             {isPanning || isReverseGeocoding ? (
                                 <ActivityIndicator size="small" color={Colors.primary} />
@@ -496,10 +542,10 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                             )}
                             <Text style={styles.footerText} numberOfLines={2}>
                                 {isPanning
-                                    ? "Déplacez la carte pour sélectionner le point"
+                                    ? "Dï¿½placez la carte pour sï¿½lectionner le point"
                                     : isReverseGeocoding
-                                      ? "Recherche de l’adresse..."
-                                      : selected.address || "Adresse non trouvée"}
+                                      ? "Recherche de lï¿½adresse..."
+                                      : selected.address || "Adresse non trouvï¿½e"}
                             </Text>
                         </View>
                         <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
@@ -507,7 +553,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                                 <Text style={styles.confirmText}>Valider</Text>
                             </LinearGradient>
                         </TouchableOpacity>
-                    </View>
+                    </BottomActionBar>
                 )}
             </SafeAreaView>
         </Modal>
@@ -544,6 +590,11 @@ const styles = StyleSheet.create({
         paddingTop: Spacing.md,
         zIndex: 5,
     },
+    hintsScrollContent: {
+        paddingTop: Spacing.sm,
+        gap: Spacing.sm,
+        paddingRight: Spacing.md,
+    },
     searchInputContainer: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -555,6 +606,28 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: Colors.gray100,
         ...Shadows.sm,
+    },
+    hintChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: Colors.white,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: 8,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+    },
+    hintChipText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    searchHelpText: {
+        marginTop: Spacing.sm,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        lineHeight: 20,
     },
     searchInput: {
         flex: 1,

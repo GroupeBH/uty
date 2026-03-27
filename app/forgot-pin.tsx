@@ -5,6 +5,7 @@ import {
     useResetPinMutation,
     useVerifyOtpMutation,
 } from '@/store/api/authApi';
+import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -24,7 +25,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 type Step = 'phone' | 'otp' | 'newPin';
 
 const isPinValid = (value: string) => /^\d{4}$/.test(value);
-const isOtpValid = (value: string) => /^\d{5,6}$/.test(value);
+const isOtpValid = (value: string) => /^\d{6}$/.test(value);
 
 const readParam = (value?: string | string[]) => {
     if (Array.isArray(value)) return value[0] ?? '';
@@ -51,14 +52,23 @@ export default function ForgotPinScreen() {
     const busy = isRequestingOtp || isVerifyingOtp || isResettingPin;
 
     const submitPhone = async () => {
-        const normalizedPhone = phone.trim();
-        if (!normalizedPhone) {
+        if (!phone.trim()) {
             showAlert('Erreur', 'Veuillez saisir votre numero de telephone.', undefined, 'error');
             return;
         }
 
+        let normalizedPhone: string;
         try {
-            await requestOtp({ phone: normalizedPhone }).unwrap();
+            normalizedPhone = normalizePhoneNumberForApi(phone);
+        } catch (error: any) {
+            showAlert('Erreur', error?.message || 'Numero de telephone invalide.', undefined, 'error');
+            return;
+        }
+
+        try {
+            const response = await requestOtp({ phone: normalizedPhone }).unwrap();
+            const resolvedPhone = response?.phone?.trim() || normalizedPhone;
+            setPhone(resolvedPhone);
             setStep('otp');
             showAlert(
                 'Code envoye',
@@ -79,12 +89,21 @@ export default function ForgotPinScreen() {
     const submitOtp = async () => {
         const normalizedOtp = otp.trim();
         if (!isOtpValid(normalizedOtp)) {
-            showAlert('Erreur', 'Le code OTP doit contenir 5 ou 6 chiffres.', undefined, 'error');
+            showAlert('Erreur', 'Le code OTP doit contenir exactement 6 chiffres.', undefined, 'error');
+            return;
+        }
+
+        let normalizedPhone: string;
+        try {
+            normalizedPhone = normalizePhoneNumberForApi(phone);
+        } catch (error: any) {
+            showAlert('Erreur', error?.message || 'Numero de telephone invalide.', undefined, 'error');
             return;
         }
 
         try {
-            await verifyOtp({ phone: phone.trim(), otp: normalizedOtp }).unwrap();
+            await verifyOtp({ phone: normalizedPhone, otp: normalizedOtp }).unwrap();
+            setPhone(normalizedPhone);
             setStep('newPin');
         } catch (error: any) {
             showAlert('Erreur', error?.data?.message || 'Code OTP invalide.', undefined, 'error');
@@ -101,9 +120,17 @@ export default function ForgotPinScreen() {
             return;
         }
 
+        let normalizedPhone: string;
+        try {
+            normalizedPhone = normalizePhoneNumberForApi(phone);
+        } catch (error: any) {
+            showAlert('Erreur', error?.message || 'Numero de telephone invalide.', undefined, 'error');
+            return;
+        }
+
         try {
             const response = await resetPin({
-                phone: phone.trim(),
+                phone: normalizedPhone,
                 newPin: newPin.trim(),
             }).unwrap();
 
@@ -118,7 +145,7 @@ export default function ForgotPinScreen() {
                                 pathname: '/modal',
                                 params: {
                                     mode: 'login',
-                                    phone: phone.trim(),
+                                    phone: normalizedPhone,
                                 },
                             }),
                     },
@@ -200,7 +227,7 @@ export default function ForgotPinScreen() {
                                         onChangeText={(text) => setOtp(text.replace(/\D/g, '').slice(0, 6))}
                                         keyboardType="number-pad"
                                         maxLength={6}
-                                        placeholder="Code recu par SMS (5 ou 6 chiffres)"
+                                        placeholder="Code recu par SMS (6 chiffres)"
                                         placeholderTextColor={Colors.gray400}
                                     />
                                 </View>

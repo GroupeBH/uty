@@ -58,6 +58,8 @@ export interface Order {
     deliveryLocation?: OrderGeoPoint | null;
     status: OrderStatusValue;
     deliveryPersonId?: string | Record<string, any> | null;
+    viewerIsBuyer?: boolean;
+    viewerIsSeller?: boolean;
     createdAt: string;
     updatedAt: string;
 }
@@ -110,6 +112,32 @@ export const toIdString = (value: unknown): string | null => {
 
 export const getOrderPartyId = (party: string | OrderParty | undefined | null): string | null =>
     toIdString((party as any)?._id ?? party);
+
+export const isOrderBuyerForUser = (
+    order: Order,
+    currentUserId?: string | null,
+): boolean => {
+    if (typeof order.viewerIsBuyer === 'boolean') {
+        return order.viewerIsBuyer;
+    }
+    if (!currentUserId) {
+        return false;
+    }
+    return getOrderPartyId(order.userId) === currentUserId;
+};
+
+export const isOrderSellerForUser = (
+    order: Order,
+    currentUserId?: string | null,
+): boolean => {
+    if (typeof order.viewerIsSeller === 'boolean') {
+        return order.viewerIsSeller;
+    }
+    if (!currentUserId) {
+        return false;
+    }
+    return getOrderPartyId(order.sellerId) === currentUserId;
+};
 
 export const getOrderPartyName = (
     party: string | OrderParty | undefined | null,

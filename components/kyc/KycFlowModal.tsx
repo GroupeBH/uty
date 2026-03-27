@@ -1,3 +1,4 @@
+import { BottomActionBar } from '@/components/ui/BottomActionBar';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useSubmitKycMutation } from '@/store/api/usersApi';
@@ -964,7 +965,7 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                                 {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
                             </ScrollView>
 
-                            <View style={styles.footer}>
+                            <BottomActionBar style={styles.footer}>
                                 <TouchableOpacity
                                     style={[styles.footerGhost, step === 1 && styles.footerGhostDisabled]}
                                     onPress={handlePrevious}
@@ -998,7 +999,7 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 )}
-                            </View>
+                            </BottomActionBar>
                         </View>
                     </View>
                 </KeyboardAvoidingView>

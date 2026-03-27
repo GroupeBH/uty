@@ -1,5 +1,6 @@
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { KycFlowModal } from '@/components/kyc/KycFlowModal';
+import { KINSHASA_CONTACT_EXAMPLE, KINSHASA_KYC_ID_EXAMPLE, KINSHASA_SHOP_NAME_EXAMPLE, KINSHASA_TAX_ID_EXAMPLE } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyKycEligibilityQuery } from '@/store/api/usersApi';
@@ -386,7 +387,7 @@ export default function CreateShopScreen() {
                         value={name}
                         onChangeText={setName}
                         style={styles.input}
-                        placeholder="Ex: Tech Market Abidjan"
+                        placeholder={KINSHASA_SHOP_NAME_EXAMPLE}
                         placeholderTextColor={Colors.gray400}
                     />
 
@@ -483,7 +484,7 @@ export default function CreateShopScreen() {
                             value={kycIdNumber}
                             onChangeText={setKycIdNumber}
                             style={styles.input}
-                            placeholder="Ex: CI-1234-5678"
+                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
                             placeholderTextColor={Colors.gray400}
                             autoCapitalize="characters"
                         />
@@ -536,7 +537,7 @@ export default function CreateShopScreen() {
                             value={idnat}
                             onChangeText={setIdnat}
                             style={styles.input}
-                            placeholder="Ex: CI123456789"
+                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
                             placeholderTextColor={Colors.gray400}
                         />
 
@@ -545,7 +546,7 @@ export default function CreateShopScreen() {
                             value={rccm}
                             onChangeText={setRccm}
                             style={styles.input}
-                            placeholder="Ex: CI-ABJ-01-2025-B12-00045"
+                            placeholder={KINSHASA_TAX_ID_EXAMPLE}
                             placeholderTextColor={Colors.gray400}
                         />
 
@@ -574,7 +575,7 @@ export default function CreateShopScreen() {
                     value={phone}
                     onChangeText={setPhone}
                     style={styles.input}
-                    placeholder="Numero de contact"
+                    placeholder={KINSHASA_CONTACT_EXAMPLE}
                     placeholderTextColor={Colors.gray400}
                 />
 

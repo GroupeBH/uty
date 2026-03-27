@@ -2,6 +2,7 @@
  * Écran de modification du profil utilisateur
  */
 
+import { BottomActionBar } from '@/components/ui/BottomActionBar';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { useAuth } from '@/hooks/useAuth';
@@ -219,7 +220,7 @@ export default function EditProfileScreen() {
             </KeyboardAvoidingView>
 
             {/* Bouton de sauvegarde */}
-            <View style={styles.footer}>
+            <BottomActionBar style={styles.footer}>
                 <TouchableOpacity
                     style={styles.saveButton}
                     onPress={handleSave}
@@ -236,7 +237,7 @@ export default function EditProfileScreen() {
                         )}
                     </LinearGradient>
                 </TouchableOpacity>
-            </View>
+            </BottomActionBar>
             {alertNode}
         </SafeAreaView>
     );
