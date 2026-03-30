@@ -39,7 +39,7 @@ export const cartApi = baseApi.injectEndpoints({
             }),
             invalidatesTags: ['Cart', 'Order'],
         }),
-        setDeliveryLocation: builder.mutation<Cart, { coordinates: number[] }>({
+        setDeliveryLocation: builder.mutation<Cart, { coordinates: number[]; address?: string }>({
             query: (body) => ({
                 url: '/carts/delivery-location',
                 method: 'PATCH',

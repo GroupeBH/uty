@@ -5,19 +5,25 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { AnnouncementStepHeader } from '@/components/forms/AnnouncementStepHeader';
+import { KinshasaAddressForm } from '@/components/forms/KinshasaAddressForm';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { BottomActionBar } from '@/components/ui/BottomActionBar';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { KINSHASA_ADDRESS_EXAMPLES, KINSHASA_ADDRESS_HELP_TEXT } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
 import { useCreateAnnouncementMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesByParentQuery, useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
+import { useLazyGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Category, CategoryAttribute } from '@/types/category';
 import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
+import { localDrafts } from '@/utils/localDrafts';
+import { formatKinshasaAddress, hasKinshasaAddressValue, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -37,7 +43,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 const BASE_STEPS = [
     { key: 'category', title: 'Catégorie', icon: 'grid-outline' as const },
@@ -239,9 +245,32 @@ const BASE_FORM_FIELDS = [
     'weightClass',
 ];
 
+type PickupInputMode = 'guided' | 'coordinates' | 'map';
+
+const PICKUP_INPUT_MODE_OPTIONS: {
+    id: PickupInputMode;
+    label: string;
+    description: string;
+}[] = [
+    {
+        id: 'guided',
+        label: 'Adresse guidee',
+        description: 'Commune, quartier et repere',
+    },
+    {
+        id: 'coordinates',
+        label: 'Coordonnees',
+        description: 'Latitude et longitude',
+    },
+    {
+        id: 'map',
+        label: 'Carte',
+        description: 'Choisir le point exact',
+    },
+];
+
 export default function PublishScreen() {
     const router = useRouter();
-    const insets = useSafeAreaInsets();
     const { requireAuth } = useAuth();
     const [createAnnouncement, { isLoading: isPublishing }] = useCreateAnnouncementMutation();
 
@@ -278,6 +307,13 @@ export default function PublishScreen() {
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [mapVisible, setMapVisible] = useState(false);
+    const [pickupInputMode, setPickupInputMode] = useState<PickupInputMode>('guided');
+    const [pickupAddressFields, setPickupAddressFields] = useState<KinshasaAddressFields>(
+        () => parseKinshasaAddress(''),
+    );
+    const [draftRestored, setDraftRestored] = useState(false);
+    const [draftReady, setDraftReady] = useState(false);
+    const draftSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     type AlertVariant = 'success' | 'error' | 'info';
     const [alertState, setAlertState] = useState<{
@@ -328,6 +364,7 @@ export default function PublishScreen() {
     const currentParentId = categoryPath.length > 0 ? categoryPath[categoryPath.length - 1]._id : null;
     const { data: currentLevelCategories, isLoading: categoriesLoading } = useGetCategoriesByParentQuery(currentParentId);
     const { data: currencies = [] } = useGetCurrenciesQuery();
+    const [triggerGeocode, { isFetching: isResolvingPickupCoordinates }] = useLazyGeocodeQuery();
     const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
         selectedLeafCategory?._id || '',
         { skip: !selectedLeafCategory }
@@ -443,6 +480,110 @@ export default function PublishScreen() {
         });
     }, [activeCurrencies]);
 
+    useEffect(() => {
+        let cancelled = false;
+
+        (async () => {
+            const draft = await localDrafts.getPublishDraft();
+            if (!draft || cancelled) {
+                setDraftReady(true);
+                return;
+            }
+
+            setFormData((prev: any) => ({
+                ...prev,
+                ...draft.formData,
+            }));
+            setDynamicAttributes(draft.dynamicAttributes || {});
+            setCategoryPath((draft.categoryPath || []) as Category[]);
+            setSelectedLeafCategory((draft.selectedLeafCategory as Category | null) || null);
+            setPickupAddressFields(
+                draft.pickupAddressFields || parseKinshasaAddress(draft.formData?.pickupAddress),
+            );
+            setDraftRestored(true);
+            setDraftReady(true);
+        })();
+
+        return () => {
+            cancelled = true;
+            if (draftSaveTimerRef.current) {
+                clearTimeout(draftSaveTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!draftReady) {
+            return;
+        }
+
+        const hasDraftContent =
+            Boolean(selectedLeafCategory?._id) ||
+            categoryPath.length > 0 ||
+            Boolean(formData.name?.trim()) ||
+            Boolean(formData.description?.trim()) ||
+            Boolean(formData.price?.trim()) ||
+            Boolean(formData.pickupAddress?.trim()) ||
+            hasKinshasaAddressValue(pickupAddressFields) ||
+            Object.keys(dynamicAttributes || {}).length > 0;
+
+        if (draftSaveTimerRef.current) {
+            clearTimeout(draftSaveTimerRef.current);
+        }
+
+        draftSaveTimerRef.current = setTimeout(() => {
+            if (!hasDraftContent) {
+                void localDrafts.clearPublishDraft();
+                return;
+            }
+
+            void localDrafts.savePublishDraft({
+                formData: {
+                    name: formData.name || '',
+                    description: formData.description || '',
+                    price: formData.price || '',
+                    currency: formData.currency || DEFAULT_CURRENCY_CODE,
+                    quantity: formData.quantity || '1',
+                    isDeliverable: !!formData.isDeliverable,
+                    weightClass: Array.isArray(formData.weightClass) ? formData.weightClass : [],
+                    pickupAddress: formData.pickupAddress || '',
+                    pickupLatitude: formData.pickupLatitude || '',
+                    pickupLongitude: formData.pickupLongitude || '',
+                },
+                dynamicAttributes,
+                categoryPath: categoryPath.map((category) => ({
+                    _id: category._id,
+                    name: category.name,
+                    icon: category.icon,
+                    isLeaf: category.isLeaf,
+                })),
+                selectedLeafCategory: selectedLeafCategory
+                    ? {
+                          _id: selectedLeafCategory._id,
+                          name: selectedLeafCategory.name,
+                          icon: selectedLeafCategory.icon,
+                          isLeaf: selectedLeafCategory.isLeaf,
+                      }
+                    : null,
+                pickupAddressFields,
+                savedAt: new Date().toISOString(),
+            });
+        }, 400);
+
+        return () => {
+            if (draftSaveTimerRef.current) {
+                clearTimeout(draftSaveTimerRef.current);
+            }
+        };
+    }, [
+        categoryPath,
+        draftReady,
+        dynamicAttributes,
+        formData,
+        pickupAddressFields,
+        selectedLeafCategory,
+    ]);
+
     // Ajuster currentStep si le nombre d'étapes change
     React.useEffect(() => {
         if (currentStep > STEPS.length) {
@@ -479,6 +620,12 @@ export default function PublishScreen() {
     // Gestion du formulaire
     const handleInputChange = (field: string, value: any) => {
         setFormData((prev: any) => ({ ...prev, [field]: value }));
+        if (field === 'pickupAddress') {
+            setPickupAddressFields(parseKinshasaAddress(String(value || '')));
+        }
+        if ((field === 'pickupLatitude' || field === 'pickupLongitude') && errors.pickupLocation) {
+            setErrors((prev) => ({ ...prev, pickupLocation: '' }));
+        }
         if (errors[field]) {
             setErrors((prev) => ({ ...prev, [field]: '' }));
         }
@@ -490,6 +637,29 @@ export default function PublishScreen() {
         }
         if (field === 'isDeliverable' && !value && errors.pickupLocation) {
             setErrors((prev) => ({ ...prev, pickupLocation: '' }));
+        }
+    };
+
+    const handlePickupInputModeChange = (mode: PickupInputMode) => {
+        setPickupInputMode(mode);
+        if (errors.pickupLocation || errors.pickupAddress) {
+            setErrors((prev) => ({
+                ...prev,
+                pickupLocation: '',
+                pickupAddress: '',
+            }));
+        }
+    };
+
+    const handleStructuredPickupAddressChange = (fields: KinshasaAddressFields) => {
+        const formattedAddress = formatKinshasaAddress(fields);
+        setPickupAddressFields(fields);
+        setFormData((prev: any) => ({
+            ...prev,
+            pickupAddress: formattedAddress,
+        }));
+        if (errors.pickupAddress) {
+            setErrors((prev) => ({ ...prev, pickupAddress: '' }));
         }
     };
 
@@ -506,11 +676,56 @@ export default function PublishScreen() {
         return Number.isFinite(parsed) ? parsed : undefined;
     };
 
+    const resolvePickupCoordinates = async () => {
+        const latitude = parseCoordinate(formData.pickupLatitude);
+        const longitude = parseCoordinate(formData.pickupLongitude);
+
+        if (typeof latitude === 'number' && typeof longitude === 'number') {
+            return { latitude, longitude, resolvedBy: 'manual' as const };
+        }
+
+        const pickupAddress = formData.pickupAddress?.trim();
+        if (!pickupAddress) {
+            return null;
+        }
+
+        try {
+            const response = await triggerGeocode({
+                address: pickupAddress,
+                language: 'fr',
+                region: 'cd',
+            }).unwrap();
+
+            const resolvedLatitude = response?.lat;
+            const resolvedLongitude = response?.lng;
+
+            if (typeof resolvedLatitude === 'number' && typeof resolvedLongitude === 'number') {
+                setFormData((prev: any) => ({
+                    ...prev,
+                    pickupLatitude: String(resolvedLatitude),
+                    pickupLongitude: String(resolvedLongitude),
+                }));
+
+                return {
+                    latitude: resolvedLatitude,
+                    longitude: resolvedLongitude,
+                    resolvedBy: 'geocode' as const,
+                };
+            }
+        } catch (error) {
+            console.warn('Unable to geocode pickup address:', error);
+        }
+
+        return null;
+    };
+
     const handleMapConfirm = (location: { latitude: number; longitude: number; address?: string }) => {
+        setPickupInputMode('map');
         handleInputChange('pickupLatitude', String(location.latitude));
         handleInputChange('pickupLongitude', String(location.longitude));
         if (location.address) {
             handleInputChange('pickupAddress', location.address);
+            setPickupAddressFields(parseKinshasaAddress(location.address));
         }
         if (errors.pickupLocation) {
             setErrors((prev) => ({ ...prev, pickupLocation: '' }));
@@ -630,17 +845,31 @@ export default function PublishScreen() {
 
         // Étape 3: Livraison
         if (step === deliveryStepId) {
-            if (formData.isDeliverable && !formData.pickupAddress?.trim()) {
-                newErrors.pickupAddress = "L'adresse de récupération est obligatoire";
-            }
             if (formData.isDeliverable && (!formData.weightClass || formData.weightClass.length === 0)) {
                 newErrors.weightClass = 'La classe de poids est obligatoire';
             }
             if (formData.isDeliverable) {
+                const pickupAddress = formData.pickupAddress?.trim() || '';
                 const latitude = parseCoordinate(formData.pickupLatitude);
                 const longitude = parseCoordinate(formData.pickupLongitude);
-                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
-                    newErrors.pickupLocation = 'Veuillez sélectionner un point sur la carte';
+                const hasCoordinates =
+                    typeof latitude === 'number' && typeof longitude === 'number';
+                const hasPartialCoordinates =
+                    !!formData.pickupLatitude?.trim() || !!formData.pickupLongitude?.trim();
+
+                if (!pickupAddress && !hasCoordinates) {
+                    newErrors.pickupAddress =
+                        pickupInputMode === 'coordinates'
+                            ? 'Ajoutez des coordonnees ou une adresse de recuperation'
+                            : "L'adresse de recuperation ou les coordonnees sont obligatoires";
+                }
+
+                if (hasPartialCoordinates && !hasCoordinates) {
+                    newErrors.pickupLocation =
+                        'Renseignez une latitude et une longitude valides';
+                } else if (pickupInputMode === 'coordinates' && !hasCoordinates && !pickupAddress) {
+                    newErrors.pickupLocation =
+                        'Saisissez la latitude et la longitude ou revenez au mode adresse guidee';
                 }
             }
 
@@ -740,21 +969,52 @@ export default function PublishScreen() {
                 if (Array.isArray(formData.weightClass) && formData.weightClass.length > 0) {
                     formDataToSend.append('weightClass', JSON.stringify(formData.weightClass));
                 }
-                const latitude = parseCoordinate(formData.pickupLatitude);
-                const longitude = parseCoordinate(formData.pickupLongitude);
-                if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+                const pickupAddress = formData.pickupAddress?.trim() || '';
+                const typedLatitude = parseCoordinate(formData.pickupLatitude);
+                const typedLongitude = parseCoordinate(formData.pickupLongitude);
+                const hasCoordinates =
+                    typeof typedLatitude === 'number' && typeof typedLongitude === 'number';
+                const hasPartialCoordinates =
+                    (!!formData.pickupLatitude?.trim() || !!formData.pickupLongitude?.trim()) &&
+                    !hasCoordinates;
+
+                if (hasPartialCoordinates) {
                     showAlert({
-                        title: 'Erreur',
-                        message: 'Veuillez sélectionner un point de récupération sur la carte',
+                        title: 'Coordonnees incompletes',
+                        message: 'Renseignez une latitude et une longitude valides, ou laissez les deux champs vides.',
                         variant: 'error',
                     });
                     return;
                 }
-                const pickupLocation = {
-                    type: 'Point',
-                    coordinates: [longitude, latitude],
-                    address: formData.pickupAddress?.trim(),
-                };
+
+                const resolvedPickupCoordinates = await resolvePickupCoordinates();
+                if (!resolvedPickupCoordinates && !pickupAddress) {
+                    showAlert({
+                        title: 'Point de pickup incomplet',
+                        message:
+                            pickupInputMode === 'coordinates'
+                                ? 'Saisissez la latitude et la longitude, ou repassez en mode adresse guidee.'
+                                : pickupInputMode === 'map'
+                                    ? 'Choisissez un point sur la carte, saisissez une adresse precise ou entrez les coordonnees manuellement.'
+                                    : 'Ajoutez une adresse de recuperation claire, ou utilisez la carte ou les coordonnees.',
+                        variant: 'error',
+                    });
+                    return;
+                }
+
+                const pickupLocation: Record<string, any> = {};
+                if (pickupAddress) {
+                    pickupLocation.address = pickupAddress;
+                    formDataToSend.append('address', pickupAddress);
+                }
+
+                if (resolvedPickupCoordinates) {
+                    pickupLocation.type = 'Point';
+                    pickupLocation.coordinates = [
+                        resolvedPickupCoordinates.longitude,
+                        resolvedPickupCoordinates.latitude,
+                    ];
+                }
 
                 formDataToSend.append('pickupLocation', JSON.stringify(pickupLocation));
             }
@@ -770,6 +1030,7 @@ export default function PublishScreen() {
             });
             
             await createAnnouncement(formDataToSend as any).unwrap();
+            await localDrafts.clearPublishDraft();
             showAlert({
                 title: 'Succes',
                 message: 'Votre annonce a ete publiee avec succes !',
@@ -779,7 +1040,28 @@ export default function PublishScreen() {
             });
         } catch (error: any) {
             console.error('Failed to create announcement:', error);
-            showAlert({ title: 'Erreur', message: error?.data?.message || "Echec de la publication de l'annonce", variant: 'error' });
+
+            if (
+                error?.status === 'PARSING_ERROR' &&
+                typeof error?.originalStatus === 'number' &&
+                error.originalStatus >= 200 &&
+                error.originalStatus < 300
+            ) {
+                await localDrafts.clearPublishDraft();
+                showAlert({
+                    title: 'Succes',
+                    message: 'Votre annonce a ete publiee avec succes !',
+                    variant: 'success',
+                    confirmText: 'OK',
+                    onConfirm: () => router.push('/(tabs)'),
+                });
+                return;
+            }
+
+            const errorMessage = Array.isArray(error?.data?.message)
+                ? error.data.message[0]
+                : error?.data?.message || error?.error || "Echec de la publication de l'annonce";
+            showAlert({ title: 'Erreur', message: errorMessage, variant: 'error' });
         }
     };
 
@@ -793,11 +1075,6 @@ export default function PublishScreen() {
                   address: formData.pickupAddress,
               }
             : undefined;
-    const navigationBottomPadding =
-        currentStep === getStepId('delivery')
-            ? Math.max(insets.bottom, Spacing.xs)
-            : Spacing.lg;
-
     console.log('announcementData', formData);
 
     return (
@@ -875,6 +1152,14 @@ export default function PublishScreen() {
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                 >
+                    {draftRestored ? (
+                        <View style={styles.draftBanner}>
+                            <Ionicons name="cloud-done-outline" size={16} color={Colors.primary} />
+                            <Text style={styles.draftBannerText}>
+                                Brouillon local restaure. Vous pouvez continuer sans tout ressaisir.
+                            </Text>
+                        </View>
+                    ) : null}
                     {/* Step 1: Sélection Catégorie */}
                     {currentStep === getStepId('category') && (
                         <View style={styles.stepContent}>
@@ -1158,6 +1443,48 @@ export default function PublishScreen() {
 
                                 {formData.isDeliverable && (
                                     <>
+                                        <View style={styles.deliveryModeSelector}>
+                                            <Text style={styles.deliveryModeTitle}>
+                                                Comment voulez-vous renseigner le point de pickup ?
+                                            </Text>
+                                            <Text style={styles.deliveryModeSubtitle}>
+                                                Choisissez la methode la plus simple. La carte n est plus obligatoire si vous avez deja une adresse claire ou des coordonnees.
+                                            </Text>
+                                            <View style={styles.inputModeChips}>
+                                                {PICKUP_INPUT_MODE_OPTIONS.map((option) => {
+                                                    const isActive = pickupInputMode === option.id;
+                                                    return (
+                                                        <TouchableOpacity
+                                                            key={option.id}
+                                                            style={[
+                                                                styles.inputModeChip,
+                                                                isActive && styles.inputModeChipActive,
+                                                            ]}
+                                                            onPress={() => handlePickupInputModeChange(option.id)}
+                                                            activeOpacity={0.85}
+                                                        >
+                                                            <Text
+                                                                style={[
+                                                                    styles.inputModeChipLabel,
+                                                                    isActive && styles.inputModeChipLabelActive,
+                                                                ]}
+                                                            >
+                                                                {option.label}
+                                                            </Text>
+                                                            <Text
+                                                                style={[
+                                                                    styles.inputModeChipDescription,
+                                                                    isActive && styles.inputModeChipDescriptionActive,
+                                                                ]}
+                                                            >
+                                                                {option.description}
+                                                            </Text>
+                                                        </TouchableOpacity>
+                                                    );
+                                                })}
+                                            </View>
+                                        </View>
+
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.inputLabel}>
                                                 Classe de poids <Text style={styles.required}>*</Text>
@@ -1198,71 +1525,140 @@ export default function PublishScreen() {
                                             {errors.weightClass && <Text style={styles.errorText}>{errors.weightClass}</Text>}
                                         </View>
 
-                                        <TouchableOpacity
-                                            style={styles.mapSelectButton}
-                                            onPress={() => setMapVisible(true)}
-                                            activeOpacity={0.8}
-                                        >
-                                            <LinearGradient colors={Gradients.primary} style={styles.mapSelectGradient}>
-                                                <Ionicons name="map-outline" size={18} color={Colors.white} />
-                                                <Text style={styles.mapSelectText}>Choisir sur la carte</Text>
-                                            </LinearGradient>
-                                        </TouchableOpacity>
-                                        {errors.pickupLocation && (
-                                            <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                        {pickupInputMode === 'guided' && (
+                                            <>
+                                                <KinshasaAddressForm
+                                                    fields={pickupAddressFields}
+                                                    onChange={handleStructuredPickupAddressChange}
+                                                    helperText="Commencez par la commune, puis ajoutez un repere connu. L application essaiera ensuite de retrouver les coordonnees automatiquement."
+                                                />
+
+                                                <View style={styles.inputGroup}>
+                                                    <Text style={styles.inputLabel}>Adresse de récupération</Text>
+                                                    <View style={[styles.inputContainer, errors.pickupAddress && styles.inputError]}>
+                                                        <Ionicons name="location-outline" size={20} color={Colors.gray400} />
+                                                        <TextInput
+                                                            style={styles.input}
+                                                            value={formData.pickupAddress}
+                                                            onChangeText={(value) => handleInputChange('pickupAddress', value)}
+                                                            placeholder={KINSHASA_ADDRESS_EXAMPLES[0]}
+                                                            placeholderTextColor={Colors.gray400}
+                                                        />
+                                                    </View>
+                                                    {errors.pickupAddress && <Text style={styles.errorText}>{errors.pickupAddress}</Text>}
+                                                    {!errors.pickupAddress ? (
+                                                        <Text style={styles.deliveryHint}>
+                                                            {isResolvingPickupCoordinates
+                                                                ? 'Localisation de l adresse en cours...'
+                                                                : KINSHASA_ADDRESS_HELP_TEXT}
+                                                        </Text>
+                                                    ) : null}
+                                                </View>
+
+                                                {errors.pickupLocation && (
+                                                    <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                                )}
+                                            </>
                                         )}
 
-                                        <View style={styles.inputGroup}>
-                                            <Text style={styles.inputLabel}>
-                                                Adresse de récupération <Text style={styles.required}>*</Text>
-                                            </Text>
-                                            <View style={[styles.inputContainer, errors.pickupAddress && styles.inputError]}>
-                                                <Ionicons name="location-outline" size={20} color={Colors.gray400} />
-                                                <TextInput
-                                                    style={styles.input}
-                                                    value={formData.pickupAddress}
-                                                    onChangeText={(value) => handleInputChange('pickupAddress', value)}
-                                                    placeholder="Ex: 12 rue des Fleurs, Abidjan"
-                                                    placeholderTextColor={Colors.gray400}
-                                                />
-                                            </View>
-                                            {errors.pickupAddress && <Text style={styles.errorText}>{errors.pickupAddress}</Text>}
-                                        </View>
-
-                                        <View style={styles.row}>
-                                            <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
-                                                <Text style={styles.inputLabel}>Latitude (optionnel)</Text>
-                                                <View style={styles.inputContainer}>
-                                                    <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
-                                                    <TextInput
-                                                        style={styles.input}
-                                                        value={formData.pickupLatitude}
-                                                        onChangeText={(value) => handleInputChange('pickupLatitude', value)}
-                                                        placeholder="5.3166"
-                                                        placeholderTextColor={Colors.gray400}
-                                                        keyboardType="decimal-pad"
-                                                    />
+                                        {pickupInputMode === 'coordinates' && (
+                                            <>
+                                                <View style={styles.inputGroup}>
+                                                    <Text style={styles.inputLabel}>Adresse de récupération (optionnel)</Text>
+                                                    <View style={[styles.inputContainer, errors.pickupAddress && styles.inputError]}>
+                                                        <Ionicons name="location-outline" size={20} color={Colors.gray400} />
+                                                        <TextInput
+                                                            style={styles.input}
+                                                            value={formData.pickupAddress}
+                                                            onChangeText={(value) => handleInputChange('pickupAddress', value)}
+                                                            placeholder={KINSHASA_ADDRESS_EXAMPLES[0]}
+                                                            placeholderTextColor={Colors.gray400}
+                                                        />
+                                                    </View>
+                                                    {errors.pickupAddress && <Text style={styles.errorText}>{errors.pickupAddress}</Text>}
                                                 </View>
-                                            </View>
 
-                                            <View style={[styles.inputGroup, styles.flex1]}>
-                                                <Text style={styles.inputLabel}>Longitude (optionnel)</Text>
-                                                <View style={styles.inputContainer}>
-                                                    <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
-                                                    <TextInput
-                                                        style={styles.input}
-                                                        value={formData.pickupLongitude}
-                                                        onChangeText={(value) => handleInputChange('pickupLongitude', value)}
-                                                        placeholder="-4.0333"
-                                                        placeholderTextColor={Colors.gray400}
-                                                        keyboardType="decimal-pad"
-                                                    />
+                                                <View style={styles.row}>
+                                                    <View style={[styles.inputGroup, styles.flex1, styles.marginRight]}>
+                                                        <Text style={styles.inputLabel}>Latitude</Text>
+                                                        <View style={styles.inputContainer}>
+                                                            <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
+                                                            <TextInput
+                                                                style={styles.input}
+                                                                value={formData.pickupLatitude}
+                                                                onChangeText={(value) => handleInputChange('pickupLatitude', value)}
+                                                                placeholder="-4.3250"
+                                                                placeholderTextColor={Colors.gray400}
+                                                                keyboardType="decimal-pad"
+                                                            />
+                                                        </View>
+                                                    </View>
+
+                                                    <View style={[styles.inputGroup, styles.flex1]}>
+                                                        <Text style={styles.inputLabel}>Longitude</Text>
+                                                        <View style={styles.inputContainer}>
+                                                            <Ionicons name="navigate-outline" size={20} color={Colors.gray400} />
+                                                            <TextInput
+                                                                style={styles.input}
+                                                                value={formData.pickupLongitude}
+                                                                onChangeText={(value) => handleInputChange('pickupLongitude', value)}
+                                                                placeholder="15.3222"
+                                                                placeholderTextColor={Colors.gray400}
+                                                                keyboardType="decimal-pad"
+                                                            />
+                                                        </View>
+                                                    </View>
                                                 </View>
-                                            </View>
-                                        </View>
+
+                                                {errors.pickupLocation && (
+                                                    <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                                )}
+
+                                                <Text style={styles.deliveryHint}>
+                                                    Saisissez latitude et longitude si vous les connaissez deja. Vous pouvez aussi ajouter une adresse pour aider le livreur.
+                                                </Text>
+                                            </>
+                                        )}
+
+                                        {pickupInputMode === 'map' && (
+                                            <>
+                                                <TouchableOpacity
+                                                    style={styles.mapSelectButton}
+                                                    onPress={() => setMapVisible(true)}
+                                                    activeOpacity={0.8}
+                                                >
+                                                    <LinearGradient colors={Gradients.primary} style={styles.mapSelectGradient}>
+                                                        <Ionicons name="map-outline" size={18} color={Colors.white} />
+                                                        <Text style={styles.mapSelectText}>Choisir sur la carte</Text>
+                                                    </LinearGradient>
+                                                </TouchableOpacity>
+                                                {errors.pickupLocation && (
+                                                    <Text style={styles.errorText}>{errors.pickupLocation}</Text>
+                                                )}
+
+                                                <View style={styles.inputGroup}>
+                                                    <Text style={styles.inputLabel}>Adresse de récupération</Text>
+                                                    <View style={[styles.inputContainer, errors.pickupAddress && styles.inputError]}>
+                                                        <Ionicons name="location-outline" size={20} color={Colors.gray400} />
+                                                        <TextInput
+                                                            style={styles.input}
+                                                            value={formData.pickupAddress}
+                                                            onChangeText={(value) => handleInputChange('pickupAddress', value)}
+                                                            placeholder={KINSHASA_ADDRESS_EXAMPLES[0]}
+                                                            placeholderTextColor={Colors.gray400}
+                                                        />
+                                                    </View>
+                                                    {errors.pickupAddress && <Text style={styles.errorText}>{errors.pickupAddress}</Text>}
+                                                </View>
+
+                                                <Text style={styles.deliveryHint}>
+                                                    Choisissez le point exact sur la carte. L adresse se remplit automatiquement quand c est possible.
+                                                </Text>
+                                            </>
+                                        )}
 
                                         <Text style={styles.deliveryHint}>
-                                            Cette adresse servira de point de récupération pour le livreur.
+                                            Ce point servira de référence de récupération pour le livreur.
                                         </Text>
                                     </>
                                 )}
@@ -1415,7 +1811,7 @@ export default function PublishScreen() {
                 </ScrollView>
 
                 {/* Navigation Buttons */}
-                <View style={[styles.navigationBar, { paddingBottom: navigationBottomPadding }]}>
+                <BottomActionBar style={styles.navigationBar}>
                     {currentStep > 1 && (
                         <TouchableOpacity style={styles.previousButton} onPress={handlePrevious}>
                             <Ionicons name="arrow-back" size={20} color={Colors.primary} />
@@ -1462,7 +1858,7 @@ export default function PublishScreen() {
                             </LinearGradient>
                         </TouchableOpacity>
                     )}
-                </View>
+                </BottomActionBar>
             </KeyboardAvoidingView>
 
             <MapPickerModal
@@ -1787,6 +2183,25 @@ const styles = StyleSheet.create({
     marginRight: {
         marginRight: 0,
     },
+    draftBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary + '0D',
+        borderWidth: 1,
+        borderColor: Colors.primary + '20',
+        marginBottom: Spacing.lg,
+    },
+    draftBannerText: {
+        flex: 1,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     deliveryCard: {
         marginTop: Spacing.sm,
         padding: Spacing.lg,
@@ -1815,10 +2230,62 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         marginTop: Spacing.xs,
     },
+    deliveryModeSelector: {
+        marginBottom: Spacing.lg,
+    },
+    deliveryModeTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.primary,
+        marginBottom: Spacing.xs,
+    },
+    deliveryModeSubtitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        lineHeight: 18,
+        marginBottom: Spacing.md,
+    },
+    inputModeChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    inputModeChip: {
+        flexGrow: 1,
+        minWidth: 100,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    inputModeChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    inputModeChipLabel: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+        marginBottom: 2,
+    },
+    inputModeChipLabelActive: {
+        color: Colors.white,
+    },
+    inputModeChipDescription: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        lineHeight: 16,
+    },
+    inputModeChipDescriptionActive: {
+        color: Colors.white + 'DD',
+    },
     deliveryHint: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray400,
         marginTop: Spacing.xs,
+        lineHeight: 18,
     },
     mapSelectButton: {
         borderRadius: BorderRadius.lg,

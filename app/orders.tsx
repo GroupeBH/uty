@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
 import { useGetMyShopQuery } from '@/store/api/shopsApi';
-import { Order, OrderStatusValue, getOrderPartyId } from '@/types/order';
+import { Order, OrderStatusValue, isOrderBuyerForUser, isOrderSellerForUser } from '@/types/order';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -75,13 +75,11 @@ export default function OrdersScreen() {
     const currentUserId = user?._id || '';
 
     const buyerOrders = React.useMemo(() => {
-        if (!currentUserId) return [] as Order[];
-        return orders.filter((order) => getOrderPartyId(order.userId) === currentUserId);
+        return orders.filter((order) => isOrderBuyerForUser(order, currentUserId));
     }, [currentUserId, orders]);
 
     const receivedOrders = React.useMemo(() => {
-        if (!currentUserId) return [] as Order[];
-        return orders.filter((order) => getOrderPartyId(order.sellerId) === currentUserId);
+        return orders.filter((order) => isOrderSellerForUser(order, currentUserId));
     }, [currentUserId, orders]);
 
     const openSellerOrders = React.useCallback(() => {

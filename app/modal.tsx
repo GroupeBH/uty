@@ -12,6 +12,8 @@ import {
 } from '@/store/api/authApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useAppDispatch } from '@/store/hooks';
+import { OTP_DISABLED } from '@/utils/featureFlags';
+import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -290,13 +292,19 @@ export default function AuthModal() {
         setIsConfirmPinFocused(false);
     };
 
-    const validatePhone = () => {
+    const resolveNormalizedPhone = () => {
         const trimmedPhone = phone.trim();
         if (!trimmedPhone) {
             showAlert('Erreur', 'Veuillez entrer votre numero de telephone', 'error');
-            return false;
+            return null;
         }
-        return true;
+
+        try {
+            return normalizePhoneNumberForApi(trimmedPhone);
+        } catch (error: any) {
+            showAlert('Erreur', error?.message || 'Numero de telephone invalide', 'error');
+            return null;
+        }
     };
 
     const validateIdentityStep = () => {
@@ -328,8 +336,24 @@ export default function AuthModal() {
     };
 
     const handleContinueToRegisterStep = () => {
-        if (!validatePhone()) return;
-        setRegisterStep(isGoogleRegistrationFlow ? 'preferences' : 'identity');
+        const normalizedPhone = resolveNormalizedPhone();
+        if (!normalizedPhone) return;
+
+        setPhone(normalizedPhone);
+        if (isGoogleRegistrationFlow) {
+            setRegisterStep('preferences');
+            return;
+        }
+
+        if (OTP_DISABLED) {
+            setRegisterStep('identity');
+            return;
+        }
+
+        router.push({
+            pathname: '/otp',
+            params: { phone: normalizedPhone },
+        });
     };
 
     const toggleCategory = (categoryId: string) => {
@@ -351,7 +375,8 @@ export default function AuthModal() {
     };
 
     const handleRegister = async () => {
-        if (!validatePhone()) {
+        const normalizedPhone = resolveNormalizedPhone();
+        if (!normalizedPhone) {
             return;
         }
 
@@ -373,7 +398,7 @@ export default function AuthModal() {
 
         try {
             const response = await register({
-                phone: phone.trim(),
+                phone: normalizedPhone,
                 firstName: resolvedFirstName,
                 lastName: resolvedLastName,
                 pin: resolvedPin,
@@ -407,29 +432,33 @@ export default function AuthModal() {
     };
 
     const handleContinueToPin = () => {
-        if (!validatePhone()) return;
+        const normalizedPhone = resolveNormalizedPhone();
+        if (!normalizedPhone) return;
+        setPhone(normalizedPhone);
         setLoginStep('pin');
     };
 
     const handleForgotPin = () => {
         if (isBusy) return;
+        const normalizedPhone = resolveNormalizedPhone();
+        if (!normalizedPhone) return;
+        setPhone(normalizedPhone);
         router.push({
             pathname: '/forgot-pin',
-            params: phone.trim() ? { phone: phone.trim() } : undefined,
+            params: { phone: normalizedPhone },
         });
     };
 
     const handleLogin = async () => {
-        if (!validatePhone()) return;
-
-        const trimmedPhone = phone.trim();
+        const normalizedPhone = resolveNormalizedPhone();
+        if (!normalizedPhone) return;
         if (!isPinValid(pin)) {
             showAlert('Erreur', 'Le code PIN doit contenir 4 chiffres', 'error');
             return;
         }
 
         try {
-            const response = await login({ phone: trimmedPhone, pin }).unwrap();
+            const response = await login({ phone: normalizedPhone, pin }).unwrap();
             await completeAuthSession(response.access_token, response.refresh_token);
             showAlert('Succes', 'Connexion reussie', 'success', () => {
                 redirectAfterSuccess();

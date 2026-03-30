@@ -43,7 +43,7 @@ export default function FavoritesScreen() {
         }
     }, [isAuthLoading, isAuthenticated, requireAuth, router]);
 
-    const currentUserId = normalizeId(user?._id || user?.id);
+    const currentUserId = normalizeId(user);
 
     const isInWishlist = React.useCallback(
         (announcement: any) => {

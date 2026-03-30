@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useRef } from 'react';
 import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface FABProps {
     onPress?: () => void;
@@ -16,6 +17,7 @@ interface FABProps {
 
 export const FAB: React.FC<FABProps> = ({ onPress }) => {
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const scaleAnim = useRef(new Animated.Value(1)).current;
     const rotateAnim = useRef(new Animated.Value(0)).current;
 
@@ -63,7 +65,7 @@ export const FAB: React.FC<FABProps> = ({ onPress }) => {
     });
 
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, { bottom: 90 + insets.bottom }]}>
             <Animated.View
                 style={[
                     styles.button,

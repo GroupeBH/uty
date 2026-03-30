@@ -1,9 +1,10 @@
 /**
- * Écran des paramètres de l'application
+ * Ecran des parametres de l'application
  */
 
-import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
+import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { OTP_DISABLED } from '@/utils/featureFlags';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -18,24 +19,53 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+type GradientValue = (typeof Gradients)[keyof typeof Gradients];
+
+type SettingsItemBase = {
+    icon: string;
+    label: string;
+    subtitle: string;
+    gradient: GradientValue;
+    isDestructive?: boolean;
+};
+
+type SettingsToggleItem = SettingsItemBase & {
+    kind: 'toggle';
+    value: boolean;
+    onValueChange: React.Dispatch<React.SetStateAction<boolean>>;
+};
+
+type SettingsActionItem = SettingsItemBase & {
+    kind: 'action';
+    onPress: () => void;
+};
+
+type SettingsItem = SettingsToggleItem | SettingsActionItem;
+
+type SettingsSection = {
+    title: string;
+    items: SettingsItem[];
+};
+
 export default function SettingsScreen() {
     const router = useRouter();
     const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
-    const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [emailNotifications, setEmailNotifications] = useState(true);
     const [pushNotifications, setPushNotifications] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
     const [biometricAuth, setBiometricAuth] = useState(false);
+
     const showComingSoon = React.useCallback(() => {
-        showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info');
+        showStyledAlert('Info', 'Fonctionnalite a venir', undefined, 'info');
     }, [showStyledAlert]);
 
-    const settingsSections = [
+    const settingsSections: SettingsSection[] = [
         {
             title: 'Notifications',
             items: [
                 {
+                    kind: 'toggle',
                     icon: 'notifications-outline',
                     label: 'Notifications push',
                     subtitle: 'Recevoir des notifications',
@@ -44,6 +74,7 @@ export default function SettingsScreen() {
                     gradient: Gradients.warm,
                 },
                 {
+                    kind: 'toggle',
                     icon: 'mail-outline',
                     label: 'Notifications email',
                     subtitle: 'Recevoir des emails',
@@ -54,27 +85,30 @@ export default function SettingsScreen() {
             ],
         },
         {
-            title: 'Sécurité',
+            title: 'Securite',
             items: [
                 {
+                    kind: 'toggle',
                     icon: 'finger-print-outline',
-                    label: 'Authentification biométrique',
-                    subtitle: 'Utiliser l\'empreinte digitale',
+                    label: 'Authentification biometrique',
+                    subtitle: "Utiliser l'empreinte digitale",
                     value: biometricAuth,
                     onValueChange: setBiometricAuth,
                     gradient: Gradients.primary,
                 },
                 {
+                    kind: 'action',
                     icon: 'lock-closed-outline',
                     label: 'Changer le code PIN',
-                    subtitle: 'Modifier votre code de sécurité',
+                    subtitle: 'Modifier votre code de securite',
                     gradient: Gradients.accent,
                     onPress: () => router.push('/change-pin'),
                 },
                 {
+                    kind: 'action',
                     icon: 'help-circle-outline',
                     label: 'PIN oublie',
-                    subtitle: 'Reinitialiser avec OTP',
+                    subtitle: OTP_DISABLED ? 'Reinitialiser temporairement sans OTP' : 'Reinitialiser avec OTP',
                     gradient: Gradients.cool,
                     onPress: () => router.push('/forgot-pin'),
                 },
@@ -84,9 +118,10 @@ export default function SettingsScreen() {
             title: 'Apparence',
             items: [
                 {
+                    kind: 'toggle',
                     icon: 'moon-outline',
                     label: 'Mode sombre',
-                    subtitle: 'Activer le thème sombre',
+                    subtitle: 'Activer le theme sombre',
                     value: darkMode,
                     onValueChange: setDarkMode,
                     gradient: Gradients.cool,
@@ -94,25 +129,48 @@ export default function SettingsScreen() {
             ],
         },
         {
-            title: 'Données',
+            title: 'Utilisation locale',
             items: [
                 {
+                    kind: 'action',
+                    icon: 'card-outline',
+                    label: 'Moyens de paiement',
+                    subtitle: 'Paiement a la livraison et options locales',
+                    gradient: Gradients.accent,
+                    onPress: () => router.push('/payment-methods'),
+                },
+                {
+                    kind: 'action',
+                    icon: 'help-circle-outline',
+                    label: 'Aide et support',
+                    subtitle: 'Conseils simples, FAQ et contacts utiles',
+                    gradient: Gradients.success,
+                    onPress: () => router.push('/help-support'),
+                },
+            ],
+        },
+        {
+            title: 'Donnees',
+            items: [
+                {
+                    kind: 'action',
                     icon: 'download-outline',
-                    label: 'Télécharger mes données',
-                    subtitle: 'Exporter toutes mes données',
+                    label: 'Telecharger mes donnees',
+                    subtitle: 'Exporter toutes mes donnees',
                     gradient: Gradients.success,
                     onPress: showComingSoon,
                 },
                 {
+                    kind: 'action',
                     icon: 'trash-outline',
                     label: 'Supprimer mon compte',
-                    subtitle: 'Supprimer définitivement mon compte',
+                    subtitle: 'Supprimer definitivement mon compte',
                     gradient: Gradients.warm,
                     isDestructive: true,
                     onPress: () => {
                         showStyledAlert(
                             'Supprimer le compte',
-                            'Êtes-vous sûr de vouloir supprimer votre compte ? Cette action est irréversible.',
+                            'Etes-vous sur de vouloir supprimer votre compte ? Cette action est irreversible.',
                             [
                                 { text: 'Annuler', style: 'cancel' },
                                 {
@@ -128,29 +186,37 @@ export default function SettingsScreen() {
             ],
         },
         {
-            title: 'À propos',
+            title: 'A propos',
             items: [
                 {
+                    kind: 'action',
                     icon: 'document-text-outline',
-                    label: 'Conditions d\'utilisation',
+                    label: "Conditions d'utilisation",
                     subtitle: 'Lire les conditions',
                     gradient: Gradients.cool,
                     onPress: showComingSoon,
                 },
                 {
+                    kind: 'action',
                     icon: 'shield-checkmark-outline',
-                    label: 'Politique de confidentialité',
-                    subtitle: 'Comment nous protégeons vos données',
+                    label: 'Politique de confidentialite',
+                    subtitle: 'Comment nous protegeons vos donnees',
                     gradient: Gradients.primary,
                     onPress: showComingSoon,
                 },
                 {
+                    kind: 'action',
                     icon: 'information-circle-outline',
-                    label: 'À propos',
+                    label: 'A propos',
                     subtitle: 'Version 1.0.0',
                     gradient: Gradients.accent,
                     onPress: () =>
-                        showStyledAlert('À propos', 'UTY - Version 1.0.0\n\nApplication de marketplace', undefined, 'info'),
+                        showStyledAlert(
+                            'A propos',
+                            'UTY - Version 1.0.0\n\nApplication de marketplace',
+                            undefined,
+                            'info',
+                        ),
                 },
             ],
         },
@@ -158,13 +224,12 @@ export default function SettingsScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {/* Header */}
             <View style={styles.header}>
                 <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Paramètres</Text>
-                <View style={{ width: 40 }} />
+                <Text style={styles.headerTitle}>Parametres</Text>
+                <View style={styles.backButton} />
             </View>
 
             <ScrollView
@@ -183,9 +248,9 @@ export default function SettingsScreen() {
                                         styles.settingItem,
                                         item.isDestructive && styles.settingItemDestructive,
                                     ]}
-                                    onPress={item.onPress}
+                                    onPress={item.kind === 'action' ? item.onPress : undefined}
                                     activeOpacity={0.7}
-                                    disabled={!item.onPress}
+                                    disabled={item.kind !== 'action'}
                                 >
                                     <View style={styles.settingItemLeft}>
                                         <LinearGradient
@@ -210,7 +275,7 @@ export default function SettingsScreen() {
                                             <Text style={styles.settingSubtitle}>{item.subtitle}</Text>
                                         </View>
                                     </View>
-                                    {item.onValueChange ? (
+                                    {item.kind === 'toggle' ? (
                                         <Switch
                                             value={item.value}
                                             onValueChange={item.onValueChange}

@@ -38,7 +38,7 @@ export const useAuthInitialization = () => {
                     
                     // Essayer de récupérer le profil pour vérifier si le token est valide
                     try {
-                        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200';
+                        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URI || 'http://192.168.1.188:5200';
                         const response = await fetch(`${API_BASE_URL}/users/profile`, {
                             headers: {
                                 'Authorization': `Bearer ${accessToken}`,
@@ -74,7 +74,7 @@ export const useAuthInitialization = () => {
                     console.log('🔄 Attempting to refresh tokens...');
                     
                     try {
-                        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200';
+                        const API_BASE_URL = process.env.EXPO_PUBLIC_API_URI || 'http://192.168.1.188:5200';
                         const refreshResponse = await fetch(`${API_BASE_URL}/auth/refresh/accessToken`, {
                             method: 'POST',
                             headers: {
@@ -91,7 +91,7 @@ export const useAuthInitialization = () => {
                             await tokenService.saveTokens(access_token, refresh_token);
 
                             // Récupérer le profil avec le nouveau token
-                            const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.1.188:5200';
+                            const API_BASE_URL = process.env.EXPO_PUBLIC_API_URI || 'http://192.168.1.188:5200';
                             const profileResponse = await fetch(`${API_BASE_URL}/users/profile`, {
                                 headers: {
                                     'Authorization': `Bearer ${access_token}`,

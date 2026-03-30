@@ -49,15 +49,15 @@ export default function SpacesScreen() {
                 </TouchableOpacity>
                 <View style={styles.headerBody}>
                     <Text style={styles.title}>Changer d espace</Text>
-                    <Text style={styles.subtitle}>Choisissez votre mode de travail</Text>
+                    <Text style={styles.subtitle}>Passez de client a vendeur ou livreur quand vous en avez besoin</Text>
                 </View>
             </View>
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
                 <LinearGradient colors={Gradients.primary} style={styles.heroCard}>
-                    <Text style={styles.heroTitle}>Espaces autonomes</Text>
+                    <Text style={styles.heroTitle}>Vos modes d utilisation</Text>
                     <Text style={styles.heroText}>
-                        Chaque espace a ses propres onglets, operations et flux metier.
+                        Chaque mode affiche seulement les actions utiles pour eviter la complexite inutile.
                     </Text>
                 </LinearGradient>
 
@@ -80,7 +80,7 @@ export default function SpacesScreen() {
                         </Text>
                         <View style={[styles.badge, sellerReady ? styles.badgeReady : styles.badgePending]}>
                             <Text style={[styles.badgeText, sellerReady && styles.badgeTextReady]}>
-                                {sellerReady ? 'Pret' : 'Configuration requise'}
+                                {sellerReady ? 'Pret' : 'A activer'}
                             </Text>
                         </View>
                     </TouchableOpacity>
@@ -105,7 +105,7 @@ export default function SpacesScreen() {
                         </Text>
                         <View style={[styles.badge, driverReady ? styles.badgeReady : styles.badgePending]}>
                             <Text style={[styles.badgeText, driverReady && styles.badgeTextReady]}>
-                                {driverReady ? 'Pret' : 'Configuration requise'}
+                                {driverReady ? 'Pret' : 'A activer'}
                             </Text>
                         </View>
                     </TouchableOpacity>

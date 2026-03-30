@@ -5,8 +5,11 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { AnnouncementStepHeader } from '@/components/forms/AnnouncementStepHeader';
+import { KinshasaAddressForm } from '@/components/forms/KinshasaAddressForm';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { CategoryIcon } from '@/components/CategoryIcon';
+import { BottomActionBar } from '@/components/ui/BottomActionBar';
+import { KINSHASA_ADDRESS_EXAMPLES } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { WEIGHT_CLASS_OPTIONS } from '@/constants/weightClass';
 import { useAuth } from '@/hooks/useAuth';
@@ -15,6 +18,7 @@ import { useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
+import { formatKinshasaAddress, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -117,6 +121,9 @@ export default function EditAnnouncementScreen() {
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [mapVisible, setMapVisible] = useState(false);
+    const [pickupAddressFields, setPickupAddressFields] = useState<KinshasaAddressFields>(
+        () => parseKinshasaAddress(''),
+    );
 
     type AlertVariant = 'success' | 'error' | 'info';
     const [alertState, setAlertState] = useState<{
@@ -256,6 +263,7 @@ export default function EditAnnouncementScreen() {
                 pickupLatitude,
                 pickupLongitude,
             });
+            setPickupAddressFields(parseKinshasaAddress(pickupAddress));
             setExistingImages(announcement.images || []);
             
             // Convert Map to object for dynamic attributes
@@ -369,7 +377,7 @@ export default function EditAnnouncementScreen() {
             const asset = result?.assets[0];
             setIsConvertingImages(true);
             try {
-                const newImage = buildImageFile(asset.uri, asset.fileName);
+                const newImage = buildImageFile(asset.uri, asset.fileName ?? undefined);
                 setImages((prev) => {
                     const remainingSlots = 10 - existingImages.length;
                     return [...prev, newImage].slice(0, remainingSlots);
@@ -405,6 +413,18 @@ export default function EditAnnouncementScreen() {
         return Number.isFinite(parsed) ? parsed : undefined;
     };
 
+    const handleStructuredPickupAddressChange = (fields: KinshasaAddressFields) => {
+        const formattedAddress = formatKinshasaAddress(fields);
+        setPickupAddressFields(fields);
+        setFormData((prev: any) => ({
+            ...prev,
+            pickupAddress: formattedAddress,
+        }));
+        if (errors.pickupAddress) {
+            setErrors((prev) => ({ ...prev, pickupAddress: '' }));
+        }
+    };
+
     const handleMapConfirm = (location: { latitude: number; longitude: number; address?: string }) => {
         setFormData((prev: any) => ({
             ...prev,
@@ -412,6 +432,9 @@ export default function EditAnnouncementScreen() {
             pickupLongitude: String(location.longitude),
             pickupAddress: location.address || prev.pickupAddress,
         }));
+        if (location.address) {
+            setPickupAddressFields(parseKinshasaAddress(location.address));
+        }
         if (location.address && errors.pickupAddress) {
             setErrors((prev) => ({ ...prev, pickupAddress: '' }));
         }
@@ -902,6 +925,12 @@ export default function EditAnnouncementScreen() {
 
                                 {formData.isDeliverable && (
                                     <>
+                                        <KinshasaAddressForm
+                                            fields={pickupAddressFields}
+                                            onChange={handleStructuredPickupAddressChange}
+                                            helperText="Renseignez d'abord commune, quartier et repere. La carte sert ensuite a confirmer le point exact."
+                                        />
+
                                         <View style={styles.inputContainer}>
                                             <Text style={styles.inputLabel}>
                                                 Classe de poids <Text style={styles.required}>*</Text>
@@ -964,11 +993,12 @@ export default function EditAnnouncementScreen() {
                                             </Text>
                                             <TextInput
                                                 style={[styles.input, errors.pickupAddress && styles.inputError]}
-                                                placeholder="Ex: 12 rue des Fleurs, Abidjan"
+                                                placeholder={KINSHASA_ADDRESS_EXAMPLES[0]}
                                                 value={formData.pickupAddress}
-                                                onChangeText={(text) =>
-                                                    setFormData({ ...formData, pickupAddress: text })
-                                                }
+                                                onChangeText={(text) => {
+                                                    setFormData({ ...formData, pickupAddress: text });
+                                                    setPickupAddressFields(parseKinshasaAddress(text));
+                                                }}
                                                 placeholderTextColor={Colors.gray400}
                                             />
                                             {errors.pickupAddress && (
@@ -1193,7 +1223,7 @@ export default function EditAnnouncementScreen() {
             </Modal>
 
             {/* Navigation Buttons */}
-            <View style={styles.navigationContainer}>
+            <BottomActionBar style={styles.navigationContainer}>
                 {currentStep > 1 && (
                     <TouchableOpacity style={styles.navButton} onPress={handlePrevious}>
                         <Ionicons name="arrow-back" size={20} color={Colors.primary} />
@@ -1222,9 +1252,9 @@ export default function EditAnnouncementScreen() {
                                 </>
                             )}
                         </LinearGradient>
-                    </TouchableOpacity>
-                )}
-            </View>
+                        </TouchableOpacity>
+                    )}
+            </BottomActionBar>
         </SafeAreaView>
     );
 }

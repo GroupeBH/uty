@@ -1,6 +1,19 @@
 import { Announcement } from '@/types/announcement';
 import { baseApi } from './baseApi';
 
+const parseMutationResponse = async (response: Response) => {
+    const raw = await response.text();
+    if (!raw.trim()) {
+        return {};
+    }
+
+    try {
+        return JSON.parse(raw);
+    } catch {
+        return { raw };
+    }
+};
+
 export interface CreateAnnouncementDto {
     name: string;
     description?: string;
@@ -70,6 +83,7 @@ export const announcementsApi = baseApi.injectEndpoints({
                 url: '/announcements',
                 method: 'POST',
                 body: data,
+                responseHandler: parseMutationResponse,
             }),
             invalidatesTags: ['Announcement'],
         }),
@@ -78,6 +92,7 @@ export const announcementsApi = baseApi.injectEndpoints({
                 url: `/announcements/${id}`,
                 method: 'PATCH',
                 body: data,
+                responseHandler: parseMutationResponse,
             }),
             invalidatesTags: (result, error, { id }) => [{ type: 'Announcement', id }, 'Announcement'],
         }),

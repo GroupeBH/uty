@@ -13,6 +13,7 @@ export interface Cart {
     status: 'in progress' | 'ordered';
     products: CartProduct[];
     deliveryLocation?: { type: string; coordinates: number[] };
+    deliveryAddress?: string;
     deliveryCost?: number;
     deliveryMode?: 'pending' | 'none' | 'walking' | 'vehicle';
     createdAt: string;

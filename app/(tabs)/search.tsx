@@ -6,6 +6,7 @@ import { ProductCard } from '@/components/ProductCard';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useGetAppConfigQuery } from '@/store/api/appConfigApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
@@ -24,6 +25,37 @@ import {
     View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+const normalizeSearchValue = (value: unknown): string =>
+    String(value || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+
+const SEARCH_ALIASES: Record<string, string[]> = {
+    telephone: ['gsm', 'smartphone', 'portable', 'phone'],
+    frigo: ['refrigerateur', 'frigidaire'],
+    ordinateur: ['pc', 'laptop'],
+    chaussures: ['souliers', 'baskets'],
+    vetements: ['habits', 'tenues'],
+};
+
+type QuickFilter = 'all' | 'deliverable' | 'in_stock' | 'recent';
+
+const matchesSearchToken = (token: string, searchableText: string): boolean => {
+    if (!token) return true;
+    if (searchableText.includes(token)) return true;
+
+    for (const [canonical, aliases] of Object.entries(SEARCH_ALIASES)) {
+        const variants = [canonical, ...aliases].map((entry) => normalizeSearchValue(entry));
+        if (variants.includes(token)) {
+            return variants.some((variant) => searchableText.includes(variant));
+        }
+    }
+
+    return false;
+};
 
 const normalizeId = (value: unknown): string | null => {
     if (!value) return null;
@@ -45,6 +77,7 @@ const toIdList = (value: unknown): string[] => {
 export default function SearchScreen() {
     const { categoryId: categoryIdFromParams } = useLocalSearchParams<{ categoryId?: string | string[] }>();
     const [searchQuery, setSearchQuery] = useState('');
+    const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
     const normalizedCategoryFromParams = useMemo(
         () =>
             Array.isArray(categoryIdFromParams)
@@ -54,6 +87,7 @@ export default function SearchScreen() {
     );
     const [category, setCategory] = useState<string | undefined>(normalizedCategoryFromParams);
     const { user, requireAuth } = useAuth();
+    const { data: appConfig } = useGetAppConfigQuery();
     const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
 
     const { data: announcements, isLoading } = useGetAnnouncementsQuery();
@@ -79,14 +113,16 @@ export default function SearchScreen() {
     }, [categoriesData]);
 
     const filteredData = useMemo(() => {
-        const normalizedSearch = searchQuery.trim().toLowerCase();
+        const normalizedSearch = normalizeSearchValue(searchQuery);
+        const searchTokens = normalizedSearch.split(/\s+/).filter(Boolean);
         return (announcements || []).filter((item) => {
-            const name = (item.name || '').toLowerCase();
-            const description = (item.description || '').toLowerCase();
+            const name = normalizeSearchValue(item.name);
+            const description = normalizeSearchValue(item.description);
+            const categoryName = normalizeSearchValue((item as any)?.category?.name);
+            const searchableText = [name, description, categoryName].filter(Boolean).join(' ');
             const matchesSearch =
-                normalizedSearch.length === 0 ||
-                name.includes(normalizedSearch) ||
-                description.includes(normalizedSearch);
+                searchTokens.length === 0 ||
+                searchTokens.every((token) => matchesSearchToken(token, searchableText));
 
             const itemCategoryId = normalizeId(item.category);
             const itemCategoryAncestors = [
@@ -97,10 +133,19 @@ export default function SearchScreen() {
             const matchesCategory = category
                 ? itemCategoryId === category || itemCategoryAncestors.includes(category)
                 : true;
+            const quantity = typeof item.quantity === 'number' ? item.quantity : undefined;
+            const isRecent = Boolean(item.createdAt) &&
+                Date.now() - new Date(item.createdAt).getTime() <= 1000 * 60 * 60 * 24 * 14;
+            const matchesQuickFilter =
+                quickFilter === 'all' ||
+                (quickFilter === 'deliverable' && item.isDeliverable === true) ||
+                (quickFilter === 'in_stock' && (quantity === undefined || quantity > 0)) ||
+                (quickFilter === 'recent' && isRecent);
 
-            return matchesSearch && matchesCategory;
+            return matchesSearch && matchesCategory && matchesQuickFilter;
         });
-    }, [announcements, category, searchQuery]);
+    }, [announcements, category, quickFilter, searchQuery]);
+    const featuredTerms = appConfig?.search?.featuredTerms || ['telephone', 'frigo', 'ordinateur', 'chaussures'];
 
     const activeCategoryMeta = useMemo(() => {
         if (!category) return { icon: null, label: 'Toutes les categories' };
@@ -224,6 +269,23 @@ export default function SearchScreen() {
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.featuredTermsContainer}
+                >
+                    {featuredTerms.map((term) => (
+                        <TouchableOpacity
+                            key={term}
+                            style={styles.featuredTermChip}
+                            onPress={() => setSearchQuery(term)}
+                            activeOpacity={0.85}
+                        >
+                            <Ionicons name="flash-outline" size={13} color={Colors.primary} />
+                            <Text style={styles.featuredTermText}>{term}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.categoriesScrollContent}
                 >
                     {categories.map((cat) => {
@@ -256,6 +318,36 @@ export default function SearchScreen() {
                                 </View>
                                 <Text style={[styles.categoryText, isSelected && styles.categoryTextActive]}>
                                     {cat.label}
+                                </Text>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.quickFiltersContainer}
+                >
+                    {[
+                        { id: 'all', label: 'Tout' },
+                        { id: 'deliverable', label: 'Livrable' },
+                        { id: 'in_stock', label: 'En stock' },
+                        { id: 'recent', label: 'Nouveaux' },
+                    ].map((filter) => {
+                        const isActive = quickFilter === filter.id;
+                        return (
+                            <TouchableOpacity
+                                key={filter.id}
+                                style={[styles.quickFilterChip, isActive && styles.quickFilterChipActive]}
+                                onPress={() => setQuickFilter(filter.id as QuickFilter)}
+                            >
+                                <Text
+                                    style={[
+                                        styles.quickFilterText,
+                                        isActive && styles.quickFilterTextActive,
+                                    ]}
+                                >
+                                    {filter.label}
                                 </Text>
                             </TouchableOpacity>
                         );
@@ -478,9 +570,56 @@ const styles = StyleSheet.create({
         paddingTop: Spacing.md,
         paddingBottom: Spacing.sm,
     },
+    featuredTermsContainer: {
+        paddingHorizontal: Spacing.lg,
+        gap: Spacing.sm,
+        paddingBottom: Spacing.sm,
+    },
+    featuredTermChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderRadius: BorderRadius.full,
+        paddingVertical: 8,
+        paddingHorizontal: Spacing.md,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '1F',
+        ...Shadows.sm,
+    },
+    featuredTermText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.textPrimary,
+    },
     categoriesScrollContent: {
         paddingHorizontal: Spacing.lg,
         gap: Spacing.sm,
+    },
+    quickFiltersContainer: {
+        paddingHorizontal: Spacing.lg,
+        gap: Spacing.sm,
+        paddingTop: Spacing.sm,
+    },
+    quickFilterChip: {
+        borderRadius: BorderRadius.full,
+        paddingVertical: 8,
+        paddingHorizontal: Spacing.md,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    quickFilterChipActive: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+    },
+    quickFilterText: {
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        color: Colors.gray700,
+    },
+    quickFilterTextActive: {
+        color: Colors.white,
     },
     categoryChip: {
         flexDirection: 'row',
