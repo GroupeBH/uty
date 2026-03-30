@@ -4,6 +4,7 @@
 
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { OTP_DISABLED } from '@/utils/featureFlags';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -107,7 +108,7 @@ export default function SettingsScreen() {
                     kind: 'action',
                     icon: 'help-circle-outline',
                     label: 'PIN oublie',
-                    subtitle: 'Reinitialiser avec OTP',
+                    subtitle: OTP_DISABLED ? 'Reinitialiser temporairement sans OTP' : 'Reinitialiser avec OTP',
                     gradient: Gradients.cool,
                     onPress: () => router.push('/forgot-pin'),
                 },

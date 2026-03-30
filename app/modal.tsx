@@ -12,6 +12,7 @@ import {
 } from '@/store/api/authApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useAppDispatch } from '@/store/hooks';
+import { OTP_DISABLED } from '@/utils/featureFlags';
 import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -341,6 +342,11 @@ export default function AuthModal() {
         setPhone(normalizedPhone);
         if (isGoogleRegistrationFlow) {
             setRegisterStep('preferences');
+            return;
+        }
+
+        if (OTP_DISABLED) {
+            setRegisterStep('identity');
             return;
         }
 

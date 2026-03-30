@@ -5,6 +5,7 @@ import {
     useResetPinMutation,
     useVerifyOtpMutation,
 } from '@/store/api/authApi';
+import { OTP_DISABLED } from '@/utils/featureFlags';
 import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -62,6 +63,18 @@ export default function ForgotPinScreen() {
             normalizedPhone = normalizePhoneNumberForApi(phone);
         } catch (error: any) {
             showAlert('Erreur', error?.message || 'Numero de telephone invalide.', undefined, 'error');
+            return;
+        }
+
+        if (OTP_DISABLED) {
+            setPhone(normalizedPhone);
+            setStep('newPin');
+            showAlert(
+                'OTP desactive',
+                'La verification OTP est desactivee temporairement. Vous pouvez definir un nouveau PIN directement.',
+                undefined,
+                'info',
+            );
             return;
         }
 
@@ -164,10 +177,10 @@ export default function ForgotPinScreen() {
 
     const goBack = () => {
         if (step === 'newPin') {
-            setStep('otp');
+            setStep(OTP_DISABLED ? 'phone' : 'otp');
             return;
         }
-        if (step === 'otp') {
+        if (!OTP_DISABLED && step === 'otp') {
             setStep('phone');
             return;
         }
@@ -192,11 +205,13 @@ export default function ForgotPinScreen() {
                     <LinearGradient colors={Gradients.cool} style={styles.heroCard}>
                         <Text style={styles.heroTitle}>Recuperation securisee</Text>
                         <Text style={styles.heroText}>
-                            Verifiez d abord votre numero avec OTP, puis choisissez un nouveau PIN.
+                            {OTP_DISABLED
+                                ? 'La verification OTP est desactivee temporairement. Saisissez votre numero puis choisissez un nouveau PIN.'
+                                : 'Verifiez d abord votre numero avec OTP, puis choisissez un nouveau PIN.'}
                         </Text>
                     </LinearGradient>
 
-                    <StepIndicator step={step} />
+                    <StepIndicator step={step} otpDisabled={OTP_DISABLED} />
 
                     <View style={styles.card}>
                         {step === 'phone' && (
@@ -216,7 +231,7 @@ export default function ForgotPinScreen() {
                             </>
                         )}
 
-                        {step === 'otp' && (
+                        {!OTP_DISABLED && step === 'otp' && (
                             <>
                                 <Text style={styles.label}>Code OTP</Text>
                                 <View style={styles.inputContainer}>
@@ -281,7 +296,9 @@ export default function ForgotPinScreen() {
                         <LinearGradient colors={Gradients.accent} style={styles.submitGradient}>
                             <Text style={styles.submitText}>
                                 {step === 'phone'
-                                    ? 'Envoyer OTP'
+                                    ? OTP_DISABLED
+                                        ? 'Continuer'
+                                        : 'Envoyer OTP'
                                     : step === 'otp'
                                         ? 'Verifier OTP'
                                         : isResettingPin
@@ -298,8 +315,8 @@ export default function ForgotPinScreen() {
     );
 }
 
-function StepIndicator({ step }: { step: Step }) {
-    const steps: Step[] = ['phone', 'otp', 'newPin'];
+function StepIndicator({ step, otpDisabled }: { step: Step; otpDisabled: boolean }) {
+    const steps: Step[] = otpDisabled ? ['phone', 'newPin'] : ['phone', 'otp', 'newPin'];
     const labels: Record<Step, string> = {
         phone: 'Telephone',
         otp: 'OTP',

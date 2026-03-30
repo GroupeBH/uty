@@ -1,6 +1,7 @@
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useRequestOtpMutation, useVerifyOtpMutation } from '@/store/api/authApi';
+import { OTP_DISABLED } from '@/utils/featureFlags';
 import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -63,6 +64,22 @@ export default function OtpScreen() {
             return null;
         }
     }, [phone, showAlert]);
+
+    React.useEffect(() => {
+        if (!OTP_DISABLED) {
+            return;
+        }
+
+        const trimmedPhone = phone.trim();
+        router.replace({
+            pathname: '/modal',
+            params: {
+                mode: 'register',
+                registerStep: trimmedPhone ? 'identity' : 'phone',
+                ...(trimmedPhone ? { phone: trimmedPhone } : {}),
+            },
+        });
+    }, [phone, router]);
 
     const submitRequestOtp = React.useCallback(
         async (showSuccessAlert = true) => {
@@ -160,6 +177,18 @@ export default function OtpScreen() {
         void submitRequestOtp(false);
     }, [goBackToRegisterPhone, hasRequestedOnce, phone, showAlert, submitRequestOtp]);
 
+    if (OTP_DISABLED) {
+        return (
+            <SafeAreaView style={styles.container} edges={['top']}>
+                <View style={styles.redirectContainer}>
+                    <Text style={styles.redirectTitle}>Verification OTP desactivee</Text>
+                    <Text style={styles.redirectText}>Redirection vers la suite de l inscription...</Text>
+                </View>
+                {alertNode}
+            </SafeAreaView>
+        );
+    }
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <View style={styles.header}>
@@ -241,6 +270,23 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: Colors.backgroundSecondary,
+    },
+    redirectContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: Spacing.xl,
+    },
+    redirectTitle: {
+        ...Typography.h3,
+        color: Colors.textPrimary,
+        marginBottom: Spacing.sm,
+        textAlign: 'center',
+    },
+    redirectText: {
+        ...Typography.body,
+        color: Colors.textSecondary,
+        textAlign: 'center',
     },
     header: {
         flexDirection: 'row',
