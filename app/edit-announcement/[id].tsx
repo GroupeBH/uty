@@ -5,7 +5,7 @@
 
 import { DynamicAttributeField } from '@/components/DynamicAttributeField';
 import { AnnouncementStepHeader } from '@/components/forms/AnnouncementStepHeader';
-import { DeliverySetupSection } from '@/components/forms/DeliverySetupSection';
+import { DeliverySetupSection, type PickupInputMode } from '@/components/forms/DeliverySetupSection';
 import { MapPickerModal } from '@/components/MapPickerModal';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { BottomActionBar } from '@/components/ui/BottomActionBar';
@@ -121,7 +121,7 @@ export default function EditAnnouncementScreen() {
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [mapVisible, setMapVisible] = useState(false);
-    const [showAdvancedPickupOptions, setShowAdvancedPickupOptions] = useState(false);
+    const [pickupInputMode, setPickupInputMode] = useState<PickupInputMode>('manual');
     const [pickupAddressFields, setPickupAddressFields] = useState<KinshasaAddressFields>(
         () => parseKinshasaAddress(''),
     );
@@ -173,7 +173,7 @@ export default function EditAnnouncementScreen() {
 
     // Queries
     const { data: currencies = [] } = useGetCurrenciesQuery();
-    const [triggerGeocode, { isFetching: isResolvingPickupCoordinates }] = useLazyGeocodeQuery();
+    const [triggerGeocode] = useLazyGeocodeQuery();
     const { data: categoryAttributes, isLoading: attributesLoading } = useGetCategoryAttributesQuery(
         announcement?.category?._id || announcement?.category || '',
         { skip: !announcement?.category }
@@ -265,7 +265,7 @@ export default function EditAnnouncementScreen() {
                 pickupLatitude,
                 pickupLongitude,
             });
-            setShowAdvancedPickupOptions(Boolean(pickupLatitude && pickupLongitude));
+            setPickupInputMode(pickupLatitude && pickupLongitude ? 'map' : 'manual');
             setPickupAddressFields(parseKinshasaAddress(pickupAddress));
             setExistingImages(announcement.images || []);
             
@@ -417,6 +417,31 @@ export default function EditAnnouncementScreen() {
         return Number.isFinite(parsed) ? parsed : undefined;
     };
 
+    const handlePickupInputModeChange = (mode: PickupInputMode) => {
+        setPickupInputMode(mode);
+        setErrors((prev) => ({
+            ...prev,
+            pickupAddress: '',
+            pickupLocation: '',
+        }));
+
+        if (mode === 'manual') {
+            setFormData((prev: any) => ({
+                ...prev,
+                pickupLatitude: '',
+                pickupLongitude: '',
+            }));
+            return;
+        }
+
+        const latitude = parseCoordinate(formData.pickupLatitude);
+        const longitude = parseCoordinate(formData.pickupLongitude);
+        const hasCoordinates = typeof latitude === 'number' && typeof longitude === 'number';
+        if (!hasCoordinates) {
+            setMapVisible(true);
+        }
+    };
+
     const handleDeliveryFieldChange = (field: string, value: any) => {
         const nextValue = typeof value === 'string' ? normalizeTextInputValue(value) : value;
         setFormData((prev: any) => ({
@@ -441,7 +466,6 @@ export default function EditAnnouncementScreen() {
         }
 
         if (field === 'isDeliverable' && !value) {
-            setShowAdvancedPickupOptions(false);
             setErrors((prev) => ({
                 ...prev,
                 pickupAddress: '',
@@ -506,22 +530,27 @@ export default function EditAnnouncementScreen() {
     };
 
     const handleMapConfirm = (location: { latitude: number; longitude: number; address?: string }) => {
+        const nextAddressFields = location.address
+            ? parseKinshasaAddress(location.address)
+            : { ...pickupAddressFields };
+        if (pickupAddressFields.reference?.trim()) {
+            nextAddressFields.reference = pickupAddressFields.reference;
+        }
+        const formattedAddress = formatKinshasaAddress(nextAddressFields) || location.address || '';
+
+        setPickupInputMode('map');
+        setPickupAddressFields(nextAddressFields);
         setFormData((prev: any) => ({
             ...prev,
             pickupLatitude: String(location.latitude),
             pickupLongitude: String(location.longitude),
-            pickupAddress: location.address || prev.pickupAddress,
+            pickupAddress: formattedAddress || prev.pickupAddress,
         }));
-        setShowAdvancedPickupOptions(false);
-        if (location.address) {
-            setPickupAddressFields(parseKinshasaAddress(location.address));
-        }
-        if (location.address && errors.pickupAddress) {
-            setErrors((prev) => ({ ...prev, pickupAddress: '' }));
-        }
-        if (errors.pickupLocation) {
-            setErrors((prev) => ({ ...prev, pickupLocation: '' }));
-        }
+        setErrors((prev) => ({
+            ...prev,
+            pickupAddress: '',
+            pickupLocation: '',
+        }));
     };
 
     // Validation
@@ -556,16 +585,33 @@ export default function EditAnnouncementScreen() {
                 newErrors.weightClass = 'La classe de poids est obligatoire';
             }
             if (formData.isDeliverable) {
-                const pickupAddress = formData.pickupAddress?.trim() || '';
                 const latitude = parseCoordinate(formData.pickupLatitude);
                 const longitude = parseCoordinate(formData.pickupLongitude);
                 const hasCoordinates =
                     typeof latitude === 'number' && typeof longitude === 'number';
                 const hasPartialCoordinates =
                     !!formData.pickupLatitude?.trim() || !!formData.pickupLongitude?.trim();
+                const hasReference = Boolean(pickupAddressFields.reference?.trim());
+                const hasManualAddress = Boolean(
+                    pickupAddressFields.commune?.trim() ||
+                        pickupAddressFields.avenue?.trim() ||
+                        pickupAddressFields.quartier?.trim(),
+                );
 
-                if (!pickupAddress && !hasCoordinates) {
-                    newErrors.pickupAddress = 'Ajoutez une adresse de retrait ou un point exact.';
+                if (pickupInputMode === 'manual' && !hasManualAddress) {
+                    newErrors.pickupAddress = 'Ajoutez au moins la commune ou l avenue.';
+                }
+
+                if (pickupInputMode === 'manual' && !hasReference) {
+                    newErrors.pickupAddress = 'Ajoutez un repere simple pour le livreur.';
+                }
+
+                if (pickupInputMode === 'map' && !hasCoordinates) {
+                    newErrors.pickupLocation = 'Choisissez le point exact sur la carte.';
+                }
+
+                if (pickupInputMode === 'map' && !hasReference) {
+                    newErrors.pickupAddress = 'Ajoutez un repere simple apres la carte.';
                 }
 
                 if (hasPartialCoordinates && !hasCoordinates) {
@@ -748,9 +794,6 @@ export default function EditAnnouncementScreen() {
     const hasPickupCoordinates =
         typeof initialLatitude === 'number' && typeof initialLongitude === 'number';
     const pickupAddressPreview = formData.pickupAddress?.trim() || 'Aucune adresse de retrait ajoutee.';
-    const pickupCoordinatesPreview = hasPickupCoordinates
-        ? `${initialLatitude!.toFixed(5)}, ${initialLongitude!.toFixed(5)}`
-        : 'Point exact non confirme';
 
     if (isLoadingAnnouncement) {
         return (
@@ -854,6 +897,7 @@ export default function EditAnnouncementScreen() {
                     {currentStep === getStepId('category') && (
                         <View style={styles.stepContainer}>
                             <AnnouncementStepHeader
+                                compact
                                 icon="grid-outline"
                                 title={STEP_COPY.category.title}
                                 subtitle={STEP_COPY.category.subtitle}
@@ -893,6 +937,7 @@ export default function EditAnnouncementScreen() {
                     {currentStep === getStepId('details') && (
                         <View style={styles.stepContainer}>
                             <AnnouncementStepHeader
+                                compact
                                 icon="document-text-outline"
                                 title={STEP_COPY.details.title}
                                 subtitle={STEP_COPY.details.subtitle}
@@ -1007,6 +1052,7 @@ export default function EditAnnouncementScreen() {
                     {currentStep === getStepId('delivery') && (
                         <View style={styles.stepContainer}>
                             <AnnouncementStepHeader
+                                compact
                                 icon="location-outline"
                                 title={STEP_COPY.delivery.title}
                                 subtitle={STEP_COPY.delivery.subtitle}
@@ -1049,33 +1095,15 @@ export default function EditAnnouncementScreen() {
                                         handleDeliveryFieldChange('weightClass', next);
                                     }}
                                     weightError={errors.weightClass}
+                                    pickupInputMode={pickupInputMode}
+                                    onPickupInputModeChange={handlePickupInputModeChange}
                                     addressFields={pickupAddressFields}
                                     onAddressFieldsChange={handleStructuredPickupAddressChange}
                                     addressError={errors.pickupAddress}
                                     addressPreview={pickupAddressPreview}
-                                    summaryMeta={
-                                        hasPickupCoordinates
-                                            ? 'Point exact deja confirme.'
-                                            : isResolvingPickupCoordinates
-                                              ? 'Localisation de l adresse en cours...'
-                                              : 'Si vous ne confirmez pas la carte, l application utilisera cette adresse telle quelle.'
-                                    }
                                     hasPickupCoordinates={hasPickupCoordinates}
-                                    coordinatesPreview={pickupCoordinatesPreview}
                                     locationError={errors.pickupLocation}
                                     onOpenMap={() => setMapVisible(true)}
-                                    showAdvancedCoordinates={showAdvancedPickupOptions}
-                                    onToggleAdvancedCoordinates={() =>
-                                        setShowAdvancedPickupOptions((previous) => !previous)
-                                    }
-                                    pickupLatitude={formData.pickupLatitude}
-                                    pickupLongitude={formData.pickupLongitude}
-                                    onChangeLatitude={(value) =>
-                                        handleDeliveryFieldChange('pickupLatitude', value)
-                                    }
-                                    onChangeLongitude={(value) =>
-                                        handleDeliveryFieldChange('pickupLongitude', value)
-                                    }
                                 />
                             </View>
                         </View>
@@ -1084,6 +1112,7 @@ export default function EditAnnouncementScreen() {
                     {currentStep === getStepId('attributes') && filteredAttributes.length > 0 && (
                         <View style={styles.stepContainer}>
                             <AnnouncementStepHeader
+                                compact
                                 icon="list-outline"
                                 title={STEP_COPY.attributes.title}
                                 subtitle={STEP_COPY.attributes.subtitle}
@@ -1121,6 +1150,7 @@ export default function EditAnnouncementScreen() {
                     {currentStep === getStepId('photos') && (
                         <View style={styles.stepContainer}>
                             <AnnouncementStepHeader
+                                compact
                                 icon="images-outline"
                                 title={STEP_COPY.photos.title}
                                 subtitle={`Ajoutez jusqu'a 10 photos de qualite (${totalImages}/10).`}
@@ -1329,10 +1359,11 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: Spacing.xl,
-        paddingVertical: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.sm,
         backgroundColor: Colors.white,
-        ...Shadows.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
     },
     headerButton: {
         width: 40,
@@ -1347,10 +1378,10 @@ const styles = StyleSheet.create({
     },
     progressContainer: {
         backgroundColor: Colors.white,
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
         marginHorizontal: Spacing.lg,
-        marginTop: Spacing.md,
+        marginTop: Spacing.sm,
         borderWidth: 1,
         borderColor: Colors.gray100,
         borderRadius: BorderRadius.xl,
@@ -1361,7 +1392,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         gap: Spacing.md,
-        marginBottom: Spacing.md,
+        marginBottom: Spacing.sm,
     },
     progressTextBlock: {
         flex: 1,
@@ -1384,11 +1415,11 @@ const styles = StyleSheet.create({
         color: Colors.accentDark,
     },
     progressTrack: {
-        height: 8,
+        height: 6,
         backgroundColor: Colors.gray100,
         borderRadius: BorderRadius.full,
         overflow: 'hidden',
-        marginBottom: Spacing.md,
+        marginBottom: 0,
     },
     progressFill: {
         height: '100%',
@@ -1396,6 +1427,7 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.full,
     },
     stepsIndicator: {
+        display: 'none',
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
@@ -1435,13 +1467,14 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     scrollContent: {
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
         paddingBottom: 100,
     },
     stepContainer: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.xl,
-        padding: Spacing.xl,
+        padding: Spacing.md,
         borderWidth: 1,
         borderColor: Colors.gray100,
         ...Shadows.sm,
@@ -1449,8 +1482,8 @@ const styles = StyleSheet.create({
     categoryCard: {
         flexDirection: 'row',
         backgroundColor: Colors.gray50,
-        borderRadius: BorderRadius.xl,
-        padding: Spacing.lg,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.md,
         borderWidth: 1,
         borderColor: Colors.gray100,
         ...Shadows.sm,
@@ -1513,7 +1546,7 @@ const styles = StyleSheet.create({
         marginTop: Spacing.xs,
     },
     textArea: {
-        minHeight: 100,
+        minHeight: 86,
         paddingTop: Spacing.md,
     },
     row: {
@@ -1521,8 +1554,8 @@ const styles = StyleSheet.create({
         gap: Spacing.md,
     },
     deliveryCard: {
-        marginTop: Spacing.lg,
-        padding: Spacing.lg,
+        marginTop: Spacing.sm,
+        padding: Spacing.md,
         backgroundColor: Colors.gray50,
         borderRadius: BorderRadius.lg,
         borderWidth: 1,
@@ -1693,7 +1726,8 @@ const styles = StyleSheet.create({
     navigationContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
         backgroundColor: Colors.white,
         ...Shadows.lg,
     },
@@ -1701,7 +1735,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
+        paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.lg,
         borderWidth: 1,
         borderColor: Colors.primary,
@@ -1716,7 +1750,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md,
+        paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.lg,
         backgroundColor: Colors.primary,
         gap: Spacing.sm,
@@ -1736,7 +1770,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: Spacing.xl,
-        paddingVertical: Spacing.md,
+        paddingVertical: Spacing.sm,
         gap: Spacing.sm,
     },
     submitText: {
