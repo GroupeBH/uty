@@ -2,6 +2,7 @@ import { KINSHASA_ADDRESS_EXAMPLES, KINSHASA_DEFAULT_CENTER, KINSHASA_FEATURED_C
 import { useGetAppConfigQuery } from '@/store/api/appConfigApi';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { BottomActionBar } from '@/components/ui/BottomActionBar';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import {
     useLazyGeocodeQuery,
     useLazyPlacesAutocompleteQuery,
@@ -382,7 +383,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                             placeholderTextColor={Colors.gray400}
                             value={searchQuery}
                             onChangeText={(value) => {
-                                setSearchQuery(value);
+                                setSearchQuery(normalizeTextInputValue(value));
                                 setSuggestionsVisible(true);
                                 if (searchResults.length > 0) {
                                     setSearchResults([]);

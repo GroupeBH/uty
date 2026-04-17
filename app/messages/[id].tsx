@@ -9,6 +9,7 @@ import {
     useSendMessageMutation,
 } from '@/store/api/messagingApi';
 import { ChatMessage, MessagingUserPreview } from '@/types/messaging';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
@@ -250,7 +251,7 @@ export default function MessageThreadScreen() {
                         placeholder="Ecrire un message..."
                         placeholderTextColor={Colors.gray400}
                         value={composerText}
-                        onChangeText={setComposerText}
+                        onChangeText={(text) => setComposerText(normalizeTextInputValue(text))}
                         multiline
                         maxLength={2000}
                     />

@@ -28,6 +28,7 @@ import {
     getDeliveryActorId,
     getDeliveryPersonRefId,
 } from '@/types/delivery';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -2097,7 +2098,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                 <TextInput
                                     style={styles.msgInput}
                                     value={messageInput}
-                                    onChangeText={setMessageInput}
+                                    onChangeText={(text) => setMessageInput(normalizeTextInputValue(text))}
                                     placeholder="Ecrire un message..."
                                 />
                                 <TouchableOpacity

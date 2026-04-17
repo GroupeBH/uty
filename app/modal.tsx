@@ -12,8 +12,8 @@ import {
 } from '@/store/api/authApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { useAppDispatch } from '@/store/hooks';
-import { OTP_DISABLED } from '@/utils/featureFlags';
 import { normalizePhoneNumberForApi } from '@/utils/phone';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -345,15 +345,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (OTP_DISABLED) {
-            setRegisterStep('identity');
-            return;
-        }
-
-        router.push({
-            pathname: '/otp',
-            params: { phone: normalizedPhone },
-        });
+        setRegisterStep('identity');
     };
 
     const toggleCategory = (categoryId: string) => {
@@ -704,7 +696,7 @@ export default function AuthModal() {
             : 'Le PIN contient exactement 4 chiffres.'
         : isGoogleRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Numero requis pour verifier et lier votre compte Google.'
+            ? 'Numero requis pour lier votre compte Google.'
             : 'Selectionnez au moins une categorie pour terminer.'
         : isRegisterPhoneStep
           ? googleRegistrationToken
@@ -1046,7 +1038,7 @@ export default function AuthModal() {
                                                 <TextInput
                                                     style={styles.input}
                                                     value={firstName}
-                                                    onChangeText={setFirstName}
+                                                    onChangeText={(text) => setFirstName(normalizeTextInputValue(text))}
                                                     onFocus={() => {
                                                         setIsFirstNameFocused(true);
                                                         scrollToForm();
@@ -1070,7 +1062,7 @@ export default function AuthModal() {
                                                 <TextInput
                                                     style={styles.input}
                                                     value={lastName}
-                                                    onChangeText={setLastName}
+                                                    onChangeText={(text) => setLastName(normalizeTextInputValue(text))}
                                                     onFocus={() => {
                                                         setIsLastNameFocused(true);
                                                         scrollToForm();

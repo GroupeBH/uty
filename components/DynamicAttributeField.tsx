@@ -1,5 +1,6 @@
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { CategoryAttribute } from '@/types/category';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -34,7 +35,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
                         <TextInput
                             style={styles.input}
                             value={value || ''}
-                            onChangeText={onChange}
+                            onChangeText={(text) => onChange(normalizeTextInputValue(text))}
                             placeholder={`Entrez ${placeholderLabel}`}
                             placeholderTextColor={Colors.gray400}
                         />
@@ -136,7 +137,7 @@ export const DynamicAttributeField: React.FC<DynamicAttributeFieldProps> = ({
                         <TextInput
                             style={styles.input}
                             value={value || ''}
-                            onChangeText={onChange}
+                            onChangeText={(text) => onChange(normalizeTextInputValue(text))}
                             placeholder={`Entrez ${placeholderLabel}`}
                             placeholderTextColor={Colors.gray400}
                         />

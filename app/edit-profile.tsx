@@ -7,6 +7,7 @@ import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetProfileQuery } from '@/store/api/authApi';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -161,7 +162,7 @@ export default function EditProfileScreen() {
                                 style={styles.input}
                                 placeholder="Votre prénom"
                                 value={formData.firstName}
-                                onChangeText={(text) => setFormData({ ...formData, firstName: text })}
+                                onChangeText={(text) => setFormData({ ...formData, firstName: normalizeTextInputValue(text) })}
                                 placeholderTextColor={Colors.gray400}
                             />
                         </View>
@@ -174,7 +175,7 @@ export default function EditProfileScreen() {
                                 style={styles.input}
                                 placeholder="Votre nom"
                                 value={formData.lastName}
-                                onChangeText={(text) => setFormData({ ...formData, lastName: text })}
+                                onChangeText={(text) => setFormData({ ...formData, lastName: normalizeTextInputValue(text) })}
                                 placeholderTextColor={Colors.gray400}
                             />
                         </View>
@@ -185,7 +186,7 @@ export default function EditProfileScreen() {
                                 style={styles.input}
                                 placeholder="Votre nom d'utilisateur"
                                 value={formData.username}
-                                onChangeText={(text) => setFormData({ ...formData, username: text })}
+                                onChangeText={(text) => setFormData({ ...formData, username: normalizeTextInputValue(text) })}
                                 placeholderTextColor={Colors.gray400}
                             />
                         </View>

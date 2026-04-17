@@ -8,6 +8,7 @@ type StepHeaderProps = {
     title: string;
     subtitle: string;
     tip?: string;
+    compact?: boolean;
 };
 
 export function AnnouncementStepHeader({
@@ -15,20 +16,21 @@ export function AnnouncementStepHeader({
     title,
     subtitle,
     tip,
+    compact = false,
 }: StepHeaderProps) {
     return (
-        <View style={styles.container}>
+        <View style={[styles.container, compact && styles.containerCompact]}>
             <View style={styles.contentRow}>
-                <View style={styles.iconWrap}>
-                    <Ionicons name={icon} size={20} color={Colors.primary} />
+                <View style={[styles.iconWrap, compact && styles.iconWrapCompact]}>
+                    <Ionicons name={icon} size={compact ? 18 : 20} color={Colors.primary} />
                 </View>
                 <View style={styles.copyWrap}>
-                    <Text style={styles.title}>{title}</Text>
-                    <Text style={styles.subtitle}>{subtitle}</Text>
+                    <Text style={[styles.title, compact && styles.titleCompact]}>{title}</Text>
+                    <Text style={[styles.subtitle, compact && styles.subtitleCompact]}>{subtitle}</Text>
                 </View>
             </View>
 
-            {tip ? (
+            {tip && !compact ? (
                 <View style={styles.tipRow}>
                     <Ionicons name="information-circle-outline" size={16} color={Colors.info} />
                     <Text style={styles.tipText}>{tip}</Text>
@@ -48,6 +50,11 @@ const styles = StyleSheet.create({
         marginBottom: Spacing.lg,
         gap: Spacing.md,
     },
+    containerCompact: {
+        padding: Spacing.sm,
+        marginBottom: Spacing.md,
+        gap: Spacing.sm,
+    },
     contentRow: {
         flexDirection: 'row',
         alignItems: 'flex-start',
@@ -63,6 +70,11 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    iconWrapCompact: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+    },
     copyWrap: {
         flex: 1,
     },
@@ -71,11 +83,18 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
     },
+    titleCompact: {
+        fontSize: Typography.fontSize.md,
+    },
     subtitle: {
         marginTop: Spacing.xs,
         fontSize: Typography.fontSize.sm,
         lineHeight: 20,
         color: Colors.textSecondary,
+    },
+    subtitleCompact: {
+        marginTop: 2,
+        lineHeight: 17,
     },
     tipRow: {
         flexDirection: 'row',

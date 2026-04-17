@@ -26,6 +26,7 @@ export type PublishDraftData = {
         pickupLatitude: string;
         pickupLongitude: string;
     };
+    pickupInputMode?: 'manual' | 'map';
     dynamicAttributes: Record<string, any>;
     categoryPath: DraftCategory[];
     selectedLeafCategory: DraftCategory | null;
