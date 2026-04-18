@@ -1,5 +1,6 @@
 import { KINSHASA_FEATURED_COMMUNES } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import {
     formatKinshasaAddress,
     KinshasaAddressFields,
@@ -19,21 +20,76 @@ type KinshasaAddressFormProps = {
     fields: KinshasaAddressFields;
     onChange: (fields: KinshasaAddressFields) => void;
     helperText?: string;
+    variant?: 'full' | 'simple';
 };
 
 export function KinshasaAddressForm({
     fields,
     onChange,
     helperText,
+    variant = 'full',
 }: KinshasaAddressFormProps) {
     const previewAddress = formatKinshasaAddress(fields);
+    const isSimple = variant === 'simple';
 
     const updateField = (field: keyof KinshasaAddressFields, value: string) => {
         onChange({
             ...fields,
-            [field]: value,
+            [field]: normalizeTextInputValue(value),
         });
     };
+
+    const updateSimpleStreet = (value: string) => {
+        onChange({
+            ...fields,
+            avenue: normalizeTextInputValue(value),
+            quartier: '',
+            details: '',
+        });
+    };
+
+    if (isSimple) {
+        return (
+            <View style={styles.container}>
+                <View style={styles.simpleFields}>
+                    <View style={styles.simpleField}>
+                        <Text style={styles.label}>Commune</Text>
+                        <TextInput
+                            style={[styles.input, styles.simpleInput]}
+                            value={fields.commune}
+                            onChangeText={(value) => updateField('commune', value)}
+                            placeholder="Ex: Limete"
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </View>
+
+                    <View style={styles.simpleField}>
+                        <Text style={styles.label}>Avenue/rue si connu</Text>
+                        <TextInput
+                            style={[styles.input, styles.simpleInput]}
+                            value={fields.avenue || fields.quartier}
+                            onChangeText={updateSimpleStreet}
+                            placeholder="Ex: 24 Novembre"
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </View>
+
+                    <View style={styles.simpleField}>
+                        <Text style={styles.label}>Repere pour le livreur</Text>
+                        <TextInput
+                            style={[styles.input, styles.simpleInput]}
+                            value={fields.reference}
+                            onChangeText={(value) => updateField('reference', value)}
+                            placeholder="Ex: portail bleu, pres du marche"
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </View>
+                </View>
+
+                {helperText ? <Text style={styles.helperText}>{helperText}</Text> : null}
+            </View>
+        );
+    }
 
     return (
         <View style={styles.container}>
@@ -181,6 +237,16 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
         marginBottom: Spacing.md,
+    },
+    simpleFields: {
+        gap: Spacing.sm,
+    },
+    simpleField: {
+        marginBottom: 0,
+    },
+    simpleInput: {
+        marginBottom: 0,
+        paddingVertical: Spacing.sm,
     },
     row: {
         flexDirection: 'row',

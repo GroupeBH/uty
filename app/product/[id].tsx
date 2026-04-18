@@ -25,6 +25,7 @@ import {
     useSendMessageMutation as useSendChatMessageMutation,
 } from '@/store/api/messagingApi';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -1271,7 +1272,7 @@ export default function ProductDetailScreen() {
                                 multiline
                                 numberOfLines={6}
                                 value={message}
-                                onChangeText={setMessage}
+                                onChangeText={(text) => setMessage(normalizeTextInputValue(text))}
                                 textAlignVertical="top"
                             />
                             
@@ -1353,7 +1354,7 @@ export default function ProductDetailScreen() {
                                     multiline
                                     numberOfLines={6}
                                     value={reviewText}
-                                    onChangeText={setReviewText}
+                                    onChangeText={(text) => setReviewText(normalizeTextInputValue(text))}
                                     textAlignVertical="top"
                                 />
                             </ScrollView>
@@ -2305,4 +2306,3 @@ const styles = StyleSheet.create({
         color: Colors.primary,
     },
 });
-

@@ -16,6 +16,7 @@ import { useGetOrderQuery } from '@/store/api/ordersApi';
 import { DeliveryGeoPoint, DeliveryStatusValue, getDeliveryActorId } from '@/types/delivery';
 import { getOrderItemName, getOrderItemProduct } from '@/types/order';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -585,7 +586,7 @@ export default function SellerDeliveryDetailScreen() {
                     <View style={styles.composer}>
                         <TextInput
                             value={messageInput}
-                            onChangeText={setMessageInput}
+                            onChangeText={(text) => setMessageInput(normalizeTextInputValue(text))}
                             placeholder="Envoyer une instruction au livreur..."
                             placeholderTextColor={Colors.gray400}
                             style={styles.input}

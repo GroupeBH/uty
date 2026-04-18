@@ -3,6 +3,7 @@
  */
 
 import { Colors, ComponentTokens, Spacing, Typography } from '@/constants/theme';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import {
@@ -35,6 +36,7 @@ export const Input: React.FC<InputProps> = ({
 }) => {
     const [isFocused, setIsFocused] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const { onChangeText, ...textInputProps } = props;
 
     const getKeyboardType = () => {
         switch (type) {
@@ -81,7 +83,12 @@ export const Input: React.FC<InputProps> = ({
                     secureTextEntry={isPassword && !showPassword}
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
-                    {...props}
+                    {...textInputProps}
+                    onChangeText={
+                        onChangeText
+                            ? (text) => onChangeText(normalizeTextInputValue(text))
+                            : undefined
+                    }
                 />
 
                 {isPassword && (

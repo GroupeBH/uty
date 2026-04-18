@@ -8,6 +8,7 @@ import { useCreateShopMutation, useLazyGetMyShopQuery } from '@/store/api/shopsA
 import { KycIdType } from '@/types/kyc';
 import { Shop } from '@/types/shop';
 import { getImageMimeType } from '@/utils/imageUtils';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -383,18 +384,18 @@ export default function CreateShopScreen() {
                     <Text style={styles.sectionHint}>Nom, description, type de structure et logo optionnel.</Text>
 
                     <Text style={styles.label}>Nom *</Text>
-                    <TextInput
-                        value={name}
-                        onChangeText={setName}
+                        <TextInput
+                            value={name}
+                            onChangeText={(text) => setName(normalizeTextInputValue(text))}
                         style={styles.input}
                         placeholder={KINSHASA_SHOP_NAME_EXAMPLE}
                         placeholderTextColor={Colors.gray400}
                     />
 
                     <Text style={styles.label}>Description</Text>
-                    <TextInput
-                        value={description}
-                        onChangeText={setDescription}
+                        <TextInput
+                            value={description}
+                            onChangeText={(text) => setDescription(normalizeTextInputValue(text))}
                         style={[styles.input, styles.textarea]}
                         placeholder="Decrivez votre activite..."
                         placeholderTextColor={Colors.gray400}
@@ -447,7 +448,7 @@ export default function CreateShopScreen() {
                         <Text style={styles.label}>Nom complet *</Text>
                         <TextInput
                             value={kycFullName}
-                            onChangeText={setKycFullName}
+                            onChangeText={(text) => setKycFullName(normalizeTextInputValue(text))}
                             style={styles.input}
                             placeholder="Ex: Jean Koffi"
                             placeholderTextColor={Colors.gray400}
