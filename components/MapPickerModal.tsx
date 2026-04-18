@@ -543,10 +543,10 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                             )}
                             <Text style={styles.footerText} numberOfLines={2}>
                                 {isPanning
-                                    ? "D�placez la carte pour s�lectionner le point"
+                                    ? "Déplacez la carte pour sélectionner le point"
                                     : isReverseGeocoding
-                                      ? "Recherche de l�adresse..."
-                                      : selected.address || "Adresse non trouv�e"}
+                                      ? "Recherche de l'adresse..."
+                                      : selected.address || "Adresse non trouvée"}
                             </Text>
                         </View>
                         <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
