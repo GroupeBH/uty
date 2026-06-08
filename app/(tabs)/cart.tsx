@@ -133,6 +133,7 @@ export default function CartScreen() {
     const [checkoutModalVisible, setCheckoutModalVisible] = React.useState(false);
     const [deliveryAddress, setDeliveryAddress] = React.useState('');
     const [deliveryInputMode, setDeliveryInputMode] = React.useState<DeliveryInputMode | null>(null);
+    const [isDeliveryEditorOpen, setIsDeliveryEditorOpen] = React.useState(false);
     const [deliveryAddressFields, setDeliveryAddressFields] = React.useState<KinshasaAddressFields>(
         () => parseKinshasaAddress(''),
     );
@@ -445,6 +446,7 @@ export default function CartScreen() {
 
     const handleDeliveryInputModeChange = React.useCallback((mode: DeliveryInputMode) => {
         setDeliveryInputMode(mode);
+        setIsDeliveryEditorOpen(true);
     }, []);
 
     const handleDeliveryConfirm = async (location: { latitude: number; longitude: number; address?: string }) => {
@@ -458,6 +460,7 @@ export default function CartScreen() {
             if (location.address) {
                 setDeliveryAddressFields(parseKinshasaAddress(location.address));
             }
+            setIsDeliveryEditorOpen(false);
             setMapVisible(false);
         } catch (error) {
             showAlert({
@@ -517,6 +520,8 @@ export default function CartScreen() {
         }
 
         if (!normalizedDeliveryAddress) {
+            setDeliveryInputMode((current) => current || 'guided');
+            setIsDeliveryEditorOpen(true);
             showAlert({
                 title: 'Adresse requise',
                 message: 'Renseignez au moins une adresse de livraison avant de valider votre panier.',
@@ -585,7 +590,6 @@ export default function CartScreen() {
     }, [currencies]);
     const usdToCdfRate = appConfig?.checkout?.usdToCdfRate || derivedUsdToCdfRate || DEFAULT_USD_TO_CDF_RATE;
     const taxRate = appConfig?.checkout?.taxRate ?? DEFAULT_TAX_RATE;
-    const deliveryHints = appConfig?.checkout?.deliveryHints || [];
     const convertAmountToCdf = React.useCallback(
         (amount: number, currency: any): number => {
             const safeAmount = Number.isFinite(amount) ? amount : 0;
@@ -748,6 +752,18 @@ export default function CartScreen() {
             : deliveryInputMode === 'guided'
                 ? 'Adresse guidee'
                 : 'Adresse manuelle';
+    const deliveryStatusLabel = normalizedDeliveryAddress
+        ? hasDeliveryCoordinates
+            ? 'Adresse et point GPS prets'
+            : 'Adresse prete'
+        : 'Adresse requise';
+    const deliveryPrimaryActionLabel = normalizedDeliveryAddress
+        ? isDeliveryEditorOpen
+            ? 'Masquer'
+            : 'Modifier'
+        : isDeliveryEditorOpen
+            ? 'Refermer'
+            : 'Renseigner';
 
     React.useEffect(() => {
         if (!deliveryCoordsKey) {
@@ -1051,112 +1067,106 @@ export default function CartScreen() {
                                     <View style={styles.deliveryPinIcon}>
                                         <Ionicons name="location" size={16} color={Colors.white} />
                                     </View>
-                                    <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
+                                    <View style={styles.deliveryTitleTextWrap}>
+                                        <Text style={styles.deliveryTitle}>Adresse de livraison</Text>
+                                        <Text style={styles.deliveryStatusText}>{deliveryStatusLabel}</Text>
+                                    </View>
                                 </View>
+                                <TouchableOpacity
+                                    style={styles.deliveryEditButton}
+                                    onPress={() => {
+                                        setDeliveryInputMode((current) => current || 'guided');
+                                        setIsDeliveryEditorOpen((current) => !current);
+                                    }}
+                                    activeOpacity={0.85}
+                                >
+                                    <Text style={styles.deliveryEditButtonText}>{deliveryPrimaryActionLabel}</Text>
+                                </TouchableOpacity>
                             </View>
-                            <Text style={styles.deliveryAddressText}>
-                                {deliveryDisplayLabel || 'Aucune adresse selectionnee'}
-                            </Text>
-                            <View style={styles.deliveryInputSelector}>
-                                <Text style={styles.deliverySelectorTitle}>Choisissez comment entrer votre adresse</Text>
-                                <Text style={styles.deliverySelectorSubtitle}>
-                                    L adresse guidee donne le plus de details au livreur. La carte sert surtout a placer le point exact.
-                                </Text>
-                                <View style={styles.deliveryInputChips}>
-                                    {DELIVERY_INPUT_MODE_OPTIONS.map((option) => {
-                                        const isActive = deliveryInputMode === option.id;
-                                        return (
-                                            <TouchableOpacity
-                                                key={option.id}
-                                                style={[
-                                                    styles.deliveryInputChip,
-                                                    isActive && styles.deliveryInputChipActive,
-                                                ]}
-                                                onPress={() => handleDeliveryInputModeChange(option.id)}
-                                                activeOpacity={0.85}
-                                            >
-                                                <Text
-                                                    style={[
-                                                        styles.deliveryInputChipLabel,
-                                                        isActive && styles.deliveryInputChipLabelActive,
-                                                    ]}
-                                                >
-                                                    {option.label}
-                                                </Text>
-                                                {option.badge ? (
-                                                    <View
-                                                        style={[
-                                                            styles.deliveryInputChipBadge,
-                                                            isActive && styles.deliveryInputChipBadgeActive,
-                                                        ]}
-                                                    >
-                                                        <Text
-                                                            style={[
-                                                                styles.deliveryInputChipBadgeText,
-                                                                isActive && styles.deliveryInputChipBadgeTextActive,
-                                                            ]}
-                                                        >
-                                                            {option.badge}
-                                                        </Text>
-                                                    </View>
-                                                ) : null}
-                                                <Text
-                                                    style={[
-                                                        styles.deliveryInputChipDescription,
-                                                        isActive && styles.deliveryInputChipDescriptionActive,
-                                                    ]}
-                                                >
-                                                    {option.description}
-                                                </Text>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                </View>
-                            </View>
-                            {!deliveryInputMode ? (
-                                <View style={styles.deliveryChoiceNotice}>
-                                    <Ionicons name="information-circle-outline" size={16} color={Colors.primary} />
-                                    <Text style={styles.deliveryChoiceNoticeText}>
-                                        Choisissez d abord une methode pour ajouter ou modifier votre adresse de livraison.
-                                    </Text>
-                                </View>
-                            ) : deliveryInputMode === 'guided' ? (
-                                <KinshasaAddressForm
-                                    fields={deliveryAddressFields}
-                                    onChange={handleStructuredDeliveryAddressChange}
-                                    helperText="Methode recommandee si vous voulez donner plus de details: commune, quartier, avenue et repere."
+                            <View style={styles.deliverySummaryRow}>
+                                <Ionicons
+                                    name={normalizedDeliveryAddress ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+                                    size={17}
+                                    color={normalizedDeliveryAddress ? Colors.success : Colors.primary}
                                 />
-                            ) : (
-                                <View style={styles.deliveryMapSection}>
-                                    <TouchableOpacity
-                                        style={styles.deliveryButton}
-                                        onPress={() => setMapVisible(true)}
-                                        activeOpacity={0.85}
-                                    >
-                                        <Ionicons name="map-outline" size={14} color={Colors.white} />
-                                        <Text style={styles.deliveryButtonText}>
-                                            {hasDeliveryCoordinates ? 'Mettre a jour sur carte' : 'Choisir sur carte'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                    <Text style={styles.deliveryHint}>
-                                        Utilisez la carte si vous voulez surtout montrer le point exact de livraison.
-                                    </Text>
-                                </View>
-                            )}
+                                <Text
+                                    style={[
+                                        styles.deliveryAddressText,
+                                        !deliveryDisplayLabel && styles.deliveryAddressPlaceholder,
+                                    ]}
+                                    numberOfLines={2}
+                                >
+                                    {deliveryDisplayLabel || 'Ajoutez une adresse pour calculer et preparer la livraison.'}
+                                </Text>
+                            </View>
                             {hasDeliveryCoordinates && deliveryModeLabel !== 'En attente' ? (
                                 <View style={styles.deliveryModeBadge}>
                                     <Ionicons name={deliveryMode === 'walking' ? 'walk-outline' : 'car-outline'} size={12} color={Colors.primary} />
                                     <Text style={styles.deliveryModeBadgeText}>{deliveryModeLabel}</Text>
                                 </View>
                             ) : null}
-                            <Text style={styles.deliveryHint}>
-                                {hasDeliveryCoordinates
-                                    ? 'Le cout est calcule automatiquement selon la distance et la classe de poids.'
-                                    : 'La carte reste utile pour obtenir un cout de livraison plus precis.'}
-                            </Text>
-                            <Text style={styles.deliveryHintSecondary}>
-                                {deliveryHints[0] || KINSHASA_ADDRESS_HELP_TEXT}
-                            </Text>
+                            {isDeliveryEditorOpen ? (
+                                <View style={styles.deliveryEditor}>
+                                    <View style={styles.deliveryInputChips}>
+                                        {DELIVERY_INPUT_MODE_OPTIONS.map((option) => {
+                                            const isActive = deliveryInputMode === option.id;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={option.id}
+                                                    style={[
+                                                        styles.deliveryInputChip,
+                                                        isActive && styles.deliveryInputChipActive,
+                                                    ]}
+                                                    onPress={() => handleDeliveryInputModeChange(option.id)}
+                                                    activeOpacity={0.85}
+                                                >
+                                                    <Text
+                                                        style={[
+                                                            styles.deliveryInputChipLabel,
+                                                            isActive && styles.deliveryInputChipLabelActive,
+                                                        ]}
+                                                    >
+                                                        {option.label}
+                                                    </Text>
+                                                    <Text
+                                                        style={[
+                                                            styles.deliveryInputChipDescription,
+                                                            isActive && styles.deliveryInputChipDescriptionActive,
+                                                        ]}
+                                                        numberOfLines={2}
+                                                    >
+                                                        {option.description}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                    {deliveryInputMode === 'map' ? (
+                                        <View style={styles.deliveryMapSection}>
+                                            <TouchableOpacity
+                                                style={styles.deliveryButton}
+                                                onPress={() => setMapVisible(true)}
+                                                activeOpacity={0.85}
+                                            >
+                                                <Ionicons name="map-outline" size={14} color={Colors.white} />
+                                                <Text style={styles.deliveryButtonText}>
+                                                    {hasDeliveryCoordinates ? 'Mettre a jour sur carte' : 'Choisir sur carte'}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <Text style={styles.deliveryHint}>
+                                                Point GPS exact, utile pour un cout de livraison plus precis.
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <KinshasaAddressForm
+                                            fields={deliveryAddressFields}
+                                            onChange={handleStructuredDeliveryAddressChange}
+                                            helperText={KINSHASA_ADDRESS_HELP_TEXT}
+                                            variant="simple"
+                                        />
+                                    )}
+                                </View>
+                            ) : null}
                         </View>
                     </View>
                 }
@@ -1327,25 +1337,24 @@ const styles = StyleSheet.create({
     listContent: {
         padding: Spacing.xl,
         paddingTop: Spacing.huge,
-        paddingBottom: 200,
+        paddingBottom: 140,
     },
     heroCard: {
-        borderRadius: BorderRadius.xl,
-        padding: Spacing.xxl,
-        marginBottom: Spacing.lg,
-        ...Shadows.xl,
+        borderRadius: BorderRadius.md,
+        padding: Spacing.lg,
+        marginBottom: Spacing.md,
+        ...Shadows.md,
     },
     heroTopRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.xl,
+        marginBottom: Spacing.md,
     },
     heroTitle: {
-        fontSize: Typography.fontSize.xxl,
+        fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
-        letterSpacing: 0.3,
     },
     heroBadge: {
         backgroundColor: Colors.white + '28',
@@ -1362,7 +1371,7 @@ const styles = StyleSheet.create({
     },
     heroBottomRow: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         justifyContent: 'space-between',
         gap: Spacing.md,
     },
@@ -1375,7 +1384,7 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
     },
     heroTotal: {
-        fontSize: Typography.fontSize.huge,
+        fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
     },
@@ -1397,8 +1406,8 @@ const styles = StyleSheet.create({
     groupedNotice: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.md,
-        padding: Spacing.lg,
-        marginBottom: Spacing.lg,
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
         borderWidth: 1,
         borderColor: Colors.primary + '15',
         ...Shadows.sm,
@@ -1412,7 +1421,7 @@ const styles = StyleSheet.create({
     groupedNoticeText: {
         fontSize: Typography.fontSize.sm,
         color: Colors.gray500,
-        lineHeight: 18,
+        lineHeight: 17,
     },
     sanitizeNotice: {
         flexDirection: 'row',
@@ -1433,9 +1442,9 @@ const styles = StyleSheet.create({
     },
     deliveryCard: {
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.lg,
-        marginBottom: Spacing.xl,
+        borderRadius: BorderRadius.md,
+        padding: Spacing.md,
+        marginBottom: Spacing.lg,
         borderWidth: 1,
         borderColor: Colors.primary + '18',
         ...Shadows.md,
@@ -1444,12 +1453,14 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.md,
+        marginBottom: Spacing.sm,
+        gap: Spacing.md,
     },
     deliveryTitleRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.sm,
+        flex: 1,
     },
     deliveryPinIcon: {
         width: 28,
@@ -1459,35 +1470,58 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    deliveryTitleTextWrap: {
+        flex: 1,
+    },
     deliveryTitle: {
-        fontSize: Typography.fontSize.md,
+        fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
     },
-    deliveryInputSelector: {
-        marginBottom: Spacing.md,
-    },
-    deliverySelectorTitle: {
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.extrabold,
-        color: Colors.gray800,
-        marginBottom: 4,
-    },
-    deliverySelectorSubtitle: {
+    deliveryStatusText: {
+        marginTop: 1,
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
-        lineHeight: 18,
-        marginBottom: Spacing.sm,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    deliveryEditButton: {
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.xs,
+    },
+    deliveryEditButtonText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    deliverySummaryRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+    },
+    deliveryEditor: {
+        marginTop: Spacing.md,
+        paddingTop: Spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
     },
     deliveryInputChips: {
         flexDirection: 'row',
         gap: Spacing.sm,
+        marginBottom: Spacing.md,
     },
     deliveryInputChip: {
         flex: 1,
-        borderRadius: BorderRadius.lg,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.md,
+        borderRadius: BorderRadius.md,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.sm,
         borderWidth: 1,
         borderColor: Colors.primary + '18',
         backgroundColor: Colors.gray50,
@@ -1498,31 +1532,12 @@ const styles = StyleSheet.create({
         ...Shadows.sm,
     },
     deliveryInputChipLabel: {
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
         marginBottom: 2,
     },
     deliveryInputChipLabelActive: {
-        color: Colors.white,
-    },
-    deliveryInputChipBadge: {
-        alignSelf: 'flex-start',
-        backgroundColor: Colors.primary + '10',
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.xs + 2,
-        paddingVertical: 3,
-        marginBottom: 6,
-    },
-    deliveryInputChipBadgeActive: {
-        backgroundColor: Colors.white + '24',
-    },
-    deliveryInputChipBadgeText: {
-        fontSize: 10,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    deliveryInputChipBadgeTextActive: {
         color: Colors.white,
     },
     deliveryInputChipDescription: {
@@ -1537,30 +1552,14 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
         marginBottom: Spacing.xs,
     },
-    deliveryChoiceNotice: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: Spacing.xs,
-        backgroundColor: Colors.primary + '0D',
-        borderRadius: BorderRadius.md,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
-        marginBottom: Spacing.xs,
-    },
-    deliveryChoiceNoticeText: {
-        flex: 1,
-        fontSize: Typography.fontSize.xs,
-        color: Colors.primary,
-        lineHeight: 18,
-        fontWeight: Typography.fontWeight.semibold,
-    },
     deliveryButton: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'center',
         gap: 4,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs + 2,
-        borderRadius: BorderRadius.full,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.md,
         backgroundColor: Colors.primary,
     },
     deliveryButtonText: {
@@ -1569,11 +1568,14 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
     },
     deliveryAddressText: {
-        fontSize: Typography.fontSize.base,
+        flex: 1,
+        fontSize: Typography.fontSize.sm,
         color: Colors.gray700,
-        marginBottom: Spacing.xs,
         fontWeight: Typography.fontWeight.medium,
-        lineHeight: 20,
+        lineHeight: 18,
+    },
+    deliveryAddressPlaceholder: {
+        color: Colors.gray500,
     },
     deliveryModeBadge: {
         flexDirection: 'row',
@@ -1595,13 +1597,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         color: Colors.gray400,
         lineHeight: 16,
-    },
-    deliveryHintSecondary: {
-        marginTop: 6,
-        fontSize: Typography.fontSize.xs,
-        color: Colors.primary,
-        lineHeight: 18,
-        fontWeight: Typography.fontWeight.semibold,
     },
     sellerNote: {
         fontSize: Typography.fontSize.xs,
@@ -1807,10 +1802,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: Spacing.xl,
-        paddingTop: Spacing.md,
-        paddingBottom: Spacing.md,
+        paddingTop: Spacing.sm,
+        paddingBottom: 0,
         gap: Spacing.md,
-        minHeight: 92,
+        minHeight: 60,
     },
     checkoutModalOverlay: {
         flex: 1,

@@ -28,7 +28,7 @@ import {
     useCameraPermission,
     useFrameProcessor,
 } from 'react-native-vision-camera';
-import { type Face, type FrameFaceDetectionOptions, useFaceDetector } from 'react-native-vision-camera-face-detector';
+import { type Face, type FrameFaceDetectionOptions, useFaceDetector } from '@/components/kyc/faceDetection';
 import { Worklets } from 'react-native-worklets-core';
 
 type AlertType = 'success' | 'error' | 'info' | 'warning';

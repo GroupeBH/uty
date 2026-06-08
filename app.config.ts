@@ -1,6 +1,9 @@
 import { ConfigContext, ExpoConfig } from 'expo/config';
+import { ConfigPlugin, withPodfile, withXcodeProject } from 'expo/config-plugins';
 import fs from 'node:fs';
 import path from 'node:path';
+
+const IOS_DEPLOYMENT_TARGET = '15.5';
 
 const hasPackage = (packageName: string): boolean => {
     try {
@@ -38,6 +41,20 @@ const readWebClientIdFromGoogleServices = (filePath: string): string | undefined
     return undefined;
 };
 
+const readValueFromPlist = (filePath: string, key: string): string | undefined => {
+    try {
+        const resolvedPath = path.resolve(process.cwd(), filePath);
+        const raw = fs.readFileSync(resolvedPath, 'utf-8');
+        const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const match = raw.match(
+            new RegExp(`<key>${escapedKey}</key>\\s*<string>([^<]+)</string>`)
+        );
+        return match?.[1]?.trim() || undefined;
+    } catch {
+        return undefined;
+    }
+};
+
 const readPackageVersion = (): string | undefined => {
     try {
         const resolvedPath = path.resolve(process.cwd(), 'package.json');
@@ -50,6 +67,90 @@ const readPackageVersion = (): string | undefined => {
     }
 };
 
+const withIosDeploymentTarget: ConfigPlugin = (expoConfig) =>
+    withXcodeProject(expoConfig, (modConfig) => {
+        const buildConfigurations = modConfig.modResults.pbxXCBuildConfigurationSection() as Record<
+            string,
+            {
+                buildSettings?: {
+                    IPHONEOS_DEPLOYMENT_TARGET?: string;
+                    EXCLUDED_ARCHS?: string;
+                    'EXCLUDED_ARCHS[sdk=iphonesimulator*]'?: string;
+                };
+            }
+        >;
+
+        for (const buildConfiguration of Object.values(buildConfigurations)) {
+            const buildSettings = buildConfiguration?.buildSettings;
+
+            if (buildSettings?.IPHONEOS_DEPLOYMENT_TARGET) {
+                buildSettings.IPHONEOS_DEPLOYMENT_TARGET = IOS_DEPLOYMENT_TARGET;
+            }
+
+            if (buildSettings) {
+                delete buildSettings.EXCLUDED_ARCHS;
+                delete buildSettings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'];
+            }
+        }
+
+        return modConfig;
+    });
+
+const withIosSimulatorArchitectures: ConfigPlugin = (expoConfig) =>
+    withPodfile(expoConfig, (modConfig) => {
+        const patchName = 'uty_ios_simulator_architectures';
+        const googleUtilitiesPod = "  pod 'GoogleUtilities', :modular_headers => true";
+        const helper = `
+def ${patchName}(installer)
+  Dir.glob(File.join(Pod::Config.instance.installation_root.to_s, 'Pods', 'Target Support Files', '**', '*.xcconfig')).each do |xcconfig_path|
+    xcconfig = Xcodeproj::Config.new(xcconfig_path)
+    xcconfig.attributes.delete('EXCLUDED_ARCHS[sdk=iphonesimulator*]')
+    xcconfig.save_as(Pathname.new(xcconfig_path))
+  end
+
+  installer.aggregate_targets.each do |aggregate_target|
+    aggregate_target.xcconfigs.each do |config_name, xcconfig|
+      xcconfig.attributes.delete('EXCLUDED_ARCHS[sdk=iphonesimulator*]')
+      xcconfig.save_as(aggregate_target.xcconfig_path(config_name))
+    end
+  end
+
+  installer.pods_project.build_configurations.each do |config|
+    config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = ''
+  end
+
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['EXCLUDED_ARCHS[sdk=iphonesimulator*]'] = ''
+    end
+  end
+end
+`;
+
+        if (!modConfig.modResults.contents.includes(`def ${patchName}`)) {
+            modConfig.modResults.contents = modConfig.modResults.contents.replace(
+                '\nENV[\'RCT_NEW_ARCH_ENABLED\']',
+                `${helper}\nENV['RCT_NEW_ARCH_ENABLED']`
+            );
+        }
+
+        if (!modConfig.modResults.contents.includes(`${patchName}(installer)`)) {
+            modConfig.modResults.contents = modConfig.modResults.contents.replace(
+                /(\s+react_native_post_install\([\s\S]*?\n\s+?\),?)/,
+                `$1\n    ${patchName}(installer)`
+            );
+        }
+
+        if (!modConfig.modResults.contents.includes("pod 'GoogleUtilities'")) {
+            modConfig.modResults.contents = modConfig.modResults.contents.replace(
+                '  use_expo_modules!',
+                `  use_expo_modules!\n\n${googleUtilitiesPod}`
+            );
+        }
+
+        return modConfig;
+    });
+
 export default ({ config }: ConfigContext): ExpoConfig => {
     const hasFirebaseApp = hasPackage('@react-native-firebase/app');
     const hasGoogleSignin = hasPackage('@react-native-google-signin/google-signin');
@@ -60,8 +161,12 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     const googleWebClientId =
         process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() ||
         readWebClientIdFromGoogleServices(androidGoogleServicesFile);
-    const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim();
-    const googleIosUrlScheme = process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim();
+    const googleIosClientId =
+        process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() ||
+        readValueFromPlist(iosGoogleServicesFile, 'CLIENT_ID');
+    const googleIosUrlScheme =
+        process.env.EXPO_PUBLIC_GOOGLE_IOS_URL_SCHEME?.trim() ||
+        readValueFromPlist(iosGoogleServicesFile, 'REVERSED_CLIENT_ID');
     const appVersion =
         process.env.EXPO_APP_VERSION?.trim() ||
         process.env.npm_package_version?.trim() ||
@@ -75,11 +180,22 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         [
             'expo-build-properties',
             {
+                ios: {
+                    deploymentTarget: IOS_DEPLOYMENT_TARGET,
+                    extraPods: [
+                        {
+                            name: 'GoogleUtilities',
+                            modular_headers: true,
+                        },
+                    ],
+                },
                 android: {
                     minSdkVersion: 26,
                 },
             },
         ],
+        withIosDeploymentTarget,
+        withIosSimulatorArchitectures,
         [
             'expo-splash-screen',
             {
@@ -133,6 +249,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         userInterfaceStyle: 'automatic',
         newArchEnabled: true,
         ios: {
+            bundleIdentifier: 'com.gbh.uty',
             supportsTablet: true,
             ...(hasFirebaseApp ? { googleServicesFile: iosGoogleServicesFile } : {}),
             config: {
