@@ -5,6 +5,7 @@
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { Announcement } from '@/types/announcement';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { getAvailableQuantity, isOutOfStockQuantity, requiresSellerContact } from '@/utils/productAvailability';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -27,13 +28,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     const router = useRouter();
     const scaleAnim = useRef(new Animated.Value(1)).current;
 
-    // Use price as default, no originalPrice field exists on Announcement yet for simple discount calculation
-    // but schema has priceRange, etc. Adjusting to display basic price for now.
-    const hasDiscount = false;
-
     const imageUrl = (product.images && product.images.length > 0)
         ? product.images[0]
         : 'https://via.placeholder.com/150';
+    const availableQuantity = getAvailableQuantity(product.quantity);
+    const isOutOfStock = isOutOfStockQuantity(product.quantity);
+    const isContactOnly = requiresSellerContact(product);
+    const canAddToCart = Boolean(onAddToCart && (availableQuantity === undefined || availableQuantity > 0));
 
     const handlePressIn = () => {
         Animated.spring(scaleAnim, {
@@ -81,7 +82,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({
                 />
 
                 {/* Badge de stock (using quantity instead of stock) */}
-                {product.quantity !== undefined && product.quantity === 0 && (
+                {isOutOfStock && (
                     <View style={styles.outOfStockBadge}>
                         <Text style={styles.outOfStockText}>Rupture de stock</Text>
                     </View>
@@ -119,20 +120,44 @@ export const ProductCard: React.FC<ProductCardProps> = ({
 
                 {/* Prix */}
                 <View style={styles.priceContainer}>
-                    <Text style={styles.price}>{formatCurrencyAmount(product.price, product.currency)}</Text>
+                    <Text
+                        style={styles.price}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.65}
+                    >
+                        {formatCurrencyAmount(product.price, product.currency)}
+                    </Text>
                 </View>
 
-                {/* Bouton ajout au panier */}
-                {onAddToCart && (product.quantity === undefined || product.quantity > 0) && (
-                    <TouchableOpacity
-                        style={styles.addButton}
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            onAddToCart(product);
-                        }}
-                    >
-                        <Ionicons name="cart" size={18} color={Colors.white} />
-                    </TouchableOpacity>
+                {/* Action */}
+                {(isContactOnly || canAddToCart) && (
+                    <View style={styles.actionRow}>
+                        {isContactOnly ? (
+                            <TouchableOpacity
+                                style={[styles.addButton, styles.contactButton]}
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    router.push({
+                                        pathname: '/product/[id]',
+                                        params: { id: product._id, contact: '1' },
+                                    } as any);
+                                }}
+                            >
+                                <Ionicons name="chatbubble-ellipses-outline" size={18} color={Colors.white} />
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                style={styles.addButton}
+                                onPress={(e) => {
+                                    e.stopPropagation();
+                                    onAddToCart?.(product);
+                                }}
+                            >
+                                <Ionicons name="add" size={22} color={Colors.white} />
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 )}
             </View>
             </Animated.View>
@@ -197,7 +222,7 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        backgroundColor: Colors.error,
         paddingVertical: Spacing.sm,
         alignItems: 'center',
     },
@@ -237,9 +262,12 @@ const styles = StyleSheet.create({
     priceContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        marginBottom: Spacing.sm,
+        marginBottom: Spacing.xs,
+        minHeight: 34,
     },
     price: {
+        flex: 1,
+        minWidth: 0,
         fontSize: Typography.fontSize.xl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
@@ -250,10 +278,13 @@ const styles = StyleSheet.create({
         textDecorationLine: 'line-through',
         marginLeft: Spacing.sm,
     },
+    actionRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        minHeight: 44,
+    },
     addButton: {
-        position: 'absolute',
-        bottom: Spacing.lg,
-        right: Spacing.lg,
         width: 44,
         height: 44,
         borderRadius: 22,
@@ -261,5 +292,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         ...Shadows.lg,
+    },
+    contactButton: {
+        backgroundColor: Colors.accent,
     },
 });

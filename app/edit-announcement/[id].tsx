@@ -16,7 +16,7 @@ import { useGetCategoryAttributesQuery } from '@/store/api/categoriesApi';
 import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyGeocodeQuery } from '@/store/api/googleMapsApi';
 import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
-import { getImageMimeType } from '@/utils/imageUtils';
+import { prepareAnnouncementImage, prepareAnnouncementImages } from '@/utils/imageUtils';
 import { formatKinshasaAddress, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -116,7 +116,7 @@ export default function EditAnnouncementScreen() {
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
     const [existingImages, setExistingImages] = useState<string[]>([]);
-    const [images, setImages] = useState<{ uri: string; name: string; type: string }[]>([]);
+    const [images, setImages] = useState<{ uri: string; name: string; type: string; size?: number }[]>([]);
     const [imagesToDelete, setImagesToDelete] = useState<string[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
@@ -324,13 +324,6 @@ export default function EditAnnouncementScreen() {
     }, [currentStep, updateProgress]);
 
     // Gestion des images
-    const buildImageFile = (uri: string, name?: string) => {
-        const mimeType = getImageMimeType(uri);
-        const extension = mimeType.split('/')[1] || 'jpg';
-        const safeName = name || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
-        return { uri, name: safeName, type: mimeType };
-    };
-
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -342,15 +335,22 @@ export default function EditAnnouncementScreen() {
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsMultipleSelection: true,
-            quality: 0.8,
+            quality: 0.65,
             selectionLimit,
+            base64: false,
+            exif: false,
         });
 
         if (!result.canceled && result.assets) {
             setIsConvertingImages(true);
             try {
-                const newImages = result.assets.map((asset: any) =>
-                    buildImageFile(asset.uri, asset.fileName)
+                const newImages = await prepareAnnouncementImages(
+                    result.assets.map((asset: any) => ({
+                        uri: asset.uri,
+                        fileName: asset.fileName,
+                        width: asset.width,
+                        height: asset.height,
+                    })),
                 );
                 setImages((prev) => {
                     const remainingSlots = 10 - existingImages.length;
@@ -358,7 +358,7 @@ export default function EditAnnouncementScreen() {
                 });
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de preparer les images', variant: 'error' });
+                showAlert({ title: 'Erreur', message: "Impossible d'ajouter les images", variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -373,21 +373,28 @@ export default function EditAnnouncementScreen() {
         }
 
         const result = await ImagePicker.launchCameraAsync({
-            quality: 0.8,
+            quality: 0.65,
+            base64: false,
+            exif: false,
         });
 
         if (!result.canceled && result.assets && result.assets.length > 0) {
             const asset = result?.assets[0];
             setIsConvertingImages(true);
             try {
-                const newImage = buildImageFile(asset.uri, asset.fileName ?? undefined);
+                const newImage = await prepareAnnouncementImage({
+                    uri: asset.uri,
+                    fileName: asset.fileName ?? undefined,
+                    width: asset.width,
+                    height: asset.height,
+                });
                 setImages((prev) => {
                     const remainingSlots = 10 - existingImages.length;
                     return [...prev, newImage].slice(0, remainingSlots);
                 });
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de preparer la photo', variant: 'error' });
+                showAlert({ title: 'Erreur', message: "Impossible d'ajouter la photo", variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -1188,7 +1195,7 @@ export default function EditAnnouncementScreen() {
                                 {isConvertingImages && (
                                     <View style={styles.imageLoadingItem}>
                                         <ActivityIndicator size="large" color={Colors.primary} />
-                                        <Text style={styles.loadingText}>Conversion...</Text>
+                                        <Text style={styles.loadingText}>Ajout en cours...</Text>
                                     </View>
                                 )}
 

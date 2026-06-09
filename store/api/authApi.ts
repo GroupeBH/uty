@@ -33,6 +33,14 @@ export interface ChangePinDto {
     newPin: string;
 }
 
+export interface UpdateProfileDto {
+    username?: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    image?: string;
+}
+
 export interface ResetPinDto {
     phone: string;
     newPin: string;
@@ -134,6 +142,14 @@ export const authApi = baseApi.injectEndpoints({
             query: () => '/users/profile',
             providesTags: ['User'],
         }),
+        updateProfile: builder.mutation<User, UpdateProfileDto>({
+            query: (dto) => ({
+                url: '/users/profile',
+                method: 'PATCH',
+                body: dto,
+            }),
+            invalidatesTags: ['User'],
+        }),
         refreshToken: builder.mutation<AuthResponse, { refresh_token: string }>({
             query: () => ({
                 url: '/auth/refresh/accessToken',
@@ -161,6 +177,7 @@ export const {
     useGoogleMobileMutation,
     useLogoutMutation,
     useGetProfileQuery,
+    useUpdateProfileMutation,
     useRefreshTokenMutation,
     useUpdateFcmTokenMutation,
 } = authApi;

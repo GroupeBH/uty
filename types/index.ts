@@ -193,6 +193,7 @@ export interface CreateOrderRequest {
     items: Array<{
         productId: string;
         quantity: number;
+        price?: number;
     }>;
     deliveryAddress: Location;
     notes?: string;

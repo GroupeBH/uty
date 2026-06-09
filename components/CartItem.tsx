@@ -67,10 +67,20 @@ export const CartItem: React.FC<CartItemProps> = ({
 
                 {/* Price Row */}
                 <View style={styles.priceRow}>
-                    <Text style={styles.unitPrice}>
+                    <Text
+                        style={styles.unitPrice}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                    >
                         {formatCurrencyAmount(productPrice, resolvedCurrencySymbol)} /u
                     </Text>
-                    <Text style={styles.lineTotal}>
+                    <Text
+                        style={styles.lineTotal}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                    >
                         {formatCurrencyAmount(lineTotal, resolvedCurrencySymbol)}
                     </Text>
                 </View>
@@ -203,13 +213,18 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         marginTop: 2,
+        gap: Spacing.sm,
     },
     unitPrice: {
+        flex: 1,
+        minWidth: 0,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.medium,
         color: Colors.gray500,
     },
     lineTotal: {
+        flexShrink: 1,
+        maxWidth: '48%',
         fontSize: Typography.fontSize.md,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.accentDark,

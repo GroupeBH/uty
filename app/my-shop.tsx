@@ -7,6 +7,7 @@ import { useGetMyShopQuery, useUpdateShopMutation } from '@/store/api/shopsApi';
 import { Announcement } from '@/types/announcement';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { getImageMimeType } from '@/utils/imageUtils';
+import { isOutOfStockQuantity } from '@/utils/productAvailability';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -552,7 +553,10 @@ export default function MyShopScreen() {
                                             </TouchableOpacity>
                                         </View>
                                     ) : (
-                                        recentAnnouncements.map((announcement: Announcement) => (
+                                        recentAnnouncements.map((announcement: Announcement) => {
+                                            const isOutOfStock = isOutOfStockQuantity(announcement.quantity);
+
+                                            return (
                                             <View key={announcement._id} style={styles.announcementCard}>
                                                 <View style={styles.announcementThumbWrap}>
                                                     {announcement.images?.[0] ? (
@@ -562,13 +566,25 @@ export default function MyShopScreen() {
                                                             <Ionicons name="image-outline" size={18} color={Colors.gray500} />
                                                         </View>
                                                     )}
+                                                    {isOutOfStock && (
+                                                        <View style={styles.announcementOutOfStockBadge}>
+                                                            <Text style={styles.announcementOutOfStockText}>
+                                                                Rupture{'\n'}de stock
+                                                            </Text>
+                                                        </View>
+                                                    )}
                                                 </View>
 
                                                 <View style={styles.announcementBody}>
                                                     <Text style={styles.announcementName} numberOfLines={1}>
                                                         {announcement.name || 'Annonce sans titre'}
                                                     </Text>
-                                                    <Text style={styles.announcementPrice}>
+                                                    <Text
+                                                        style={styles.announcementPrice}
+                                                        numberOfLines={1}
+                                                        adjustsFontSizeToFit
+                                                        minimumFontScale={0.7}
+                                                    >
                                                         {formatPrice(announcement.price, announcement.currency)}
                                                     </Text>
                                                     <View style={styles.announcementMetaRow}>
@@ -594,7 +610,8 @@ export default function MyShopScreen() {
                                                     </View>
                                                 </View>
                                             </View>
-                                        ))
+                                            );
+                                        })
                                     )}
                                 </View>
 
@@ -1210,6 +1227,23 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    announcementOutOfStockBadge: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: Colors.error,
+        paddingVertical: 3,
+        alignItems: 'center',
+    },
+    announcementOutOfStockText: {
+        color: Colors.white,
+        fontSize: 8,
+        fontWeight: Typography.fontWeight.extrabold,
+        lineHeight: 9,
+        textAlign: 'center',
+        textTransform: 'uppercase',
+    },
     announcementBody: {
         flex: 1,
     },
@@ -1223,6 +1257,7 @@ const styles = StyleSheet.create({
         color: Colors.accentDark,
         fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.extrabold,
+        minWidth: 0,
     },
     announcementMetaRow: {
         marginTop: Spacing.xs,

@@ -19,22 +19,28 @@ import {
     useCreateCommentMutation,
     useGetCommentsForAnnouncementQuery,
 } from '@/store/api/commentsApi';
+import { useCreateContactRequestMutation } from '@/store/api/contactRequestsApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     useCreateConversationMutation,
     useSendMessageMutation as useSendChatMessageMutation,
 } from '@/store/api/messagingApi';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { cacheDirectOrderProduct } from '@/utils/directOrderDraft';
+import { getAvailableQuantity } from '@/utils/productAvailability';
+import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
+    ActivityIndicator,
     Animated,
     Dimensions,
     Image,
     KeyboardAvoidingView,
+    Linking,
     Modal,
     Platform,
     ScrollView,
@@ -102,7 +108,7 @@ const isSensitiveAttributeKey = (key: string): boolean => {
 };
 
 export default function ProductDetailScreen() {
-    const { id } = useLocalSearchParams<{ id: string }>();
+    const { id, contact } = useLocalSearchParams<{ id: string; contact?: string }>();
     const announcementId = id || '';
     const router = useRouter();
     const insets = useSafeAreaInsets();
@@ -143,10 +149,13 @@ export default function ProductDetailScreen() {
     const [updateCartItem] = useUpdateCartItemMutation();
     const [createConversation, { isLoading: isCreatingConversation }] = useCreateConversationMutation();
     const [sendChatMessage, { isLoading: isSendingChatMessage }] = useSendChatMessageMutation();
+    const [createContactRequest, { isLoading: isCreatingContactRequest }] = useCreateContactRequestMutation();
     const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+    const [isMainImageLoading, setIsMainImageLoading] = useState(true);
+    const [thumbnailLoadingByUri, setThumbnailLoadingByUri] = useState<Record<string, boolean>>({});
     const [showImageModal, setShowImageModal] = useState(false);
     const [showContactModal, setShowContactModal] = useState(false);
     const [showReviewModal, setShowReviewModal] = useState(false);
@@ -160,7 +169,7 @@ export default function ProductDetailScreen() {
     
     // Contact form states
     const [message, setMessage] = useState('');
-    const isContactSubmitting = isCreatingConversation || isSendingChatMessage;
+    const isContactSubmitting = isCreatingConversation || isSendingChatMessage || isCreatingContactRequest;
     const [alertState, setAlertState] = useState<{
         visible: boolean;
         title: string;
@@ -174,15 +183,19 @@ export default function ProductDetailScreen() {
     });
     
     const scrollY = useRef(new Animated.Value(0)).current;
+    const hasOpenedContactFromRoute = useRef(false);
     const cartItem = cart?.products?.find((item) => {
         const productId =
             typeof item.productId === 'string' ? item.productId : item.productId?._id;
         return productId === product?._id;
     });
     const inCartQuantity = cartItem?.quantity || 0;
-    const stock = typeof product?.quantity === 'number' ? product.quantity : undefined;
+    const stock = getAvailableQuantity(product?.quantity);
     const remainingStock = stock === undefined ? undefined : Math.max(stock - inCartQuantity, 0);
     const hasStockLeft = remainingStock === undefined ? true : remainingStock > 0;
+    const isOutOfStock = stock !== undefined && stock <= 0;
+    const productImages = React.useMemo(() => product?.images || [], [product?.images]);
+    const selectedImageUri = productImages[selectedImageIndex] || 'https://via.placeholder.com/400';
     const showAlert = (
         title: string,
         message: string,
@@ -267,8 +280,8 @@ export default function ProductDetailScreen() {
             }
             : null,
         locationPreview ? { icon: 'location-outline', label: locationPreview } : null,
-        typeof product?.quantity === 'number'
-            ? { icon: 'layers-outline', label: `${product.quantity} en stock` }
+        stock !== undefined
+            ? { icon: 'layers-outline', label: `${stock} en stock` }
             : null,
         product?.isSold ? { icon: 'checkmark-done-outline', label: 'Annonce vendue' } : null,
     ].filter(Boolean) as { icon: string; label: string; categoryIcon?: unknown }[];
@@ -441,11 +454,11 @@ export default function ProductDetailScreen() {
             value: product.isSold ? 'Vendu' : 'Disponible',
         });
 
-        if (typeof product.quantity === 'number') {
+        if (stock !== undefined) {
             rows.push({
                 icon: 'cube-outline',
                 label: 'Quantite disponible',
-                value: `${product.quantity}`,
+                value: `${stock}`,
             });
         }
 
@@ -547,7 +560,7 @@ export default function ProductDetailScreen() {
         }
 
         return rows;
-    }, [comments.length, likeCount, pickupLocationLabel, product, publicAddresses, publicLocations]);
+    }, [comments.length, likeCount, pickupLocationLabel, product, publicAddresses, publicLocations, stock]);
     const sellerIdentity = React.useMemo(() => {
         const seller = typeof product?.user === 'object' ? (product.user as any) : undefined;
         const firstName =
@@ -571,15 +584,81 @@ export default function ProductDetailScreen() {
             subtitle: shopName ? `Boutique: ${shopName}` : 'Contact via messagerie securisee',
         };
     }, [product?.shop, product?.user]);
-    const sellerUserId = React.useMemo(() => {
-        if (!product?.user) return '';
-        if (typeof product.user === 'string') return product.user;
+    const sellerPhone = React.useMemo(() => {
+        const shopOwner =
+            typeof product?.shop === 'object' ? (product.shop as any)?.user : null;
+        const candidates = [
+            typeof product?.user === 'object' ? (product.user as any)?.verified_phone : null,
+            typeof product?.user === 'object' ? (product.user as any)?.phone : null,
+            typeof product?.seller === 'object' ? (product.seller as any)?.verified_phone : null,
+            typeof product?.seller === 'object' ? (product.seller as any)?.phone : null,
+            typeof shopOwner === 'object' ? (shopOwner as any)?.verified_phone : null,
+            typeof shopOwner === 'object' ? (shopOwner as any)?.phone : null,
+        ];
+        const rawPhone = candidates.find(
+            (candidate) => typeof candidate === 'string' && candidate.trim().length > 0,
+        );
+        if (!rawPhone) {
+            return null;
+        }
 
-        const asObject = product.user as any;
-        if (typeof asObject._id === 'string') return asObject._id;
-        if (typeof asObject.id === 'string') return asObject.id;
-        return '';
-    }, [product?.user]);
+        try {
+            return normalizePhoneNumberForApi(rawPhone);
+        } catch {
+            return rawPhone.trim();
+        }
+    }, [product?.seller, product?.shop, product?.user]);
+    const sellerWhatsAppNumber = React.useMemo(() => {
+        if (!sellerPhone) return '';
+        return sellerPhone.replace(/\D/g, '');
+    }, [sellerPhone]);
+    const sellerUserId = React.useMemo(() => {
+        const toIdString = (value: unknown): string => {
+            if (!value) return '';
+            if (typeof value === 'string') return value.trim();
+
+            if (typeof value === 'object') {
+                const asObject = value as Record<string, any>;
+                if (typeof asObject._id === 'string') return asObject._id;
+                if (typeof asObject.id === 'string') return asObject.id;
+            }
+
+            return '';
+        };
+
+        const shopOwner =
+            product?.shop && typeof product.shop === 'object'
+                ? (product.shop as any)?.user
+                : null;
+
+        return (
+            toIdString(shopOwner) ||
+            toIdString(product?.seller) ||
+            toIdString(product?.user)
+        );
+    }, [product?.seller, product?.shop, product?.user]);
+    const requiresSellerContact = React.useMemo(() => {
+        if (!product?.category || typeof product.category !== 'object') {
+            return false;
+        }
+
+        return product.category.transactionMode === 'contact';
+    }, [product?.category]);
+    const openContactModal = React.useCallback(() => {
+        if (requireAuth('Vous devez être connecté pour contacter le vendeur')) {
+            setShowContactModal(true);
+        }
+    }, [requireAuth]);
+
+    React.useEffect(() => {
+        const shouldOpenContact = contact === '1' || contact === 'true';
+        if (!shouldOpenContact || hasOpenedContactFromRoute.current || !product) {
+            return;
+        }
+
+        hasOpenedContactFromRoute.current = true;
+        openContactModal();
+    }, [contact, openContactModal, product]);
 
     React.useEffect(() => {
         if (remainingStock === undefined) return;
@@ -590,12 +669,39 @@ export default function ProductDetailScreen() {
         });
     }, [remainingStock]);
 
+    React.useEffect(() => {
+        setIsMainImageLoading(true);
+    }, [selectedImageUri]);
+
+    React.useEffect(() => {
+        const loadingByUri: Record<string, boolean> = {};
+        productImages.forEach((image) => {
+            loadingByUri[image] = true;
+        });
+        setThumbnailLoadingByUri(loadingByUri);
+    }, [productImages]);
+
+    React.useEffect(() => {
+        if (productImages.length > 0 && selectedImageIndex >= productImages.length) {
+            setSelectedImageIndex(0);
+        }
+    }, [productImages.length, selectedImageIndex]);
+
+    const setThumbnailLoading = React.useCallback((uri: string, loading: boolean) => {
+        setThumbnailLoadingByUri((prev) => ({ ...prev, [uri]: loading }));
+    }, []);
+
     const handleAddToCart = async () => {
         if (!requireAuth('Vous devez etre connecte pour ajouter au panier')) {
             return;
         }
 
         if (!product) {
+            return;
+        }
+
+        if (requiresSellerContact) {
+            openContactModal();
             return;
         }
 
@@ -632,18 +738,72 @@ export default function ProductDetailScreen() {
         }
     };
 
-    const handleRemoveFromCart = async () => {
-        if (!requireAuth('Vous devez ??tre connect?? pour modifier le panier')) {
+    const getDefaultContactMessage = React.useCallback(() => {
+        const productName = product?.name?.trim();
+        return productName
+            ? `Bonjour, je vous contacte au sujet de votre annonce "${productName}" sur Uty.`
+            : 'Bonjour, je vous contacte au sujet de votre annonce sur Uty.';
+    }, [product?.name]);
+
+    const trackSellerContact = React.useCallback(
+        async (channel: string, content?: string, conversationId?: string) => {
+            if (!product?._id) {
+                return;
+            }
+
+            try {
+                await createContactRequest({
+                    announcementId: product._id,
+                    conversationId,
+                    message: content,
+                    source: 'product_detail',
+                    channel,
+                }).unwrap();
+            } catch (trackingError) {
+                console.warn('Unable to track seller contact request', trackingError);
+            }
+        },
+        [createContactRequest, product?._id],
+    );
+
+    const handleWhatsAppContact = async () => {
+        if (!requireAuth('Vous devez être connecté pour contacter le vendeur')) {
+            return;
+        }
+        if (!sellerWhatsAppNumber) {
+            showAlert('WhatsApp', 'Le numero du vendeur est indisponible.', 'warning');
             return;
         }
 
-        if (product) {
-            try {
-                await removeFromCart(product._id).unwrap();
-                showAlert('Info', 'Article retire du panier', 'info');
-            } catch {
-                showAlert('Erreur', 'Impossible de retirer l\'article', 'error');
-            }
+        const content = message.trim() || getDefaultContactMessage();
+        await trackSellerContact('whatsapp', content);
+
+        try {
+            await Linking.openURL(
+                `https://wa.me/${sellerWhatsAppNumber}?text=${encodeURIComponent(content)}`,
+            );
+            setShowContactModal(false);
+        } catch (error: any) {
+            showAlert('WhatsApp', parseError(error, "Impossible d'ouvrir WhatsApp."), 'error');
+        }
+    };
+
+    const handlePhoneContact = async () => {
+        if (!requireAuth('Vous devez être connecté pour contacter le vendeur')) {
+            return;
+        }
+        if (!sellerPhone) {
+            showAlert('Appel', 'Le numero du vendeur est indisponible.', 'warning');
+            return;
+        }
+
+        await trackSellerContact('phone_call', getDefaultContactMessage());
+
+        try {
+            await Linking.openURL(`tel:${sellerPhone}`);
+            setShowContactModal(false);
+        } catch (error: any) {
+            showAlert('Appel', parseError(error, "Impossible de lancer l'appel."), 'error');
         }
     };
 
@@ -655,6 +815,11 @@ export default function ProductDetailScreen() {
         const content = message.trim();
         if (!content) {
             showAlert('Erreur', 'Veuillez entrer un message', 'warning');
+            return;
+        }
+
+        if (!product?._id) {
+            showAlert('Erreur', 'Annonce introuvable.', 'error');
             return;
         }
 
@@ -677,6 +842,9 @@ export default function ProductDetailScreen() {
                 conversationId: conversation.id,
                 data: { content },
             }).unwrap();
+
+            await trackSellerContact('in_app_message', content, conversation.id);
+            await cacheDirectOrderProduct(conversation.id, product);
 
             setShowContactModal(false);
             setMessage('');
@@ -834,11 +1002,21 @@ export default function ProductDetailScreen() {
                         activeOpacity={0.9}
                         onPress={() => setShowImageModal(true)}
                     >
-                        <Image
-                            source={{ uri: product.images?.[selectedImageIndex] || 'https://via.placeholder.com/400' }}
-                            style={styles.mainImage}
-                            resizeMode="cover"
-                        />
+                        <View style={styles.mainImageWrap}>
+                            <Image
+                                source={{ uri: selectedImageUri }}
+                                style={styles.mainImage}
+                                resizeMode="cover"
+                                onLoadStart={() => setIsMainImageLoading(true)}
+                                onLoadEnd={() => setIsMainImageLoading(false)}
+                            />
+                            {isMainImageLoading && (
+                                <View style={styles.imageLoadingOverlay}>
+                                    <ActivityIndicator color={Colors.primary} size="small" />
+                                    <Text style={styles.imageLoadingText}>Chargement de l&apos;image...</Text>
+                                </View>
+                            )}
+                        </View>
                     </TouchableOpacity>
                     
                     {/* Indicateur de galerie */}
@@ -848,6 +1026,13 @@ export default function ProductDetailScreen() {
                             <Text style={styles.imageCounterText}>
                                 {selectedImageIndex + 1}/{product.images.length}
                             </Text>
+                        </View>
+                    )}
+
+                    {isOutOfStock && (
+                        <View style={styles.outOfStockBadge}>
+                            <Ionicons name="alert-circle" size={16} color={Colors.white} />
+                            <Text style={styles.outOfStockText}>Rupture de stock</Text>
                         </View>
                     )}
 
@@ -868,10 +1053,19 @@ export default function ProductDetailScreen() {
                                         selectedImageIndex === index && styles.thumbnailActive
                                     ]}
                                 >
-                                    <Image
-                                        source={{ uri: image }}
-                                        style={styles.thumbnailImage}
-                                    />
+                                    <View style={styles.thumbnailImageWrap}>
+                                        <Image
+                                            source={{ uri: image }}
+                                            style={styles.thumbnailImage}
+                                            onLoadStart={() => setThumbnailLoading(image, true)}
+                                            onLoadEnd={() => setThumbnailLoading(image, false)}
+                                        />
+                                        {thumbnailLoadingByUri[image] !== false && (
+                                            <View style={styles.thumbnailLoadingOverlay}>
+                                                <ActivityIndicator color={Colors.primary} size="small" />
+                                            </View>
+                                        )}
+                                    </View>
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
@@ -886,7 +1080,14 @@ export default function ProductDetailScreen() {
                             <Text style={styles.productName}>{product.name}</Text>
                         </View>
                         <View style={styles.priceRow}>
-                            <Text style={styles.price}>{formatCurrencyAmount(product.price, product.currency)}</Text>
+                            <Text
+                                style={styles.price}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit
+                                minimumFontScale={0.6}
+                            >
+                                {formatCurrencyAmount(product.price, product.currency)}
+                            </Text>
                             <View style={styles.ratingContainer}>
                                 <Ionicons name="star" size={18} color={Colors.accent} />
                                 <Text style={styles.ratingText}>
@@ -1023,11 +1224,7 @@ export default function ProductDetailScreen() {
                             </View>
                             <TouchableOpacity
                                 style={styles.contactSellerButton}
-                                onPress={() => {
-                                    if (requireAuth('Vous devez être connecté pour contacter le vendeur')) {
-                                        setShowContactModal(true);
-                                    }
-                                }}
+                                onPress={openContactModal}
                             >
                                 <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
                             </TouchableOpacity>
@@ -1138,15 +1335,41 @@ export default function ProductDetailScreen() {
             <View style={styles.bottomBar}>
                 <SafeAreaView edges={['bottom']} style={styles.bottomBarContent}>
                     <View style={styles.bottomBarInfoRow}>
-                        <Text style={styles.bottomBarLabel}>Dans le panier</Text>
-                        <Text style={styles.bottomBarValue}>{inCartQuantity} article(s)</Text>
+                        <Text style={styles.bottomBarLabel}>
+                            {requiresSellerContact ? 'Transaction' : 'Dans le panier'}
+                        </Text>
+                        <Text style={styles.bottomBarValue}>
+                            {requiresSellerContact ? 'Contact vendeur requis' : `${inCartQuantity} article(s)`}
+                        </Text>
                         <Text style={styles.bottomBarState}>
-                            {inCartQuantity > 0 ? 'Deja au panier' : hasStockLeft ? 'Pret pour ajout' : 'Stock atteint'}
+                            {requiresSellerContact
+                                ? 'Messagerie'
+                                : inCartQuantity > 0
+                                    ? 'Deja au panier'
+                                    : hasStockLeft
+                                        ? 'Pret pour ajout'
+                                        : 'Stock atteint'}
                         </Text>
                     </View>
 
                     <View style={styles.bottomBarButtons}>
-                        {inCartQuantity > 0 ? (
+                        {requiresSellerContact ? (
+                            <TouchableOpacity
+                                style={styles.addToCartButton}
+                                onPress={openContactModal}
+                                activeOpacity={0.8}
+                            >
+                                <LinearGradient
+                                    colors={Gradients.primary}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={styles.viewCartGradient}
+                                >
+                                    <Ionicons name="chatbubble-ellipses-outline" size={20} color={Colors.white} />
+                                    <Text style={styles.viewCartText}>Contacter le vendeur</Text>
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        ) : inCartQuantity > 0 ? (
                             <TouchableOpacity
                                 style={styles.addToCartButton}
                                 onPress={() => router.push('/(tabs)/cart')}
@@ -1262,6 +1485,62 @@ export default function ProductDetailScreen() {
                                     onPress={() => setShowContactModal(false)}
                                 >
                                     <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                                </TouchableOpacity>
+                            </View>
+
+                            <View style={styles.contactOptions}>
+                                <TouchableOpacity
+                                    style={styles.contactOption}
+                                    onPress={() => setMessage((current) => current || getDefaultContactMessage())}
+                                    activeOpacity={0.85}
+                                >
+                                    <View style={styles.contactOptionIcon}>
+                                        <Ionicons name="chatbubble-ellipses-outline" size={20} color={Colors.primary} />
+                                    </View>
+                                    <View style={styles.contactOptionTextWrap}>
+                                        <Text style={styles.contactOptionTitle}>Messagerie Uty</Text>
+                                        <Text style={styles.contactOptionSubtitle}>Envoyer un message dans l&apos;app.</Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.contactOption,
+                                        !sellerWhatsAppNumber && styles.contactOptionDisabled,
+                                    ]}
+                                    onPress={() => void handleWhatsAppContact()}
+                                    disabled={!sellerWhatsAppNumber || isCreatingContactRequest}
+                                    activeOpacity={0.85}
+                                >
+                                    <View style={[styles.contactOptionIcon, styles.whatsAppOptionIcon]}>
+                                        <Ionicons name="logo-whatsapp" size={20} color={Colors.white} />
+                                    </View>
+                                    <View style={styles.contactOptionTextWrap}>
+                                        <Text style={styles.contactOptionTitle}>WhatsApp</Text>
+                                        <Text style={styles.contactOptionSubtitle}>
+                                            {sellerPhone ? sellerPhone : 'Numero vendeur indisponible'}
+                                        </Text>
+                                    </View>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                    style={[
+                                        styles.contactOption,
+                                        !sellerPhone && styles.contactOptionDisabled,
+                                    ]}
+                                    onPress={() => void handlePhoneContact()}
+                                    disabled={!sellerPhone || isCreatingContactRequest}
+                                    activeOpacity={0.85}
+                                >
+                                    <View style={styles.contactOptionIcon}>
+                                        <Ionicons name="call-outline" size={20} color={Colors.primary} />
+                                    </View>
+                                    <View style={styles.contactOptionTextWrap}>
+                                        <Text style={styles.contactOptionTitle}>Appel telephonique</Text>
+                                        <Text style={styles.contactOptionSubtitle}>
+                                            {sellerPhone ? sellerPhone : 'Numero vendeur indisponible'}
+                                        </Text>
+                                    </View>
                                 </TouchableOpacity>
                             </View>
                             
@@ -1460,10 +1739,33 @@ const styles = StyleSheet.create({
     },
     imageContainer: {
         backgroundColor: Colors.white,
+        position: 'relative',
     },
-    mainImage: {
+    mainImageWrap: {
         width: SCREEN_WIDTH,
         height: SCREEN_WIDTH,
+        backgroundColor: Colors.gray100,
+    },
+    mainImage: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: Colors.gray100,
+    },
+    imageLoadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        backgroundColor: Colors.gray100,
+    },
+    imageLoadingText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
     },
     imageCounter: {
         position: 'absolute',
@@ -1481,6 +1783,24 @@ const styles = StyleSheet.create({
         color: Colors.white,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
+    },
+    outOfStockBadge: {
+        position: 'absolute',
+        bottom: Spacing.lg,
+        left: Spacing.lg,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        backgroundColor: Colors.error,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        borderRadius: BorderRadius.full,
+        ...Shadows.md,
+    },
+    outOfStockText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     thumbnailsContainer: {
         backgroundColor: Colors.white,
@@ -1506,6 +1826,23 @@ const styles = StyleSheet.create({
     thumbnailImage: {
         width: '100%',
         height: '100%',
+        backgroundColor: Colors.gray100,
+    },
+    thumbnailImageWrap: {
+        width: '100%',
+        height: '100%',
+        position: 'relative',
+        backgroundColor: Colors.gray100,
+    },
+    thumbnailLoadingOverlay: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.gray100,
     },
     contentContainer: {
         padding: Spacing.xl,
@@ -1524,10 +1861,14 @@ const styles = StyleSheet.create({
     },
     priceRow: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
     },
     price: {
+        flex: 1,
+        minWidth: 0,
         fontSize: Typography.fontSize.xxxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.accent,
@@ -2182,6 +2523,48 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
+    },
+    contactOptions: {
+        gap: Spacing.sm,
+        marginBottom: Spacing.lg,
+    },
+    contactOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        paddingVertical: Spacing.md,
+        paddingHorizontal: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
+    },
+    contactOptionDisabled: {
+        opacity: 0.45,
+    },
+    contactOptionIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '12',
+    },
+    whatsAppOptionIcon: {
+        backgroundColor: '#25D366',
+    },
+    contactOptionTextWrap: {
+        flex: 1,
+    },
+    contactOptionTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    contactOptionSubtitle: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        marginTop: 2,
     },
     messageInput: {
         backgroundColor: Colors.gray50,

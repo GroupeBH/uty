@@ -6,9 +6,14 @@ import { BottomActionBar } from '@/components/ui/BottomActionBar';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { useAuth } from '@/hooks/useAuth';
-import { useGetProfileQuery } from '@/store/api/authApi';
+import { useGetProfileQuery, useUpdateProfileMutation } from '@/store/api/authApi';
+import { useAppDispatch } from '@/store/hooks';
+import { setUser } from '@/store/slices/authSlice';
+import { getImageMimeType } from '@/utils/imageUtils';
+import { storage } from '@/utils/storage';
 import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
@@ -29,8 +34,10 @@ import * as ImagePicker from 'expo-image-picker';
 
 export default function EditProfileScreen() {
     const router = useRouter();
+    const dispatch = useAppDispatch();
     const { user } = useAuth();
     const { data: profile, isLoading } = useGetProfileQuery();
+    const [updateProfile] = useUpdateProfileMutation();
     const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [formData, setFormData] = useState({
@@ -78,21 +85,72 @@ export default function EditProfileScreen() {
         }
     };
 
+    const parseApiErrorMessage = (error: any, fallback: string) => {
+        if (!error) return fallback;
+        if (typeof error === 'string') return error;
+        const data = error?.data;
+        if (typeof data === 'string') return data;
+        if (Array.isArray(data?.message) && data.message.length > 0) return String(data.message[0]);
+        if (typeof data?.message === 'string') return data.message;
+        if (typeof data?.error === 'string') return data.error;
+        if (typeof error?.message === 'string') return error.message;
+        return fallback;
+    };
+
+    const buildProfileImagePayload = async () => {
+        const selectedImage = image?.trim();
+        if (!selectedImage) {
+            return undefined;
+        }
+
+        if (/^https?:\/\//i.test(selectedImage) || selectedImage.startsWith('data:')) {
+            return selectedImage;
+        }
+
+        const base64 = await FileSystem.readAsStringAsync(selectedImage, {
+            encoding: 'base64',
+        });
+        if (!base64) {
+            throw new Error("Impossible de lire l'image selectionnee.");
+        }
+
+        return `data:${getImageMimeType(selectedImage)};base64,${base64}`;
+    };
+
     const handleSave = async () => {
-        if (!formData.firstName.trim() || !formData.lastName.trim()) {
-            showStyledAlert('Erreur', 'Le prénom et le nom sont obligatoires');
+        const firstName = formData.firstName.trim();
+        const lastName = formData.lastName.trim();
+        const username = formData.username.trim();
+        const email = formData.email.trim();
+
+        if (!firstName || !lastName) {
+            showStyledAlert('Erreur', 'Le prenom et le nom sont obligatoires');
             return;
         }
 
         setIsSaving(true);
         try {
-            // TODO: Implémenter l'API de mise à jour du profil
-            // await updateProfile({ ...formData, image }).unwrap();
-            showStyledAlert('Succès', 'Profil mis à jour avec succès', [
+            const imagePayload = await buildProfileImagePayload();
+            const updatedUser = await updateProfile({
+                firstName,
+                lastName,
+                ...(username ? { username } : {}),
+                email,
+                ...(imagePayload ? { image: imagePayload } : {}),
+            }).unwrap();
+
+            dispatch(setUser(updatedUser));
+            await storage.setUser(updatedUser);
+            setImage(updatedUser.image || null);
+
+            showStyledAlert('Succes', 'Profil mis a jour avec succes', [
                 { text: 'OK', onPress: () => router.back() },
             ]);
         } catch (error: any) {
-            showStyledAlert('Erreur', error?.data?.message || 'Impossible de mettre à jour le profil');
+            showStyledAlert(
+                'Erreur',
+                parseApiErrorMessage(error, 'Impossible de mettre a jour le profil'),
+            );
         } finally {
             setIsSaving(false);
         }
