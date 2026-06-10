@@ -95,6 +95,32 @@ const formatSince = (value?: string): string => {
     return `Recu il y a ${Math.floor(diff / 60)} h`;
 };
 
+const formatPointLabel = (
+    value: unknown,
+    coordinates?: DeliveryGeoPoint | null,
+    fallback = 'Adresse indisponible',
+): string => {
+    if (typeof value === 'string' && value.trim()) {
+        return value.trim();
+    }
+    if (value && typeof value === 'object') {
+        const asRecord = value as Record<string, unknown>;
+        const label =
+            (typeof asRecord.label === 'string' && asRecord.label.trim()) ||
+            (typeof asRecord.address === 'string' && asRecord.address.trim()) ||
+            (typeof asRecord.formattedAddress === 'string' && asRecord.formattedAddress.trim()) ||
+            '';
+        if (label) return label;
+    }
+
+    const parsed = parseGeoPoint(coordinates);
+    if (parsed) {
+        return `${parsed.latitude.toFixed(5)}, ${parsed.longitude.toFixed(5)}`;
+    }
+
+    return fallback;
+};
+
 const STEPS: { key: DeliveryStatusValue; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
     { key: 'pending', label: 'Attente', icon: 'time-outline' },
     { key: 'assigned', label: 'Assigne', icon: 'person-add-outline' },
@@ -220,6 +246,30 @@ export default function SellerDeliveryDetailScreen() {
         parseCoordinateString(tracking?.deliveryLocation || delivery?.deliveryLocation);
     const driverPoint = parseGeoPoint((tracking?.currentLocation || delivery?.currentLocation) as DeliveryGeoPoint | null | undefined);
     const mapCenter = driverPoint || pickupPoint || dropoffPoint || DEFAULT_MAP_CENTER;
+    const pickupLabel = formatPointLabel(
+        (tracking as any)?.pickupLocationLabel || (delivery as any)?.pickupLocationLabel || tracking?.pickupLocation || delivery?.pickupLocation,
+        (tracking?.pickupCoordinates || delivery?.pickupCoordinates) as DeliveryGeoPoint | null | undefined,
+        'Point de retrait',
+    );
+    const dropoffLabel = formatPointLabel(
+        (tracking as any)?.deliveryLocationLabel || (delivery as any)?.deliveryLocationLabel || tracking?.deliveryLocation || delivery?.deliveryLocation,
+        (tracking?.deliveryCoordinates || delivery?.deliveryCoordinates) as DeliveryGeoPoint | null | undefined,
+        'Destination client',
+    );
+    const isHeadingToPickup = ['pending', 'assigned', 'at_pickup'].includes(status);
+    const mapFocusLabel = isHeadingToPickup ? pickupLabel : dropoffLabel;
+    const mapLead =
+        status === 'pending'
+            ? 'Recherche livreur'
+            : isHeadingToPickup
+                ? 'Cap sur le retrait'
+                : 'Cap sur le client';
+    const mapInstruction =
+        status === 'pending'
+            ? 'La course est publiee aux livreurs disponibles.'
+            : isHeadingToPickup
+                ? 'Le livreur se dirige vers le point de retrait.'
+                : 'Le colis est en route vers le client.';
 
     const driverObj =
         delivery?.deliveryPersonId && typeof delivery.deliveryPersonId === 'object'
@@ -359,6 +409,67 @@ export default function SellerDeliveryDetailScreen() {
             </LinearGradient>
 
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                {/* Tracking map */}
+                <View style={styles.mapCard}>
+                    <MapView
+                        style={styles.map}
+                        {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
+                        initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }}
+                    >
+                        {pickupPoint ? (
+                            <Marker coordinate={pickupPoint} title="Point de retrait">
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: UI.accent }]}>
+                                    <Ionicons name="storefront" size={15} color={Colors.white} />
+                                </View>
+                            </Marker>
+                        ) : null}
+                        {dropoffPoint ? (
+                            <Marker coordinate={dropoffPoint} title="Point de livraison">
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.info }]}>
+                                    <Ionicons name="location" size={16} color={Colors.white} />
+                                </View>
+                            </Marker>
+                        ) : null}
+                        {driverPoint ? (
+                            <Marker coordinate={driverPoint} title="Position livreur">
+                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.warning }]}>
+                                    <Ionicons name="bicycle" size={15} color={Colors.white} />
+                                </View>
+                            </Marker>
+                        ) : null}
+                        {pickupPoint && dropoffPoint ? (
+                            <>
+                                <Polyline coordinates={[pickupPoint, dropoffPoint]} strokeWidth={8} strokeColor={Colors.white + 'D9'} />
+                                <Polyline coordinates={[pickupPoint, dropoffPoint]} strokeWidth={4} strokeColor={Colors.primary} />
+                            </>
+                        ) : null}
+                    </MapView>
+                    <LinearGradient
+                        colors={[Colors.primaryDark + 'D9', Colors.primaryDark + '08']}
+                        style={styles.mapTopFade}
+                        pointerEvents="none"
+                    />
+                    <View style={styles.mapOverlayTop}>
+                        <View style={styles.mapModeChip}>
+                            <Ionicons name="navigate" size={14} color={Colors.white} />
+                            <Text style={styles.mapModeChipText}>{mapLead}</Text>
+                        </View>
+                        <TouchableOpacity style={styles.mapRefreshButton} onPress={onRefreshAll}>
+                            <Ionicons name="refresh" size={18} color={Colors.white} />
+                        </TouchableOpacity>
+                    </View>
+                    <View style={styles.mapGuidanceCard}>
+                        <View style={styles.mapGuidanceIcon}>
+                            <Ionicons name={isHeadingToPickup ? 'storefront-outline' : 'flag-outline'} size={18} color={Colors.white} />
+                        </View>
+                        <View style={styles.mapGuidanceCopy}>
+                            <Text style={styles.mapGuidanceLead}>{businessStatusLabel}</Text>
+                            <Text style={styles.mapGuidanceInstruction}>{mapInstruction}</Text>
+                            <Text style={styles.mapGuidanceSub} numberOfLines={1}>{mapFocusLabel}</Text>
+                        </View>
+                    </View>
+                </View>
+
                 {/* Stepper */}
                 <View style={styles.stepperCard}>
                     <View style={styles.stepperHeader}>
@@ -401,7 +512,7 @@ export default function SellerDeliveryDetailScreen() {
                     </View>
                     <View style={styles.stepperMeta}>
                         <Text style={styles.stepperMetaText}>
-                            Retrait vendeur: {sellerPickupConfirmed ? '✓ confirme' : '⏳ en attente'}
+                            Retrait vendeur: {sellerPickupConfirmed ? 'confirme' : 'en attente'}
                         </Text>
                         <Text style={styles.stepperMetaText}>
                             {packedCount}/{Math.max(items.length, 1)} prepares
@@ -435,38 +546,6 @@ export default function SellerDeliveryDetailScreen() {
                             <Text style={styles.contactBtnText}>Acheteur</Text>
                         </TouchableOpacity>
                     </View>
-                </View>
-
-                {/* Map */}
-                <View style={styles.mapCard}>
-                    <MapView
-                        style={styles.map}
-                        {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
-                        initialRegion={{ latitude: mapCenter.latitude, longitude: mapCenter.longitude, latitudeDelta: 0.04, longitudeDelta: 0.04 }}
-                    >
-                        {pickupPoint ? (
-                            <Marker coordinate={pickupPoint} title="Point de retrait">
-                                <View style={[styles.mapMarkerBadge, { backgroundColor: UI.accent }]}>
-                                    <Ionicons name="storefront" size={15} color={Colors.white} />
-                                </View>
-                            </Marker>
-                        ) : null}
-                        {dropoffPoint ? (
-                            <Marker coordinate={dropoffPoint} title="Point de livraison">
-                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.info }]}>
-                                    <Ionicons name="location" size={16} color={Colors.white} />
-                                </View>
-                            </Marker>
-                        ) : null}
-                        {driverPoint ? (
-                            <Marker coordinate={driverPoint} title="Position livreur">
-                                <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.warning }]}>
-                                    <Ionicons name="bicycle" size={15} color={Colors.white} />
-                                </View>
-                            </Marker>
-                        ) : null}
-                        {pickupPoint && dropoffPoint ? <Polyline coordinates={[pickupPoint, dropoffPoint]} strokeWidth={3} strokeColor={UI.accent + 'C0'} /> : null}
-                    </MapView>
                 </View>
 
                 {/* Pickup Code Card */}
@@ -879,7 +958,7 @@ const styles = StyleSheet.create({
 
     // Map
     mapCard: {
-        height: 220,
+        height: 330,
         borderRadius: BorderRadius.xl,
         overflow: 'hidden',
         borderWidth: 1,
@@ -889,6 +968,99 @@ const styles = StyleSheet.create({
     map: {
         width: '100%',
         height: '100%',
+    },
+    mapTopFade: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        height: 150,
+    },
+    mapOverlayTop: {
+        position: 'absolute',
+        left: Spacing.md,
+        right: Spacing.md,
+        top: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    mapModeChip: {
+        height: 36,
+        borderRadius: BorderRadius.full,
+        paddingHorizontal: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        borderWidth: 1,
+        borderColor: Colors.white + '3A',
+        backgroundColor: Colors.primaryDark + 'CC',
+    },
+    mapModeChipText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.2,
+    },
+    mapRefreshButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.white + '3C',
+        backgroundColor: Colors.primaryDark + '99',
+        ...Shadows.md,
+    },
+    mapGuidanceCard: {
+        position: 'absolute',
+        left: Spacing.md,
+        right: Spacing.md,
+        bottom: Spacing.md,
+        minHeight: 98,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.sm,
+        borderWidth: 1,
+        borderColor: Colors.white + '2F',
+        backgroundColor: Colors.primaryDark + 'E8',
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        ...Shadows.lg,
+    },
+    mapGuidanceIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 1,
+    },
+    mapGuidanceCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    mapGuidanceLead: {
+        color: Colors.accent,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.3,
+        textTransform: 'uppercase',
+    },
+    mapGuidanceInstruction: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        lineHeight: 20,
+    },
+    mapGuidanceSub: {
+        marginTop: 4,
+        color: Colors.white + 'C5',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     mapMarkerBadge: {
         width: 34,

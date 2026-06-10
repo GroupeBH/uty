@@ -2,6 +2,11 @@ import { CustomAlert } from '@/components/ui/CustomAlert';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { MapPickerModal } from '@/components/MapPickerModal';
+import { OrderProgressTimeline, getOrderProgressMeta } from '@/components/orders/OrderProgressTimeline';
+import {
+    RequestDeliveryFormValues,
+    RequestDeliveryModal,
+} from '@/components/orders/RequestDeliveryModal';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetOrderQuery, useRequestDeliveryMutation, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
@@ -21,6 +26,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
     Image,
+    Linking,
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
@@ -85,6 +92,35 @@ const formatGeoPointLabel = (value?: { coordinates?: number[] } | null): string 
     return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 };
 
+const getOrderPartyPhone = (party: unknown): string | null => {
+    if (!party || typeof party !== 'object') return null;
+    const phone = (party as { phone?: string }).phone?.trim();
+    return phone || null;
+};
+
+const getOrderPartyEmail = (party: unknown): string | null => {
+    if (!party || typeof party !== 'object') return null;
+    const email = (party as { email?: string }).email?.trim();
+    return email || null;
+};
+
+const getOrderPartyUsername = (party: unknown): string | null => {
+    if (!party || typeof party !== 'object') return null;
+    const username = (party as { username?: string }).username?.trim();
+    return username || null;
+};
+
+const normalizePhoneUrl = (phone: string) => phone.replace(/[^\d+]/g, '');
+
+const INITIAL_DELIVERY_REQUEST_FORM: RequestDeliveryFormValues = {
+    pickupLocation: '',
+    deliveryLocation: '',
+    scheduledPickupAt: '',
+    scheduledDeliveryAt: '',
+    comment: '',
+    deliveryMode: 'auto',
+};
+
 export default function OrderDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const router = useRouter();
@@ -99,6 +135,13 @@ export default function OrderDetailScreen() {
     const [pickupLocationInput, setPickupLocationInput] = React.useState('');
     const [deliveryLocationInput, setDeliveryLocationInput] = React.useState('');
     const [mapPickerField, setMapPickerField] = React.useState<'pickup' | 'delivery' | null>(null);
+    const [deliveryRequestModalVisible, setDeliveryRequestModalVisible] = React.useState(false);
+    const [profileModalVisible, setProfileModalVisible] = React.useState(false);
+    const [routeModalVisible, setRouteModalVisible] = React.useState(false);
+    const [itemsModalVisible, setItemsModalVisible] = React.useState(false);
+    const [deliveryRequestForm, setDeliveryRequestForm] = React.useState<RequestDeliveryFormValues>(
+        INITIAL_DELIVERY_REQUEST_FORM,
+    );
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
         title: string;
@@ -180,7 +223,12 @@ export default function OrderDetailScreen() {
     React.useEffect(() => {
         if (!order) return;
         if (!deliveryLocationInput.trim() && order.deliveryAddress?.trim()) {
-            setDeliveryLocationInput(order.deliveryAddress.trim());
+            const deliveryAddress = order.deliveryAddress.trim();
+            setDeliveryLocationInput(deliveryAddress);
+            setDeliveryRequestForm((prev) => ({
+                ...prev,
+                deliveryLocation: prev.deliveryLocation || deliveryAddress,
+            }));
         }
     }, [deliveryLocationInput, order]);
 
@@ -217,6 +265,35 @@ export default function OrderDetailScreen() {
             });
         },
         [],
+    );
+
+    const callParty = React.useCallback(
+        async (phone: string | null, label: string) => {
+            if (!phone) {
+                showAlert({
+                    title: 'Contact indisponible',
+                    message: `Aucun numero ${label} disponible pour cette commande.`,
+                    type: 'warning',
+                });
+                return;
+            }
+
+            const url = `tel:${normalizePhoneUrl(phone)}`;
+            try {
+                const canOpen = await Linking.canOpenURL(url);
+                if (!canOpen) {
+                    throw new Error('tel unsupported');
+                }
+                await Linking.openURL(url);
+            } catch {
+                showAlert({
+                    title: 'Appel impossible',
+                    message: `Impossible d'appeler le ${label}.`,
+                    type: 'error',
+                });
+            }
+        },
+        [showAlert],
     );
 
     const changeStatus = async (nextStatus: OrderStatusValue) => {
@@ -269,7 +346,19 @@ export default function OrderDetailScreen() {
                             onConfirm:
                                 isOrderConfirmed && !deliveryId
                                     ? () => {
-                                          void onRequestDelivery();
+                                          setDeliveryRequestForm((prev) => ({
+                                              ...prev,
+                                              pickupLocation:
+                                                  prev.pickupLocation ||
+                                                  pickupLocationInput.trim() ||
+                                                  formatGeoPointLabel((order as any)?.pickupLocation),
+                                              deliveryLocation:
+                                                  prev.deliveryLocation ||
+                                                  deliveryLocationInput.trim() ||
+                                                  order.deliveryAddress?.trim() ||
+                                                  formatGeoPointLabel(order.deliveryLocation),
+                                          }));
+                                          setDeliveryRequestModalVisible(true);
                                       }
                                     : undefined,
                         });
@@ -295,16 +384,33 @@ export default function OrderDetailScreen() {
         if (!order?._id) return;
 
         try {
+            const form = deliveryRequestForm;
+            const pickupLocation =
+                form.pickupLocation.trim() ||
+                pickupLocationInput.trim() ||
+                formatGeoPointLabel((order as any)?.pickupLocation);
+            const deliveryLocation =
+                form.deliveryLocation.trim() ||
+                deliveryLocationInput.trim() ||
+                order.deliveryAddress?.trim() ||
+                formatGeoPointLabel(order.deliveryLocation);
             const payload = {
-                pickupLocation: pickupLocationInput.trim() || undefined,
-                deliveryLocation: deliveryLocationInput.trim() || undefined,
+                pickupLocation: pickupLocation || undefined,
+                deliveryLocation: deliveryLocation || undefined,
+                scheduledPickupAt: form.scheduledPickupAt.trim() || undefined,
+                scheduledDeliveryAt: form.scheduledDeliveryAt.trim() || undefined,
+                comment: form.comment.trim() || undefined,
+                deliveryMode: form.deliveryMode !== 'auto' ? form.deliveryMode : undefined,
             };
+            setPickupLocationInput(pickupLocation);
+            setDeliveryLocationInput(deliveryLocation);
             const createdDelivery = await requestDelivery({ id: order._id, data: payload }).unwrap();
             const createdDeliveryId = (createdDelivery as any)?._id?.toString?.() || (createdDelivery as any)?._id;
 
             if (createdDeliveryId) {
                 setDeliveryId(String(createdDeliveryId));
                 setShowDeliveryIdInput(false);
+                setDeliveryRequestModalVisible(false);
                 await deliveryStorage.setDeliveryIdForOrder(order._id, String(createdDeliveryId));
             }
             await refetch();
@@ -360,8 +466,16 @@ export default function OrderDetailScreen() {
                 `${location.latitude.toFixed(6)},${location.longitude.toFixed(6)}`;
             if (mapPickerField === 'pickup') {
                 setPickupLocationInput(formattedLocation);
+                setDeliveryRequestForm((prev) => ({
+                    ...prev,
+                    pickupLocation: formattedLocation,
+                }));
             } else if (mapPickerField === 'delivery') {
                 setDeliveryLocationInput(formattedLocation);
+                setDeliveryRequestForm((prev) => ({
+                    ...prev,
+                    deliveryLocation: formattedLocation,
+                }));
             }
             setMapPickerField(null);
         },
@@ -388,6 +502,7 @@ export default function OrderDetailScreen() {
     const orderCurrency = order.items
         .map((item) => getOrderItemProduct(item)?.currency)
         .find(Boolean);
+    const progressMeta = getOrderProgressMeta(order.status);
     const showSellerActionsDock = isSeller;
     const canRequestDeliveryNow = isSeller && order.status === 'confirmed' && !deliveryId;
     const canTrackDeliveryNow = isSeller && Boolean(deliveryId);
@@ -411,10 +526,77 @@ export default function OrderDetailScreen() {
     const deliveryPanelHint = deliveryId
         ? `Course #${deliveryId.slice(-8).toUpperCase()} liee a cette commande.`
         : canRequestDeliveryNow
-            ? 'Verifiez les points, puis envoyez la demande aux livreurs disponibles.'
+            ? 'Choisissez le mode, les horaires et les consignes avant d envoyer la demande.'
             : order.status === 'pending'
                 ? 'Confirmez la commande pour debloquer la demande de livraison.'
                 : 'La demande de livraison n est plus disponible pour ce statut.';
+    const visibleParties = isSeller
+        ? [
+              {
+                  key: 'buyer',
+                  label: 'Acheteur',
+                  name: getOrderPartyName(order.userId, 'Client inconnu'),
+                  phone: getOrderPartyPhone(order.userId),
+                  email: getOrderPartyEmail(order.userId),
+                  username: getOrderPartyUsername(order.userId),
+                  icon: 'person-outline' as const,
+                  callLabel: 'client',
+              },
+          ]
+        : isBuyer
+            ? [
+                  {
+                      key: 'seller',
+                      label: 'Vendeur',
+                      name: getOrderPartyName(order.sellerId, 'Vendeur inconnu'),
+                      phone: getOrderPartyPhone(order.sellerId),
+                      email: getOrderPartyEmail(order.sellerId),
+                      username: getOrderPartyUsername(order.sellerId),
+                      icon: 'storefront-outline' as const,
+                      callLabel: 'vendeur',
+                  },
+              ]
+            : [
+                  {
+                      key: 'buyer',
+                      label: 'Acheteur',
+                      name: getOrderPartyName(order.userId, 'Client inconnu'),
+                      phone: getOrderPartyPhone(order.userId),
+                      email: getOrderPartyEmail(order.userId),
+                      username: getOrderPartyUsername(order.userId),
+                      icon: 'person-outline' as const,
+                      callLabel: 'client',
+                  },
+                  {
+                      key: 'seller',
+                      label: 'Vendeur',
+                      name: getOrderPartyName(order.sellerId, 'Vendeur inconnu'),
+                      phone: getOrderPartyPhone(order.sellerId),
+                      email: getOrderPartyEmail(order.sellerId),
+                      username: getOrderPartyUsername(order.sellerId),
+                      icon: 'storefront-outline' as const,
+                      callLabel: 'vendeur',
+                  },
+              ];
+    const primaryParty = visibleParties[0];
+    const primaryPartyContact =
+        primaryParty?.username
+            ? `@${primaryParty.username}`
+            : primaryParty?.email || primaryParty?.phone || 'Profil public';
+    const primaryPartyPhone = primaryParty?.phone || null;
+    const primaryPartyCallLabel = primaryParty?.callLabel || 'contact';
+    const firstItem = order.items[0];
+    const firstItemImage = firstItem ? getOrderItemImage(firstItem) : undefined;
+    const firstItemName = firstItem ? getOrderItemName(firstItem) : 'Articles de la commande';
+    const itemSummaryText = `${itemCount} article${itemCount > 1 ? 's' : ''}`;
+    const openDeliveryRequestModal = () => {
+        setDeliveryRequestForm((prev) => ({
+            ...prev,
+            pickupLocation: prev.pickupLocation || pickupLocationLabel,
+            deliveryLocation: prev.deliveryLocation || deliveryLocationLabel,
+        }));
+        setDeliveryRequestModalVisible(true);
+    };
     const sellerDockBottomInset = Math.max(insets.bottom, Spacing.sm);
     const sellerDockEstimatedHeight = hasSellerStatusActions
         ? 176
@@ -426,6 +608,7 @@ export default function OrderDetailScreen() {
     const contentBottomPadding = showSellerActionsDock
         ? sellerDockEstimatedHeight + sellerDockBottomInset + Spacing.lg
         : Spacing.xxxl;
+    const modalBottomPadding = Math.max(insets.bottom, Spacing.lg);
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -444,86 +627,112 @@ export default function OrderDetailScreen() {
                 style={styles.scroll}
                 contentContainerStyle={[styles.content, { paddingBottom: contentBottomPadding }]}
             >
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Resume</Text>
-                    <View style={styles.rowBetween}>
-                        <Text style={styles.mutedText}>Articles</Text>
-                        <Text style={styles.valueText}>{itemCount}</Text>
+                <View style={[styles.trackingHero, { backgroundColor: progressMeta.accentBackground }]}>
+                    <View style={styles.trackingHeroTop}>
+                        <View style={[styles.trackingHeroIcon, { backgroundColor: progressMeta.color + '18' }]}>
+                            <Ionicons
+                                name={order.status === 'delivered' ? 'checkmark-done-outline' : 'navigate-outline'}
+                                size={24}
+                                color={progressMeta.color}
+                            />
+                        </View>
+                        <View style={styles.trackingHeroCopy}>
+                            <Text style={styles.trackingHeroEyebrow}>Suivi commande</Text>
+                            <Text style={styles.trackingHeroTitle}>{progressMeta.headline}</Text>
+                            <Text style={styles.trackingHeroText}>{progressMeta.helper}</Text>
+                        </View>
+                        <Text style={styles.trackingHeroPercent}>{progressMeta.progressPercent}%</Text>
                     </View>
-                    <View style={styles.rowBetween}>
-                        <Text style={styles.mutedText}>Total</Text>
-                        <Text style={styles.totalText}>{formatAmount(order.totalAmount, orderCurrency)}</Text>
-                    </View>
+                    <OrderProgressTimeline status={order.status} variant="full" />
                 </View>
 
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Parties</Text>
-                    <View style={styles.partyRow}>
-                        <View style={styles.partyIconWrap}>
-                            <Ionicons name="person-outline" size={16} color={Colors.primary} />
+                <View style={styles.quickCardsGrid}>
+                    <TouchableOpacity
+                        style={[styles.quickCard, styles.quickCardFeatured]}
+                        onPress={() => setProfileModalVisible(true)}
+                        activeOpacity={0.88}
+                    >
+                        <View style={styles.quickCardIconWrap}>
+                            <Ionicons
+                                name={primaryParty?.icon || 'person-outline'}
+                                size={19}
+                                color={Colors.white}
+                            />
                         </View>
-                        <View style={styles.partyTextWrap}>
-                            <Text style={styles.partyLabel}>Acheteur</Text>
-                            <Text style={styles.partyValue}>{getOrderPartyName(order.userId, 'Client inconnu')}</Text>
+                        <View style={styles.quickCardBody}>
+                            <Text style={[styles.quickCardEyebrow, styles.quickCardFeaturedEyebrow]}>Parties</Text>
+                            <Text style={[styles.quickCardTitle, styles.quickCardFeaturedTitle]} numberOfLines={1}>
+                                {primaryParty?.name || 'Interlocuteur'}
+                            </Text>
+                            <Text style={[styles.quickCardText, styles.quickCardFeaturedText]} numberOfLines={1}>
+                                {primaryParty?.label || 'Profil public'} - {primaryPartyContact}
+                            </Text>
                         </View>
-                    </View>
-                    <View style={styles.partyRow}>
-                        <View style={styles.partyIconWrap}>
-                            <Ionicons name="storefront-outline" size={16} color={Colors.primary} />
+                        <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={Colors.white}
+                            style={styles.quickCardChevron}
+                        />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.quickCard}
+                        onPress={() => setRouteModalVisible(true)}
+                        activeOpacity={0.88}
+                    >
+                        <View style={[styles.quickCardIconWrap, styles.quickCardIconSoft]}>
+                            <Ionicons name="map-outline" size={19} color={Colors.primary} />
                         </View>
-                        <View style={styles.partyTextWrap}>
-                            <Text style={styles.partyLabel}>Vendeur</Text>
-                            <Text style={styles.partyValue}>{getOrderPartyName(order.sellerId, 'Vendeur inconnu')}</Text>
+                        <View style={styles.quickCardBody}>
+                            <Text style={styles.quickCardEyebrow}>Adresse de livraison</Text>
+                            <Text style={styles.quickCardTitle} numberOfLines={1}>
+                                Trajet prevu
+                            </Text>
+                            <Text style={styles.quickCardText} numberOfLines={2}>
+                                {deliveryLocationLabel}
+                            </Text>
                         </View>
-                    </View>
+                        <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={Colors.primary}
+                            style={styles.quickCardChevron}
+                        />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        style={styles.quickCard}
+                        onPress={() => setItemsModalVisible(true)}
+                        activeOpacity={0.88}
+                    >
+                        <View style={styles.quickItemThumb}>
+                            {firstItemImage ? (
+                                <Image source={{ uri: firstItemImage }} style={styles.quickItemImage} />
+                            ) : (
+                                <Ionicons name="cube-outline" size={19} color={Colors.primary} />
+                            )}
+                        </View>
+                        <View style={styles.quickCardBody}>
+                            <Text style={styles.quickCardEyebrow}>Articles commandes</Text>
+                            <Text style={styles.quickCardTitle} numberOfLines={1}>
+                                {firstItemName}
+                            </Text>
+                            <Text style={styles.quickCardText} numberOfLines={1}>
+                                {itemSummaryText} - {formatAmount(order.totalAmount, orderCurrency)}
+                            </Text>
+                        </View>
+                        <Ionicons
+                            name="chevron-forward"
+                            size={18}
+                            color={Colors.primary}
+                            style={styles.quickCardChevron}
+                        />
+                    </TouchableOpacity>
                 </View>
 
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Adresse de livraison</Text>
-                    <Text style={styles.addressText}>
-                        {order.deliveryAddress?.trim() || 'Adresse non renseignee'}
-                    </Text>
-                </View>
-
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Articles commandes</Text>
-                    {order.items.map((item, index) => {
-                        const image = getOrderItemImage(item);
-                        const lineTotal = (Number(item.quantity) || 0) * (Number(item.price) || 0);
-                        const product = getOrderItemProduct(item);
-                        const stock = typeof product?.quantity === 'number' ? product.quantity : undefined;
-
-                        return (
-                            <View key={`${order._id}-line-${index}`} style={styles.itemRow}>
-                                <View style={styles.itemImageWrap}>
-                                    {image ? (
-                                        <Image source={{ uri: image }} style={styles.itemImage} />
-                                    ) : (
-                                        <View style={styles.itemImagePlaceholder}>
-                                            <Ionicons name="image-outline" size={18} color={Colors.gray400} />
-                                        </View>
-                                    )}
-                                </View>
-                                <View style={styles.itemBody}>
-                                    <Text style={styles.itemName} numberOfLines={2}>
-                                        {getOrderItemName(item)}
-                                    </Text>
-                                    <Text style={styles.itemMeta}>
-                                        {Number(item.quantity) || 0} x {formatAmount(item.price, product?.currency || orderCurrency)}
-                                    </Text>
-                                    {typeof stock === 'number' ? (
-                                        <Text style={styles.itemStock}>Stock actuel: {stock}</Text>
-                                    ) : null}
-                                </View>
-                                <Text style={styles.itemLineTotal}>
-                                    {formatAmount(lineTotal, product?.currency || orderCurrency)}
-                                </Text>
-                            </View>
-                        );
-                    })}
-                </View>
-
-                <View style={[styles.card, styles.deliveryPanel]}>
+                {!isSeller ? (
+                    <View style={[styles.card, styles.deliveryPanel]}>
                     <View style={styles.deliveryPanelHeader}>
                         <View style={styles.deliveryPanelIcon}>
                             <Ionicons
@@ -562,13 +771,6 @@ export default function OrderDetailScreen() {
                                             {pickupLocationLabel}
                                         </Text>
                                     </View>
-                                    <TouchableOpacity
-                                        style={styles.deliveryPointMapButton}
-                                        onPress={() => setMapPickerField('pickup')}
-                                    >
-                                        <Ionicons name="map-outline" size={16} color={Colors.primary} />
-                                        <Text style={styles.deliveryPointMapText}>Carte</Text>
-                                    </TouchableOpacity>
                                 </View>
 
                                 <View style={styles.deliveryRouteDivider} />
@@ -583,45 +785,17 @@ export default function OrderDetailScreen() {
                                             {deliveryLocationLabel}
                                         </Text>
                                     </View>
-                                    <TouchableOpacity
-                                        style={styles.deliveryPointMapButton}
-                                        onPress={() => setMapPickerField('delivery')}
-                                    >
-                                        <Ionicons name="map-outline" size={16} color={Colors.primary} />
-                                        <Text style={styles.deliveryPointMapText}>Carte</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-
-                            <View style={styles.deliveryFieldsGrid}>
-                                <View style={styles.deliveryFieldGroup}>
-                                    <Text style={styles.fieldLabel}>Retrait</Text>
-                                    <TextInput
-                                        value={pickupLocationInput}
-                                        onChangeText={setPickupLocationInput}
-                                        placeholder="Adresse ou point GPS"
-                                        style={styles.fieldInput}
-                                    />
-                                </View>
-                                <View style={styles.deliveryFieldGroup}>
-                                    <Text style={styles.fieldLabel}>Livraison</Text>
-                                    <TextInput
-                                        value={deliveryLocationInput}
-                                        onChangeText={setDeliveryLocationInput}
-                                        placeholder="Adresse de livraison"
-                                        style={styles.fieldInput}
-                                    />
                                 </View>
                             </View>
 
                             <TouchableOpacity
                                 style={[styles.deliveryRequestButton, isRequestingDelivery && styles.disabledButton]}
-                                onPress={onRequestDelivery}
+                                onPress={openDeliveryRequestModal}
                                 disabled={isRequestingDelivery}
                             >
                                 <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
                                 <Text style={styles.deliveryRequestButtonText}>
-                                    {isRequestingDelivery ? 'Demande en cours...' : 'Demander une livraison'}
+                                    {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
                                 </Text>
                             </TouchableOpacity>
                         </>
@@ -680,9 +854,10 @@ export default function OrderDetailScreen() {
                             ) : null}
                         </View>
                     ) : null}
-                </View>
+                    </View>
+                ) : null}
 
-                {isBuyer ? (
+                {isBuyer && !isSeller ? (
                     <View style={styles.card}>
                         <Text style={styles.cardTitle}>Suivi client</Text>
                         <Text style={styles.mutedText}>
@@ -705,7 +880,7 @@ export default function OrderDetailScreen() {
                         </View>
                         <Text style={styles.sellerActionsDockHint}>
                             {canRequestDeliveryNow
-                                ? 'Commande acceptee. Etape suivante: demander une livraison.'
+                                ? 'Commande acceptee. Etape suivante: commander une livraison.'
                                 : canTrackDeliveryNow
                                     ? 'Livraison creee. Suivez son avancement.'
                                     : 'Choisissez la prochaine etape de la commande.'}
@@ -750,16 +925,16 @@ export default function OrderDetailScreen() {
                             <>
                                 <TouchableOpacity
                                     style={[styles.deliveryRequestButton, styles.sellerDockPrimaryButton]}
-                                    onPress={onRequestDelivery}
+                                    onPress={openDeliveryRequestModal}
                                     disabled={isRequestingDelivery}
                                 >
                                     <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
                                     <Text style={styles.deliveryRequestButtonText}>
-                                        {isRequestingDelivery ? 'Demande en cours...' : 'Demander une livraison'}
+                                        {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
                                     </Text>
                                 </TouchableOpacity>
                                 <Text style={styles.sellerDockHelperText}>
-                                    Ajustez les points dans le bloc Livraison si necessaire.
+                                    Horaire, commentaire et mode de livraison dans le formulaire.
                                 </Text>
                             </>
                         ) : canTrackDeliveryNow ? (
@@ -779,6 +954,214 @@ export default function OrderDetailScreen() {
                 </View>
             ) : null}
 
+            <Modal
+                visible={profileModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setProfileModalVisible(false)}
+            >
+                <View style={[styles.modalBackdrop, { paddingBottom: modalBottomPadding }]}>
+                    <View style={styles.modalSheet}>
+                        <View style={styles.modalHeader}>
+                            <View>
+                                <Text style={styles.modalEyebrow}>Profil public</Text>
+                                <Text style={styles.modalTitle}>{primaryParty?.label || 'Interlocuteur'}</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setProfileModalVisible(false)}
+                            >
+                                <Ionicons name="close" size={18} color={Colors.primary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.profileHero}>
+                            <View style={styles.profileAvatar}>
+                                <Ionicons
+                                    name={primaryParty?.icon || 'person-outline'}
+                                    size={28}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.profileHeroCopy}>
+                                <Text style={styles.profileName}>{primaryParty?.name || 'Profil indisponible'}</Text>
+                                <Text style={styles.profileSubtitle}>{primaryPartyContact}</Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.profileInfoGrid}>
+                            <View style={styles.profileInfoRow}>
+                                <Ionicons name="shield-checkmark-outline" size={17} color={Colors.primary} />
+                                <View style={styles.profileInfoCopy}>
+                                    <Text style={styles.profileInfoLabel}>Role dans la commande</Text>
+                                    <Text style={styles.profileInfoValue}>
+                                        {primaryParty?.label || 'Participant'}
+                                    </Text>
+                                </View>
+                            </View>
+                            {primaryParty?.email ? (
+                                <View style={styles.profileInfoRow}>
+                                    <Ionicons name="mail-outline" size={17} color={Colors.primary} />
+                                    <View style={styles.profileInfoCopy}>
+                                        <Text style={styles.profileInfoLabel}>Email</Text>
+                                        <Text style={styles.profileInfoValue}>{primaryParty.email}</Text>
+                                    </View>
+                                </View>
+                            ) : null}
+                            {primaryParty?.phone ? (
+                                <View style={styles.profileInfoRow}>
+                                    <Ionicons name="call-outline" size={17} color={Colors.primary} />
+                                    <View style={styles.profileInfoCopy}>
+                                        <Text style={styles.profileInfoLabel}>Telephone</Text>
+                                        <Text style={styles.profileInfoValue}>{primaryParty.phone}</Text>
+                                    </View>
+                                </View>
+                            ) : null}
+                        </View>
+
+                        {primaryPartyPhone ? (
+                            <TouchableOpacity
+                                style={styles.modalPrimaryButton}
+                                onPress={() => void callParty(primaryPartyPhone, primaryPartyCallLabel)}
+                            >
+                                <Ionicons name="call-outline" size={16} color={Colors.white} />
+                                <Text style={styles.modalPrimaryButtonText}>Appeler</Text>
+                            </TouchableOpacity>
+                        ) : null}
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={routeModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setRouteModalVisible(false)}
+            >
+                <View style={[styles.modalBackdrop, { paddingBottom: modalBottomPadding }]}>
+                    <View style={styles.modalSheet}>
+                        <View style={styles.modalHeader}>
+                            <View>
+                                <Text style={styles.modalEyebrow}>Livraison</Text>
+                                <Text style={styles.modalTitle}>Trajet prevu</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setRouteModalVisible(false)}
+                            >
+                                <Ionicons name="close" size={18} color={Colors.primary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.routeMapCard}>
+                            <View style={styles.routeMapGridLine} />
+                            <View style={[styles.routeMapLine, styles.routeMapLineFirst]} />
+                            <View style={[styles.routeMapLine, styles.routeMapLineSecond]} />
+                            <View style={[styles.routeMapPin, styles.routeMapPinStart]}>
+                                <Ionicons name="storefront-outline" size={15} color={Colors.white} />
+                            </View>
+                            <View style={[styles.routeMapPin, styles.routeMapPinEnd]}>
+                                <Ionicons name="location-outline" size={15} color={Colors.white} />
+                            </View>
+                        </View>
+
+                        <View style={styles.routeSteps}>
+                            <View style={styles.routeStep}>
+                                <View style={styles.routeStepMarker} />
+                                <View style={styles.routeStepCopy}>
+                                    <Text style={styles.routeStepLabel}>Retrait vendeur</Text>
+                                    <Text style={styles.routeStepValue}>{pickupLocationLabel}</Text>
+                                </View>
+                            </View>
+                            <View style={styles.routeStepConnector} />
+                            <View style={styles.routeStep}>
+                                <View style={[styles.routeStepMarker, styles.routeStepMarkerEnd]} />
+                                <View style={styles.routeStepCopy}>
+                                    <Text style={styles.routeStepLabel}>Destination client</Text>
+                                    <Text style={styles.routeStepValue}>{deliveryLocationLabel}</Text>
+                                </View>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={itemsModalVisible}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setItemsModalVisible(false)}
+            >
+                <View style={[styles.modalBackdrop, { paddingBottom: modalBottomPadding }]}>
+                    <View style={[styles.modalSheet, styles.itemsModalSheet]}>
+                        <View style={styles.modalHeader}>
+                            <View>
+                                <Text style={styles.modalEyebrow}>Commande</Text>
+                                <Text style={styles.modalTitle}>Articles commandes</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.modalCloseButton}
+                                onPress={() => setItemsModalVisible(false)}
+                            >
+                                <Ionicons name="close" size={18} color={Colors.primary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView
+                            style={styles.modalScroll}
+                            contentContainerStyle={styles.modalScrollContent}
+                            showsVerticalScrollIndicator={false}
+                        >
+                            {order.items.map((item, index) => {
+                                const image = getOrderItemImage(item);
+                                const lineTotal = (Number(item.quantity) || 0) * (Number(item.price) || 0);
+                                const product = getOrderItemProduct(item);
+                                const stock = typeof product?.quantity === 'number' ? product.quantity : undefined;
+
+                                return (
+                                    <View key={`${order._id}-modal-line-${index}`} style={styles.modalItemRow}>
+                                        <View style={styles.itemImageWrap}>
+                                            {image ? (
+                                                <Image source={{ uri: image }} style={styles.itemImage} />
+                                            ) : (
+                                                <View style={styles.itemImagePlaceholder}>
+                                                    <Ionicons
+                                                        name="image-outline"
+                                                        size={18}
+                                                        color={Colors.gray400}
+                                                    />
+                                                </View>
+                                            )}
+                                        </View>
+                                        <View style={styles.itemBody}>
+                                            <Text style={styles.itemName} numberOfLines={2}>
+                                                {getOrderItemName(item)}
+                                            </Text>
+                                            <Text style={styles.itemMeta}>
+                                                {Number(item.quantity) || 0} x{' '}
+                                                {formatAmount(item.price, product?.currency || orderCurrency)}
+                                            </Text>
+                                            {typeof stock === 'number' ? (
+                                                <Text style={styles.itemStock}>Stock actuel: {stock}</Text>
+                                            ) : null}
+                                        </View>
+                                        <Text style={styles.itemLineTotal}>
+                                            {formatAmount(lineTotal, product?.currency || orderCurrency)}
+                                        </Text>
+                                    </View>
+                                );
+                            })}
+                            <View style={styles.modalTotalRow}>
+                                <Text style={styles.modalTotalLabel}>Total</Text>
+                                <Text style={styles.modalTotalValue}>
+                                    {formatAmount(order.totalAmount, orderCurrency)}
+                                </Text>
+                            </View>
+                        </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
             <CustomAlert
                 visible={alertState.visible}
                 title={alertState.title}
@@ -797,6 +1180,16 @@ export default function OrderDetailScreen() {
                     closeAlert();
                     callback?.();
                 }}
+            />
+            <RequestDeliveryModal
+                visible={deliveryRequestModalVisible}
+                values={deliveryRequestForm}
+                loading={isRequestingDelivery}
+                onChange={setDeliveryRequestForm}
+                onClose={() => setDeliveryRequestModalVisible(false)}
+                onSubmit={onRequestDelivery}
+                onPickPickupOnMap={() => setMapPickerField('pickup')}
+                onPickDeliveryOnMap={() => setMapPickerField('delivery')}
             />
             <MapPickerModal
                 visible={Boolean(mapPickerField)}
@@ -853,6 +1246,54 @@ const styles = StyleSheet.create({
         paddingBottom: Spacing.xxxl,
         gap: Spacing.md,
     },
+    trackingHero: {
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+        padding: Spacing.lg,
+        overflow: 'hidden',
+    },
+    trackingHeroTop: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.md,
+        marginBottom: Spacing.lg,
+    },
+    trackingHeroIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    trackingHeroCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    trackingHeroEyebrow: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+    },
+    trackingHeroTitle: {
+        marginTop: 2,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    trackingHeroText: {
+        marginTop: Spacing.xs,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
+    },
+    trackingHeroPercent: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
     card: {
         backgroundColor: Colors.white,
         borderRadius: BorderRadius.lg,
@@ -894,25 +1335,6 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontSize: Typography.fontSize.sm,
     },
-    mapSelectButton: {
-        marginTop: Spacing.xs,
-        alignSelf: 'stretch',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.xs,
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.primary + '40',
-        backgroundColor: Colors.primary + '0D',
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
-    },
-    mapSelectButtonText: {
-        color: Colors.primary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.bold,
-    },
     valueText: {
         fontSize: Typography.fontSize.base,
         color: Colors.primary,
@@ -922,6 +1344,99 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xl,
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.extrabold,
+    },
+    quickCardsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: Spacing.sm,
+    },
+    quickCard: {
+        position: 'relative',
+        flexGrow: 1,
+        flexBasis: 150,
+        minWidth: 145,
+        minHeight: 96,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'flex-start',
+        gap: Spacing.sm,
+        ...Shadows.sm,
+    },
+    quickCardFeatured: {
+        backgroundColor: Colors.primary,
+        borderColor: Colors.primary,
+        ...Shadows.md,
+    },
+    quickCardIconWrap: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white + '22',
+        borderWidth: 1,
+        borderColor: Colors.white + '28',
+    },
+    quickCardIconSoft: {
+        backgroundColor: Colors.primary + '10',
+        borderColor: Colors.primary + '16',
+    },
+    quickCardBody: {
+        flex: 1,
+        minWidth: 0,
+    },
+    quickCardEyebrow: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    quickCardTitle: {
+        marginTop: 3,
+        fontSize: Typography.fontSize.md,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    quickCardText: {
+        marginTop: 3,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        lineHeight: 18,
+    },
+    quickCardFeaturedEyebrow: {
+        color: Colors.accent,
+    },
+    quickCardFeaturedTitle: {
+        color: Colors.white,
+    },
+    quickCardFeaturedText: {
+        color: Colors.white + 'D9',
+    },
+    quickItemThumb: {
+        width: 42,
+        height: 42,
+        borderRadius: BorderRadius.md,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+        borderWidth: 1,
+        borderColor: Colors.primary + '14',
+    },
+    quickItemImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    quickCardChevron: {
+        marginLeft: 'auto',
+        flexShrink: 0,
     },
     partyRow: {
         flexDirection: 'row',
@@ -949,6 +1464,23 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.semibold,
+    },
+    partyCallButton: {
+        minHeight: 36,
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '28',
+        backgroundColor: Colors.primary + '08',
+        paddingHorizontal: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 5,
+    },
+    partyCallText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     addressText: {
         fontSize: Typography.fontSize.sm,
@@ -1002,6 +1534,264 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.bold,
+    },
+    modalBackdrop: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(17, 24, 39, 0.44)',
+        padding: Spacing.lg,
+    },
+    modalSheet: {
+        maxHeight: '86%',
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.white,
+        padding: Spacing.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        ...Shadows.lg,
+    },
+    itemsModalSheet: {
+        minHeight: 360,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.md,
+        marginBottom: Spacing.lg,
+    },
+    modalEyebrow: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    modalTitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xl,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    modalCloseButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '0D',
+    },
+    profileHero: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary,
+        padding: Spacing.md,
+    },
+    profileAvatar: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white + '20',
+        borderWidth: 1,
+        borderColor: Colors.white + '28',
+    },
+    profileHeroCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    profileName: {
+        fontSize: Typography.fontSize.lg,
+        color: Colors.white,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    profileSubtitle: {
+        marginTop: 3,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.white + 'CC',
+    },
+    profileInfoGrid: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+        gap: Spacing.sm,
+    },
+    profileInfoRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    profileInfoCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    profileInfoLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    profileInfoValue: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    modalPrimaryButton: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.md,
+        minHeight: 46,
+        backgroundColor: Colors.primary,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.xs,
+    },
+    modalPrimaryButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    routeMapCard: {
+        height: 168,
+        borderRadius: BorderRadius.lg,
+        overflow: 'hidden',
+        backgroundColor: Colors.primary + '08',
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        marginBottom: Spacing.md,
+    },
+    routeMapGridLine: {
+        position: 'absolute',
+        left: -24,
+        right: -24,
+        top: 78,
+        height: 1,
+        backgroundColor: Colors.primary + '10',
+        transform: [{ rotate: '-18deg' }],
+    },
+    routeMapLine: {
+        position: 'absolute',
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: Colors.primary,
+    },
+    routeMapLineFirst: {
+        left: 58,
+        top: 52,
+        width: 118,
+        transform: [{ rotate: '18deg' }],
+    },
+    routeMapLineSecond: {
+        right: 62,
+        top: 102,
+        width: 122,
+        transform: [{ rotate: '-24deg' }],
+    },
+    routeMapPin: {
+        position: 'absolute',
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+        borderWidth: 4,
+        borderColor: Colors.white,
+        ...Shadows.sm,
+    },
+    routeMapPinStart: {
+        left: 36,
+        top: 34,
+    },
+    routeMapPinEnd: {
+        right: 36,
+        bottom: 30,
+        backgroundColor: Colors.accentDark,
+    },
+    routeSteps: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+    },
+    routeStep: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    routeStepMarker: {
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        marginTop: 3,
+        backgroundColor: Colors.primary,
+        borderWidth: 3,
+        borderColor: Colors.white,
+    },
+    routeStepMarkerEnd: {
+        backgroundColor: Colors.accentDark,
+    },
+    routeStepConnector: {
+        width: 2,
+        height: 24,
+        marginLeft: 6,
+        backgroundColor: Colors.primary + '20',
+    },
+    routeStepCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    routeStepLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    routeStepValue: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+        lineHeight: 19,
+    },
+    modalScroll: {
+        maxHeight: 440,
+    },
+    modalScrollContent: {
+        paddingBottom: Spacing.sm,
+    },
+    modalItemRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+    },
+    modalTotalRow: {
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.primary + '0D',
+        padding: Spacing.md,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    modalTotalLabel: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    modalTotalValue: {
+        fontSize: Typography.fontSize.lg,
+        color: Colors.accentDark,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     deliveryPanel: {
         borderColor: Colors.primary + '24',
@@ -1081,37 +1871,12 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         lineHeight: 19,
     },
-    deliveryPointMapButton: {
-        minWidth: 68,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: Colors.white,
-        borderWidth: 1,
-        borderColor: Colors.primary + '28',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexDirection: 'row',
-        gap: 4,
-        paddingHorizontal: Spacing.sm,
-    },
-    deliveryPointMapText: {
-        fontSize: Typography.fontSize.xs,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.bold,
-    },
     deliveryRouteDivider: {
         width: 1,
         height: 18,
         backgroundColor: Colors.primary + '20',
         marginLeft: 15,
         marginVertical: 4,
-    },
-    deliveryFieldsGrid: {
-        marginTop: Spacing.md,
-        gap: Spacing.sm,
-    },
-    deliveryFieldGroup: {
-        minWidth: 0,
     },
     deliveryLockedState: {
         flexDirection: 'row',

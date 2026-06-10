@@ -182,6 +182,10 @@ export interface DeliveryTracking {
 export interface RequestDeliveryDto {
     pickupLocation?: string;
     deliveryLocation?: string;
+    scheduledPickupAt?: string;
+    scheduledDeliveryAt?: string;
+    comment?: string;
+    deliveryMode?: string;
 }
 
 export interface DeliveryQrPayload {

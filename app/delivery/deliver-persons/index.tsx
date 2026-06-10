@@ -1,4 +1,5 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { DeliveryRoutePreview } from '@/components/delivery/DeliveryRoutePreview';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
@@ -8,7 +9,6 @@ import {
 } from '@/store/api/deliveriesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
-    DELIVERY_STATUS_LABELS,
     Delivery,
     DeliveryGeoPoint,
     getDeliveryPersonRefId,
@@ -522,25 +522,18 @@ export default function DriverDeliveriesPoolScreen({
                                 'Adresse de livraison indisponible',
                             );
                             return (
-                                <TouchableOpacity
+                                <DeliveryRoutePreview
                                     key={`mine-${delivery._id}`}
-                                    style={styles.activeCard}
+                                    code={`#${getOrderCode(delivery)}`}
+                                    pickupLabel={pickupLabel}
+                                    dropoffLabel={dropoffLabel}
+                                    status={delivery.status}
+                                    workflow={delivery.workflow}
+                                    actionLabel="Continuer la course"
                                     onPress={() =>
                                         router.push(`/delivery/deliver-persons/${delivery._id}` as any)
                                     }
-                                >
-                                    <View style={styles.cardTopRow}>
-                                        <Text style={styles.cardCode}>#{getOrderCode(delivery)}</Text>
-                                        <Text style={styles.statusChip}>
-                                            {DELIVERY_STATUS_LABELS[delivery.status]}
-                                        </Text>
-                                    </View>
-                                    <Text style={styles.cardLocationLine}>{pickupLabel}</Text>
-                                    <Text style={styles.cardLocationLineMuted}>
-                                        {'-> '}
-                                        {dropoffLabel}
-                                    </Text>
-                                </TouchableOpacity>
+                                />
                             );
                         })}
                     </View>
@@ -724,13 +717,6 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
     },
-    activeCard: {
-        backgroundColor: Colors.primary + '0F',
-        borderWidth: 1,
-        borderColor: Colors.primary + '30',
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.md,
-    },
     deliveryCard: {
         backgroundColor: Colors.white,
         borderWidth: 1,
@@ -748,15 +734,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
-    },
-    statusChip: {
-        fontSize: Typography.fontSize.xs,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.semibold,
-        backgroundColor: Colors.primary + '14',
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 4,
     },
     pendingChip: {
         fontSize: Typography.fontSize.xs,
@@ -811,17 +788,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.gray700,
         lineHeight: 18,
-    },
-    cardLocationLine: {
-        marginTop: Spacing.xs,
-        fontSize: Typography.fontSize.sm,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    cardLocationLineMuted: {
-        marginTop: 2,
-        fontSize: Typography.fontSize.sm,
-        color: Colors.gray600,
     },
     actionsRow: {
         marginTop: Spacing.md,

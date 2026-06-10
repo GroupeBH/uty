@@ -7,6 +7,7 @@ import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import {
     Order,
     getOrderItemCurrency,
+    getOrderItemImage,
     getOrderItemName,
     getOrderPartyName,
 } from '@/types/order';
@@ -14,7 +15,8 @@ import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { OrderProgressTimeline, getOrderProgressMeta } from './orders/OrderProgressTimeline';
 import { StatusBadge } from './ui/StatusBadge';
 
 interface OrderCardProps {
@@ -52,6 +54,10 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
     const { data: currencies = [] } = useGetCurrenciesQuery();
     const orderCurrency = getOrderCurrency(order);
     const actionLabel = perspective === 'seller' ? 'Gerer' : 'Voir details';
+    const progressMeta = getOrderProgressMeta(order.status);
+    const firstItems = order.items.slice(0, 3);
+    const firstImage = getOrderItemImage(order.items[0]);
+    const deliveryLabel = order.deliveryAddress?.trim() || 'Adresse de livraison a confirmer';
     const counterpartyLabel =
         perspective === 'seller'
             ? `Client: ${getOrderPartyName(order.userId, 'Client inconnu')}`
@@ -72,33 +78,52 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
             activeOpacity={0.9}
         >
             <View style={styles.header}>
+                <View style={[styles.statusIcon, { backgroundColor: progressMeta.accentBackground }]}>
+                    <Ionicons
+                        name={order.status === 'delivered' ? 'checkmark-done-outline' : 'navigate-outline'}
+                        size={18}
+                        color={progressMeta.color}
+                    />
+                </View>
                 <View style={styles.headerLeft}>
-                    <Text style={styles.orderNumber}>Commande #{order._id.slice(-8).toUpperCase()}</Text>
-                    <View style={styles.dateRow}>
-                        <Ionicons name="calendar-outline" size={13} color={Colors.gray500} />
-                        <Text style={styles.date}>{formatDate(order.createdAt)}</Text>
-                    </View>
+                    <Text style={styles.orderNumber}>#{order._id.slice(-8).toUpperCase()}</Text>
+                    <Text style={styles.statusHeadline}>{progressMeta.headline}</Text>
+                    <Text style={styles.date}>{formatDate(order.createdAt)}</Text>
                 </View>
                 <StatusBadge status={order.status} />
             </View>
 
-            <Text style={styles.counterpartyText}>{counterpartyLabel}</Text>
+            <View style={styles.timelinePanel}>
+                <View style={styles.trackingCopyRow}>
+                    <Text style={styles.trackingHint}>{progressMeta.helper}</Text>
+                    <Text style={styles.trackingPercent}>{progressMeta.progressPercent}%</Text>
+                </View>
+                <OrderProgressTimeline status={order.status} />
+            </View>
 
-            <View style={styles.items}>
-                <Text style={styles.itemsText}>
-                    {order.items.length} article{order.items.length > 1 ? 's' : ''}
-                </Text>
-                <View style={styles.itemsPreview}>
-                    {order.items.slice(0, 3).map((item, index) => (
+            <View style={styles.routeRow}>
+                <Ionicons name="location-outline" size={15} color={Colors.primary} />
+                <Text style={styles.routeText} numberOfLines={1}>{deliveryLabel}</Text>
+            </View>
+
+            <View style={styles.itemsPanel}>
+                <View style={styles.itemThumb}>
+                    {firstImage ? (
+                        <Image source={{ uri: firstImage }} style={styles.itemThumbImage} />
+                    ) : (
+                        <Ionicons name="cube-outline" size={22} color={Colors.gray400} />
+                    )}
+                </View>
+                <View style={styles.itemsBody}>
+                    <Text style={styles.counterpartyText}>{counterpartyLabel}</Text>
+                    <Text style={styles.itemsText}>
+                        {order.items.length} article{order.items.length > 1 ? 's' : ''}
+                    </Text>
+                    {firstItems.map((item, index) => (
                         <Text key={`${order._id}-item-${index}`} style={styles.itemName} numberOfLines={1}>
-                            - {getOrderItemName(item)}
+                            {getOrderItemName(item)}
                         </Text>
                     ))}
-                    {order.items.length > 3 && (
-                        <Text style={styles.moreItems}>
-                            +{order.items.length - 3} autre{order.items.length - 3 > 1 ? 's' : ''}
-                        </Text>
-                    )}
                 </View>
             </View>
 
@@ -111,7 +136,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
                 </View>
                 <View style={styles.actionPill}>
                     <Text style={styles.actionPillText}>{actionLabel}</Text>
-                    <Ionicons name="chevron-forward" size={16} color={Colors.white} />
+                    <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
                 </View>
             </View>
         </TouchableOpacity>
@@ -121,69 +146,124 @@ export const OrderCard: React.FC<OrderCardProps> = ({ order, perspective }) => {
 const styles = StyleSheet.create({
     card: {
         backgroundColor: Colors.white,
-        borderRadius: BorderRadius.lg,
-        padding: Spacing.xl,
+        borderRadius: BorderRadius.xl,
+        padding: Spacing.lg,
         marginBottom: Spacing.lg,
         borderWidth: 1,
         borderColor: Colors.gray100,
-        ...Shadows.md,
+        ...Shadows.sm,
     },
     header: {
         flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
+        gap: Spacing.sm,
         marginBottom: Spacing.md,
+    },
+    statusIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     headerLeft: {
         flex: 1,
-        paddingRight: Spacing.sm,
+        minWidth: 0,
     },
     orderNumber: {
-        fontSize: Typography.fontSize.lg,
-        fontWeight: Typography.fontWeight.bold,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
-        marginBottom: Spacing.xs,
+        letterSpacing: 0.4,
+    },
+    statusHeadline: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     date: {
-        fontSize: Typography.fontSize.sm,
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
         color: Colors.textSecondary,
     },
-    dateRow: {
+    timelinePanel: {
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    trackingCopyRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.xs / 2,
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+        marginBottom: Spacing.xs,
+    },
+    trackingHint: {
+        flex: 1,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    trackingPercent: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    routeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        marginBottom: Spacing.md,
+    },
+    routeText: {
+        flex: 1,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     counterpartyText: {
         fontSize: Typography.fontSize.sm,
-        color: Colors.gray600,
-        marginBottom: Spacing.md,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
     },
-    items: {
+    itemsPanel: {
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        alignItems: 'center',
         marginBottom: Spacing.lg,
-        paddingVertical: Spacing.lg,
-        borderTopWidth: 1,
-        borderBottomWidth: 1,
-        borderColor: Colors.gray100,
+    },
+    itemThumb: {
+        width: 58,
+        height: 58,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.gray100,
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    itemThumbImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    itemsBody: {
+        flex: 1,
+        minWidth: 0,
     },
     itemsText: {
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.primary,
-        marginBottom: Spacing.sm,
-    },
-    itemsPreview: {
         marginTop: Spacing.xs,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.gray500,
     },
     itemName: {
-        fontSize: Typography.fontSize.sm,
-        color: Colors.textSecondary,
-        marginBottom: Spacing.xs,
-    },
-    moreItems: {
+        marginTop: 2,
         fontSize: Typography.fontSize.xs,
-        color: Colors.accentDark,
-        fontWeight: Typography.fontWeight.bold,
-        marginTop: Spacing.sm,
+        color: Colors.textSecondary,
     },
     footer: {
         flexDirection: 'row',
@@ -208,15 +288,15 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: Spacing.xs / 2,
-        backgroundColor: Colors.primary,
+        backgroundColor: Colors.accent,
         paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.xs + 2,
+        paddingVertical: Spacing.sm,
         borderRadius: BorderRadius.full,
         ...Shadows.sm,
     },
     actionPillText: {
-        color: Colors.white,
+        color: Colors.primary,
         fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
+        fontWeight: Typography.fontWeight.extrabold,
     },
 });

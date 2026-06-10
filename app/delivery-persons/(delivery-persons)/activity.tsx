@@ -1,10 +1,11 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { DeliveryRoutePreview } from '@/components/delivery/DeliveryRoutePreview';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
 import { useGetOngoingDeliveriesQuery } from '@/store/api/deliveriesApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
-import { DELIVERY_STATUS_LABELS, DeliveryGeoPoint, getDeliveryPersonRefId } from '@/types/delivery';
+import { DeliveryGeoPoint, getDeliveryPersonRefId } from '@/types/delivery';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -301,31 +302,27 @@ export default function DeliveryPersonsActivityTab() {
                             delivery.deliveryCoordinates,
                             'Adresse de livraison indisponible',
                         );
+                        const deliveryCode = String(
+                            delivery.orderId && typeof delivery.orderId === 'object'
+                                ? delivery.orderId._id || delivery._id
+                                : delivery._id,
+                        )
+                            .slice(-8)
+                            .toUpperCase();
 
                         return (
-                            <TouchableOpacity
+                            <DeliveryRoutePreview
                                 key={delivery._id}
-                                style={styles.card}
-                                activeOpacity={0.9}
+                                code={`#${deliveryCode}`}
+                                pickupLabel={pickupLabel}
+                                dropoffLabel={dropoffLabel}
+                                status={delivery.status}
+                                workflow={delivery.workflow}
+                                actionLabel="Suivre la course"
                                 onPress={() =>
                                     router.push(`/delivery/deliver-persons/${delivery._id}` as any)
                                 }
-                            >
-                                <View style={styles.row}>
-                                    <Text style={styles.code}>
-                                        #{String(delivery.orderId && typeof delivery.orderId === 'object' ? delivery.orderId._id || delivery._id : delivery._id).slice(-8).toUpperCase()}
-                                    </Text>
-                                    <View style={styles.statusBadge}>
-                                        <Text style={styles.statusText}>
-                                            {DELIVERY_STATUS_LABELS[delivery.status]}
-                                        </Text>
-                                    </View>
-                                </View>
-                                <Text style={styles.label}>Retrait</Text>
-                                <Text style={styles.value}>{pickupLabel}</Text>
-                                <Text style={[styles.label, { marginTop: Spacing.xs }]}>Livraison</Text>
-                                <Text style={styles.value}>{dropoffLabel}</Text>
-                            </TouchableOpacity>
+                            />
                         );
                     })
                 )}
@@ -358,48 +355,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.xl,
         paddingBottom: 120,
         gap: Spacing.sm,
-    },
-    card: {
-        borderRadius: BorderRadius.lg,
-        borderWidth: 1,
-        borderColor: Colors.gray100,
-        backgroundColor: Colors.white,
-        padding: Spacing.md,
-    },
-    row: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: Spacing.sm,
-    },
-    code: {
-        color: Colors.primary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.extrabold,
-    },
-    statusBadge: {
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.primary + '30',
-        backgroundColor: Colors.primary + '10',
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 5,
-    },
-    statusText: {
-        color: Colors.primary,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    label: {
-        marginTop: Spacing.sm,
-        color: Colors.gray500,
-        fontSize: Typography.fontSize.xs,
-    },
-    value: {
-        marginTop: 2,
-        color: Colors.gray700,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.semibold,
     },
     emptyCard: {
         marginTop: Spacing.md,
