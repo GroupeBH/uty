@@ -49,7 +49,7 @@ import {
     View,
 } from 'react-native';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type LatLng = { latitude: number; longitude: number };
 type RouteMetrics = { distanceKm: number; durationMin: number; summary?: string };
@@ -565,6 +565,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
     const { id } = useLocalSearchParams<{ id?: string }>();
     const deliveryId = (id || '').trim();
     const { user } = useAuth();
+    const insets = useSafeAreaInsets();
     const currentUserId = user?._id || '';
     const mapRef = React.useRef<MapView | null>(null);
     const watchRef = React.useRef<Location.LocationSubscription | null>(null);
@@ -1172,20 +1173,11 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         };
     }, [canShareLiveLocation, deliveryId, isLiveSharingEnabled, updateDeliveryLocation]);
     React.useEffect(() => {
-        if (!driverPoint || !activeTargetPoint) {
-            setRouteCoordinates([]);
-            setRouteMetrics(null);
-            setRouteSteps([]);
-            setRouteSource('none');
-            setActiveStepIndex(0);
-            return;
-        }
-
         if (backendRouteCandidate) {
             setRouteCoordinates(
                 backendRouteCandidate.coordinates.length >= 2
                     ? backendRouteCandidate.coordinates
-                    : [driverPoint, activeTargetPoint],
+                    : [],
             );
             setRouteMetrics(backendRouteCandidate.metrics);
             setRouteSteps(backendRouteCandidate.steps);
@@ -1194,12 +1186,24 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             return;
         }
 
+        const routeOriginPoint = driverPoint || pickupPoint;
+        const routeDestinationPoint = driverPoint ? activeTargetPoint : dropoffPoint;
+
+        if (!routeOriginPoint || !routeDestinationPoint) {
+            setRouteCoordinates([]);
+            setRouteMetrics(null);
+            setRouteSteps([]);
+            setRouteSource('none');
+            setActiveStepIndex(0);
+            return;
+        }
+
         let cancelled = false;
         const timeout = setTimeout(async () => {
             try {
                 const response = await fetchDirections({
-                    origin: { lat: driverPoint.latitude, lng: driverPoint.longitude },
-                    destination: { lat: activeTargetPoint.latitude, lng: activeTargetPoint.longitude },
+                    origin: { lat: routeOriginPoint.latitude, lng: routeOriginPoint.longitude },
+                    destination: { lat: routeDestinationPoint.latitude, lng: routeDestinationPoint.longitude },
                     language: 'fr',
                 }).unwrap();
 
@@ -1210,7 +1214,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 setRouteCoordinates(
                     parsedGoogleRoute?.coordinates && parsedGoogleRoute.coordinates.length >= 2
                         ? parsedGoogleRoute.coordinates
-                        : [driverPoint, activeTargetPoint],
+                        : [],
                 );
                 setRouteMetrics(parsedGoogleRoute?.metrics || null);
                 setRouteSteps(parsedGoogleRoute?.steps || []);
@@ -1218,7 +1222,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 setActiveStepIndex(0);
             } catch {
                 if (cancelled) return;
-                setRouteCoordinates([driverPoint, activeTargetPoint]);
+                setRouteCoordinates([]);
                 setRouteMetrics(null);
                 setRouteSteps([]);
                 setRouteSource('fallback');
@@ -1234,7 +1238,9 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         activeTargetPoint,
         backendRouteCandidate,
         driverPoint,
+        dropoffPoint,
         fetchDirections,
+        pickupPoint,
         routeRefreshKey,
     ]);
 
@@ -1315,6 +1321,24 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             lastGuidanceCameraRef.current = null;
         }
     }, [isGuidanceMode, isMapExpanded]);
+
+    React.useEffect(() => {
+        if (!mapRef.current) return;
+        const points =
+            routeCoordinates.length >= 2
+                ? routeCoordinates
+                : ([driverPoint, activeTargetPoint, pickupPoint, dropoffPoint].filter(Boolean) as LatLng[]);
+        if (points.length < 2) return;
+
+        const timeout = setTimeout(() => {
+            mapRef.current?.fitToCoordinates(points, {
+                edgePadding: { top: 170, right: 64, bottom: 150, left: 64 },
+                animated: true,
+            });
+        }, 450);
+
+        return () => clearTimeout(timeout);
+    }, [activeTargetPoint, driverPoint, dropoffPoint, pickupPoint, routeCoordinates]);
 
     const recenterMap = React.useCallback(() => {
         if (!mapRef.current) return;
@@ -1410,7 +1434,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             : routeSource === 'google'
                 ? 'Trajet live'
                 : routeSource === 'fallback'
-                    ? 'Trajet direct'
+                    ? 'Trace en attente'
                     : 'Trajet en attente';
     const startPointLabel = isAssignedDriver
         ? 'Ma position actuelle'
@@ -1558,6 +1582,31 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
             { key: 'actions', label: 'Actions', icon: 'flash-outline', badge: `${availableActionsCount}` },
             { key: 'messages', label: 'Messages', icon: 'chatbubble-ellipses-outline', badge: `${messages.length}` },
         ];
+    const routeHasPolyline = routeCoordinates.length >= 2;
+    const routeTraceStatus = routeHasPolyline
+        ? routeSourceLabel
+        : isRouting || isResolvingPoints
+            ? 'Calcul du trajet'
+            : 'Trace en attente';
+    const routeProgressPercent = Math.max(
+        8,
+        Math.min(
+            100,
+            Math.round(((stageProgressIndex + 1) / Math.max(workflowProgress.totalSteps, 1)) * 100),
+        ),
+    );
+    const activeInstructionTitle =
+        activeInstruction?.instruction ||
+        (routeHasPolyline ? 'Suivez le trace de livraison' : 'En attente du trace routier');
+    const targetTitle = headingToPickup ? 'Retrait vendeur' : 'Destination client';
+    const useTrackingLayout = true;
+    const primaryStepAction = prioritizedStepActions[0] || null;
+    const primaryStepActionLabel = primaryStepAction
+        ? primaryStepAction.key === 'accept-delivery'
+            ? 'Accepter la course'
+            : 'Executer'
+        : '';
+    const showPrimaryActionDock = useTrackingLayout && Boolean(primaryStepAction);
     if (!deliveryId || isLoading) return <LoadingSpinner fullScreen />;
     if (deliveryError || !delivery) {
         return (
@@ -1586,6 +1635,459 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+            {useTrackingLayout ? (
+                <>
+                    <View style={styles.trackingMapPane}>
+                        <MapView
+                            ref={mapRef}
+                            style={styles.trackingMap}
+                            {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
+                            initialRegion={mapInitialRegion}
+                            showsUserLocation={isAssignedDriver}
+                        >
+                            {pickupPoint ? (
+                                <Marker
+                                    coordinate={pickupPoint}
+                                    title="Point de retrait"
+                                    description={pickupLabel || undefined}
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                    tracksViewChanges={false}
+                                    tracksInfoWindowChanges={false}
+                                >
+                                    <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.accentDark }]}>
+                                        <Ionicons name="storefront" size={15} color={Colors.white} />
+                                    </View>
+                                </Marker>
+                            ) : null}
+                            {dropoffPoint ? (
+                                <Marker
+                                    coordinate={dropoffPoint}
+                                    title="Point de livraison"
+                                    description={dropoffLabel || undefined}
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                    tracksViewChanges={false}
+                                    tracksInfoWindowChanges={false}
+                                >
+                                    <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.success }]}>
+                                        <Ionicons name="location" size={16} color={Colors.white} />
+                                    </View>
+                                </Marker>
+                            ) : null}
+                            {driverPoint ? (
+                                <Marker
+                                    coordinate={driverPoint}
+                                    title="Position livreur"
+                                    anchor={{ x: 0.5, y: 0.5 }}
+                                    tracksViewChanges={false}
+                                    tracksInfoWindowChanges={false}
+                                >
+                                    <View style={[styles.mapMarkerBadge, { backgroundColor: Colors.primary }]}>
+                                        <Ionicons name="bicycle" size={15} color={Colors.white} />
+                                    </View>
+                                </Marker>
+                            ) : null}
+                            {routeHasPolyline ? (
+                                <>
+                                    <Polyline coordinates={routeCoordinates} strokeWidth={9} strokeColor={Colors.white + 'EA'} />
+                                    <Polyline coordinates={routeCoordinates} strokeWidth={5} strokeColor={Colors.primaryLight} />
+                                </>
+                            ) : null}
+                        </MapView>
+
+                        <LinearGradient
+                            colors={[Colors.primaryDark + 'E6', Colors.primaryDark + '18', Colors.primaryDark + '00']}
+                            style={styles.trackingTopFade}
+                            pointerEvents="none"
+                        />
+
+                        <View style={styles.trackingTopBar}>
+                            <TouchableOpacity style={styles.trackingIconButton} onPress={() => router.back()}>
+                                <Ionicons name="arrow-back" size={20} color={Colors.white} />
+                            </TouchableOpacity>
+                            <View style={styles.trackingTopTitleWrap}>
+                                <Text style={styles.trackingTopEyebrow}>Livraison #{deliveryId.slice(-8).toUpperCase()}</Text>
+                                <Text style={styles.trackingTopTitle}>{businessStatusLabel}</Text>
+                            </View>
+                            <TouchableOpacity style={styles.trackingIconButton} onPress={refetchAll}>
+                                <Ionicons name="refresh" size={18} color={Colors.white} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.trackingInstructionCard}>
+                            <View style={styles.trackingInstructionIcon}>
+                                <Ionicons
+                                    name={routeHasPolyline ? instructionIcon(activeInstruction?.instruction) : 'trail-sign-outline'}
+                                    size={18}
+                                    color={Colors.white}
+                                />
+                            </View>
+                            <View style={styles.trackingInstructionCopy}>
+                                <Text style={styles.trackingInstructionLead}>{routeTraceStatus}</Text>
+                                <Text style={styles.trackingInstructionText} numberOfLines={2}>
+                                    {activeInstructionTitle}
+                                </Text>
+                                <Text style={styles.trackingInstructionMeta} numberOfLines={1}>
+                                    {targetTitle}: {activeTargetLabel || 'Point non defini'}
+                                </Text>
+                            </View>
+                        </View>
+
+                        <View style={styles.trackingMapMetrics}>
+                            <View style={styles.trackingMetricChip}>
+                                <Text style={styles.trackingMetricValue}>{durationLabel}</Text>
+                                <Text style={styles.trackingMetricLabel}>ETA</Text>
+                            </View>
+                            <View style={styles.trackingMetricChip}>
+                                <Text style={styles.trackingMetricValue}>{distanceLabel}</Text>
+                                <Text style={styles.trackingMetricLabel}>Distance</Text>
+                            </View>
+                        </View>
+
+                        <TouchableOpacity style={styles.trackingRecenterButton} onPress={recenterMap}>
+                            <Ionicons name="locate" size={18} color={Colors.primary} />
+                        </TouchableOpacity>
+                    </View>
+
+                    <ScrollView
+                        style={styles.trackingSheet}
+                        contentContainerStyle={[
+                            styles.trackingSheetContent,
+                            showPrimaryActionDock && styles.trackingSheetContentWithDock,
+                        ]}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        <View style={styles.trackingSheetHandle} />
+
+                        <LinearGradient
+                            colors={[Colors.primaryDark, Colors.primary]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.trackingRideCard}
+                        >
+                            <View style={styles.rideSheetTopRow}>
+                                <View style={styles.rideSheetEtaBlock}>
+                                    <Text style={styles.rideSheetStatusLabel}>Suivi livraison</Text>
+                                    <Text style={styles.rideSheetEtaValue}>{durationLabel}</Text>
+                                    <Text style={styles.rideSheetEtaSub}>{businessStatusLabel}</Text>
+                                </View>
+                                <View style={styles.rideSheetDistanceBlock}>
+                                    <Text style={styles.rideSheetDistanceLabel}>Distance</Text>
+                                    <Text style={styles.rideSheetDistanceValue}>{distanceLabel}</Text>
+                                    <Text style={styles.rideSheetDistanceSub}>{routeModeLabel}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.trackingProgressTrack}>
+                                <View style={[styles.trackingProgressFill, { width: `${routeProgressPercent}%` }]} />
+                            </View>
+
+                            <View style={styles.rideSheetDivider} />
+
+                            <View style={styles.rideStopsRow}>
+                                <View style={styles.rideStopsRail}>
+                                    <View style={styles.rideStopDotStart} />
+                                    <View style={styles.rideStopRail} />
+                                    <View style={styles.rideStopDotEnd} />
+                                </View>
+                                <View style={styles.rideStopsContent}>
+                                    <Text style={styles.rideStopLabel}>Retrait vendeur</Text>
+                                    <Text style={styles.rideStopValue} numberOfLines={2}>{pickupLabel}</Text>
+                                    <View style={styles.rideStopSeparator} />
+                                    <Text style={styles.rideStopLabel}>Destination client</Text>
+                                    <Text style={styles.rideStopValue} numberOfLines={2}>{dropoffLabel}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.rideFooterRow}>
+                                <Text style={styles.rideSummaryText} numberOfLines={1}>
+                                    {progressionSummary} - {routeTraceStatus}
+                                </Text>
+                                <View
+                                    style={[
+                                        styles.routeSourcePill,
+                                        routeSource === 'backend' && styles.routeSourcePillBackend,
+                                        !routeHasPolyline && styles.routeSourcePillFallback,
+                                    ]}
+                                >
+                                    <Text style={styles.routeSourcePillText}>{routeTraceStatus}</Text>
+                                </View>
+                            </View>
+                        </LinearGradient>
+
+                        {workflowNextAction ? (
+                            <View style={styles.trackingNextCard}>
+                                <View style={styles.workflowNextIcon}>
+                                    <Ionicons name="flash-outline" size={17} color={Colors.primary} />
+                                </View>
+                                <View style={styles.workflowNextTextWrap}>
+                                    <Text style={styles.workflowNextLabel}>Prochaine action</Text>
+                                    <Text style={styles.workflowNextTitle}>{workflowNextAction.title}</Text>
+                                    <Text style={styles.workflowNextDescription}>{workflowNextAction.description}</Text>
+                                </View>
+                            </View>
+                        ) : null}
+
+                        <View style={styles.trackingTabsCard}>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.workspaceTabsRow}
+                            >
+                                {workspaceTabs.map((tab) => {
+                                    const isActive = activeWorkspaceTab === tab.key;
+                                    return (
+                                        <TouchableOpacity
+                                            key={tab.key}
+                                            style={[
+                                                styles.workspaceTabButton,
+                                                isActive && styles.workspaceTabButtonActive,
+                                            ]}
+                                            onPress={() => setActiveWorkspaceTab(tab.key)}
+                                            activeOpacity={0.9}
+                                        >
+                                            <Ionicons
+                                                name={tab.icon}
+                                                size={14}
+                                                color={isActive ? Colors.white : Colors.primary}
+                                            />
+                                            <Text
+                                                style={[
+                                                    styles.workspaceTabText,
+                                                    isActive && styles.workspaceTabTextActive,
+                                                ]}
+                                            >
+                                                {tab.label}
+                                            </Text>
+                                            <View
+                                                style={[
+                                                    styles.workspaceTabBadge,
+                                                    isActive && styles.workspaceTabBadgeActive,
+                                                ]}
+                                            >
+                                                <Text
+                                                    style={[
+                                                        styles.workspaceTabBadgeText,
+                                                        isActive && styles.workspaceTabBadgeTextActive,
+                                                    ]}
+                                                >
+                                                    {tab.badge}
+                                                </Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </ScrollView>
+                        </View>
+
+                        {activeWorkspaceTab === 'navigation' ? (
+                            <View style={styles.trackingPanel}>
+                                <View style={styles.mapActionsRow}>
+                                    <TouchableOpacity
+                                        style={[styles.mapActionButton, !activeTargetPoint && styles.mapActionButtonDisabled]}
+                                        onPress={openRealtimeNavigation}
+                                        disabled={!activeTargetPoint}
+                                    >
+                                        <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                                        <Text style={styles.mapActionText}>Ouvrir Google Maps</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity style={styles.mapActionSecondary} onPress={recenterMap}>
+                                        <Ionicons name="locate-outline" size={16} color={Colors.primary} />
+                                        <Text style={styles.mapActionSecondaryText}>Recentrer</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.mapHintGrid}>
+                                    <View style={styles.mapHintRow}>
+                                        <Text style={styles.mapHintLabel}>Statut</Text>
+                                        <Text style={styles.mapHintValue}>{businessStatusLabel}</Text>
+                                    </View>
+                                    <View style={styles.mapHintRow}>
+                                        <Text style={styles.mapHintLabel}>Trajet</Text>
+                                        <Text style={styles.mapHintValue} numberOfLines={1}>
+                                            {routeTraceStatus}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.mapHintRow}>
+                                        <Text style={styles.mapHintLabel}>Cible</Text>
+                                        <Text style={styles.mapHintValue} numberOfLines={1}>
+                                            {activeTargetLabel || '-'}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {routeSteps.length > 0 ? (
+                                    <View style={styles.routeInstructionsCard}>
+                                        <View style={styles.routeInstructionsHeader}>
+                                            <Text style={styles.priorityActionsTitle}>Prochaines directions</Text>
+                                            <Text style={styles.priorityActionsSubtitle}>{routeSteps.length} etapes</Text>
+                                        </View>
+                                        {routeSteps.slice(activeStepIndex, activeStepIndex + 4).map((step, index) => (
+                                            <View key={`${step.instruction}-${index}`} style={styles.priorityActionRow}>
+                                                <View style={styles.priorityActionInfo}>
+                                                    <View style={styles.priorityActionIcon}>
+                                                        <Ionicons
+                                                            name={instructionIcon(step.instruction)}
+                                                            size={16}
+                                                            color={Colors.primary}
+                                                        />
+                                                    </View>
+                                                    <View style={styles.priorityActionTextWrap}>
+                                                        <Text style={styles.priorityActionTitle}>{step.instruction}</Text>
+                                                        <Text style={styles.priorityActionSubtitle}>
+                                                            {Math.round(step.distanceMeters)} m - {Math.round(step.durationSeconds / 60)} min
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ) : (
+                                    <View style={styles.noActionState}>
+                                        <Ionicons name="trail-sign-outline" size={18} color={Colors.gray500} />
+                                        <Text style={styles.noActionStateText}>
+                                            Aucune direction detaillee disponible pour le moment.
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
+                        ) : null}
+
+                        {activeWorkspaceTab === 'actions' ? (
+                            <View style={styles.trackingPanel}>
+                                <View style={styles.priorityActionsHeader}>
+                                    <View>
+                                        <Text style={styles.priorityActionsTitle}>Actions prioritaires</Text>
+                                        <Text style={styles.priorityActionsSubtitle}>
+                                            Etape actuelle: {businessStatusLabel}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.priorityActionsMeta}>
+                                        <Text style={styles.priorityActionsMetaText}>
+                                            {availableActionsCount} action(s)
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {prioritizedStepActions.length > 0 ? (
+                                    prioritizedStepActions.map((action, index) => {
+                                        const isPrimaryAction = index === 0;
+                                        const actionLabel =
+                                            action.key === 'accept-delivery'
+                                                ? 'Accepter la course'
+                                                : isPrimaryAction
+                                                    ? 'Executer'
+                                                    : 'Lancer';
+
+                                        return (
+                                            <View
+                                                key={action.key}
+                                                style={[
+                                                    styles.priorityActionRow,
+                                                    isPrimaryAction && styles.priorityActionRowPrimary,
+                                                ]}
+                                            >
+                                                <View style={styles.priorityActionInfo}>
+                                                    <View
+                                                        style={[
+                                                            styles.priorityActionIcon,
+                                                            isPrimaryAction && styles.priorityActionIconPrimary,
+                                                        ]}
+                                                    >
+                                                        <Ionicons
+                                                            name={action.icon}
+                                                            size={16}
+                                                            color={isPrimaryAction ? Colors.accentDark : Colors.primary}
+                                                        />
+                                                    </View>
+                                                    <View style={styles.priorityActionTextWrap}>
+                                                        <Text style={styles.priorityActionTitle}>{action.title}</Text>
+                                                        <Text style={styles.priorityActionSubtitle}>{action.subtitle}</Text>
+                                                    </View>
+                                                </View>
+                                                <Button
+                                                    title={actionLabel}
+                                                    variant={isPrimaryAction ? 'primary' : 'outline'}
+                                                    size={isPrimaryAction ? 'md' : 'sm'}
+                                                    loading={action.loading}
+                                                    onPress={action.onPress}
+                                                    style={isPrimaryAction ? styles.priorityActionCta : undefined}
+                                                    icon={
+                                                        isPrimaryAction ? (
+                                                            <Ionicons
+                                                                name="arrow-forward-circle"
+                                                                size={17}
+                                                                color={Colors.primary}
+                                                                style={styles.priorityActionButtonIcon}
+                                                            />
+                                                        ) : undefined
+                                                    }
+                                                />
+                                            </View>
+                                        );
+                                    })
+                                ) : (
+                                    <View style={styles.noActionState}>
+                                        <Ionicons name="time-outline" size={18} color={Colors.gray500} />
+                                        <Text style={styles.noActionStateText}>
+                                            Aucune action immediate. Suivez la progression de livraison.
+                                        </Text>
+                                    </View>
+                                )}
+                            </View>
+                        ) : null}
+
+                        {activeWorkspaceTab === 'messages' ? (
+                            <View style={styles.trackingPanel}>
+                                <View style={styles.workspaceMessagesHeader}>
+                                    <Text style={styles.priorityActionsTitle}>Messages</Text>
+                                    <Text style={styles.priorityActionsSubtitle}>{latestMessagePreview}</Text>
+                                </View>
+                                <ScrollView style={styles.messagesList} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+                                    {messages.map((msg, index) => (
+                                        <View
+                                            key={`${msg.sentAt}-${index}`}
+                                            style={[
+                                                styles.msgBubble,
+                                                getDeliveryActorId(msg.senderId) === currentUserId
+                                                    ? styles.msgBubbleOwn
+                                                    : styles.msgBubbleOther,
+                                            ]}
+                                        >
+                                            <View style={styles.msgHead}>
+                                                <Text style={styles.msgRole}>{msg.senderRole.replace('_', ' ')}</Text>
+                                                <Text style={styles.msgTime}>{formatClockTime(msg.sentAt)}</Text>
+                                            </View>
+                                            <Text style={styles.msgText}>{msg.message}</Text>
+                                        </View>
+                                    ))}
+                                    {messages.length === 0 ? (
+                                        <Text style={styles.infoText}>Aucun message.</Text>
+                                    ) : null}
+                                </ScrollView>
+                                <View style={styles.msgComposer}>
+                                    <TextInput
+                                        style={styles.msgInput}
+                                        value={messageInput}
+                                        onChangeText={(text) => setMessageInput(normalizeTextInputValue(text))}
+                                        placeholder="Ecrire un message..."
+                                    />
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.sendBtn,
+                                            (!messageInput.trim() || isSendingMessage) && styles.sendBtnDisabled,
+                                        ]}
+                                        onPress={onSendMessage}
+                                        disabled={!messageInput.trim() || isSendingMessage}
+                                    >
+                                        <Ionicons name="send" size={16} color={Colors.white} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ) : null}
+                    </ScrollView>
+                </>
+            ) : (
+                <>
             <View style={styles.header}>
                 <TouchableOpacity style={styles.headerButton} onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={22} color={Colors.primary} />
@@ -2022,30 +2524,62 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                             </View>
 
                             {prioritizedStepActions.length > 0 ? (
-                                prioritizedStepActions.map((action, index) => (
-                                    <View key={action.key} style={styles.priorityActionRow}>
-                                        <View style={styles.priorityActionInfo}>
-                                            <View style={styles.priorityActionIcon}>
-                                                <Ionicons
-                                                    name={action.icon}
-                                                    size={16}
-                                                    color={Colors.primary}
-                                                />
+                                prioritizedStepActions.map((action, index) => {
+                                    const isPrimaryAction = index === 0;
+                                    const actionLabel =
+                                        action.key === 'accept-delivery'
+                                            ? 'Accepter la course'
+                                            : isPrimaryAction
+                                                ? 'Executer'
+                                                : 'Lancer';
+
+                                    return (
+                                        <View
+                                            key={action.key}
+                                            style={[
+                                                styles.priorityActionRow,
+                                                isPrimaryAction && styles.priorityActionRowPrimary,
+                                            ]}
+                                        >
+                                            <View style={styles.priorityActionInfo}>
+                                                <View
+                                                    style={[
+                                                        styles.priorityActionIcon,
+                                                        isPrimaryAction && styles.priorityActionIconPrimary,
+                                                    ]}
+                                                >
+                                                    <Ionicons
+                                                        name={action.icon}
+                                                        size={16}
+                                                        color={isPrimaryAction ? Colors.accentDark : Colors.primary}
+                                                    />
+                                                </View>
+                                                <View style={styles.priorityActionTextWrap}>
+                                                    <Text style={styles.priorityActionTitle}>{action.title}</Text>
+                                                    <Text style={styles.priorityActionSubtitle}>{action.subtitle}</Text>
+                                                </View>
                                             </View>
-                                            <View style={styles.priorityActionTextWrap}>
-                                                <Text style={styles.priorityActionTitle}>{action.title}</Text>
-                                                <Text style={styles.priorityActionSubtitle}>{action.subtitle}</Text>
-                                            </View>
+                                            <Button
+                                                title={actionLabel}
+                                                variant={isPrimaryAction ? 'primary' : 'outline'}
+                                                size={isPrimaryAction ? 'md' : 'sm'}
+                                                loading={action.loading}
+                                                onPress={action.onPress}
+                                                style={isPrimaryAction ? styles.priorityActionCta : undefined}
+                                                icon={
+                                                    isPrimaryAction ? (
+                                                        <Ionicons
+                                                            name="arrow-forward-circle"
+                                                            size={17}
+                                                            color={Colors.primary}
+                                                            style={styles.priorityActionButtonIcon}
+                                                        />
+                                                    ) : undefined
+                                                }
+                                            />
                                         </View>
-                                        <Button
-                                            title={index === 0 ? 'Executer' : 'Lancer'}
-                                            variant={index === 0 ? 'secondary' : 'outline'}
-                                            size="sm"
-                                            loading={action.loading}
-                                            onPress={action.onPress}
-                                        />
-                                    </View>
-                                ))
+                                    );
+                                })
                             ) : (
                                 <View style={styles.noActionState}>
                                     <Ionicons name="time-outline" size={18} color={Colors.gray500} />
@@ -2113,6 +2647,40 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                     ) : null}
                 </View>
             </ScrollView>
+                </>
+            )}
+
+            {showPrimaryActionDock && primaryStepAction ? (
+                <View
+                    style={[
+                        styles.primaryActionDock,
+                        { paddingBottom: Math.max(insets.bottom, Spacing.sm) },
+                    ]}
+                >
+                    <View style={styles.primaryActionDockTextWrap}>
+                        <Text style={styles.primaryActionDockLabel}>Action maintenant</Text>
+                        <Text style={styles.primaryActionDockTitle} numberOfLines={1}>
+                            {primaryStepAction.title}
+                        </Text>
+                    </View>
+                    <Button
+                        title={primaryStepActionLabel}
+                        variant="primary"
+                        size="md"
+                        loading={primaryStepAction.loading}
+                        onPress={primaryStepAction.onPress}
+                        style={styles.primaryActionDockButton}
+                        icon={
+                            <Ionicons
+                                name="arrow-forward-circle"
+                                size={17}
+                                color={Colors.primary}
+                                style={styles.priorityActionButtonIcon}
+                            />
+                        }
+                    />
+                </View>
+            ) : null}
 
             <Modal visible={qrModalVisible} transparent animationType="fade" onRequestClose={closeQrModal}>
                 <View style={styles.modalOverlay}>
@@ -2198,6 +2766,266 @@ export default function DeliveryDetailRouteScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#EDF2FC' },
+    trackingMapPane: {
+        height: Math.max(390, Math.round(SCREEN_HEIGHT * 0.52)),
+        backgroundColor: '#DCE8FB',
+        overflow: 'hidden',
+    },
+    trackingMap: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    trackingTopFade: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        top: 0,
+        height: 190,
+    },
+    trackingTopBar: {
+        position: 'absolute',
+        top: Spacing.sm,
+        left: Spacing.md,
+        right: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    trackingIconButton: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primaryDark + 'B8',
+        borderWidth: 1,
+        borderColor: Colors.white + '35',
+        ...Shadows.md,
+    },
+    trackingTopTitleWrap: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    trackingTopEyebrow: {
+        color: Colors.white + 'C8',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    trackingTopTitle: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    trackingInstructionCard: {
+        position: 'absolute',
+        left: Spacing.md,
+        right: Spacing.md,
+        top: 72,
+        minHeight: 90,
+        borderRadius: BorderRadius.lg,
+        padding: Spacing.sm,
+        backgroundColor: Colors.primaryDark + 'E8',
+        borderWidth: 1,
+        borderColor: Colors.white + '30',
+        flexDirection: 'row',
+        gap: Spacing.sm,
+        alignItems: 'flex-start',
+        ...Shadows.lg,
+    },
+    trackingInstructionIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+    },
+    trackingInstructionCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    trackingInstructionLead: {
+        color: Colors.accent,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    trackingInstructionText: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        lineHeight: 21,
+    },
+    trackingInstructionMeta: {
+        marginTop: 4,
+        color: Colors.white + 'CF',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    trackingMapMetrics: {
+        position: 'absolute',
+        left: Spacing.md,
+        bottom: Spacing.lg + 34,
+        gap: Spacing.xs,
+    },
+    trackingMetricChip: {
+        minWidth: 82,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: '#111827D9',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs,
+        alignItems: 'center',
+        ...Shadows.sm,
+    },
+    trackingMetricValue: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    trackingMetricLabel: {
+        marginTop: 1,
+        color: Colors.white + 'BC',
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    trackingRecenterButton: {
+        position: 'absolute',
+        right: Spacing.md,
+        bottom: Spacing.lg + 38,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+        ...Shadows.lg,
+    },
+    trackingSheet: {
+        flex: 1,
+        marginTop: -34,
+        borderTopLeftRadius: 30,
+        borderTopRightRadius: 30,
+        backgroundColor: '#F7FAFF',
+    },
+    trackingSheetContent: {
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        paddingBottom: 120,
+        gap: Spacing.md,
+    },
+    trackingSheetContentWithDock: {
+        paddingBottom: 176,
+    },
+    trackingSheetHandle: {
+        alignSelf: 'center',
+        width: 54,
+        height: 5,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray300,
+        marginBottom: 2,
+    },
+    trackingRideCard: {
+        borderRadius: BorderRadius.xl,
+        paddingHorizontal: Spacing.lg,
+        paddingVertical: Spacing.md,
+        overflow: 'hidden',
+        ...Shadows.lg,
+    },
+    trackingProgressTrack: {
+        marginTop: Spacing.md,
+        height: 8,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white + '26',
+        overflow: 'hidden',
+    },
+    trackingProgressFill: {
+        height: '100%',
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.accent,
+    },
+    trackingNextCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '14',
+        backgroundColor: Colors.white,
+        ...Shadows.sm,
+    },
+    trackingTabsCard: {
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.xs,
+        ...Shadows.sm,
+    },
+    trackingPanel: {
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '10',
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+        gap: Spacing.sm,
+        ...Shadows.sm,
+    },
+    primaryActionDock: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        backgroundColor: Colors.white + 'F8',
+        borderTopWidth: 1,
+        borderTopColor: Colors.primary + '12',
+    },
+    primaryActionDockTextWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    primaryActionDockLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+    primaryActionDockTitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    primaryActionDockButton: {
+        minWidth: 170,
+        paddingHorizontal: Spacing.md,
+        borderRadius: BorderRadius.full,
+        elevation: 0,
+        shadowOpacity: 0,
+    },
+    routeInstructionsCard: {
+        gap: Spacing.sm,
+    },
+    routeInstructionsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
     header: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2879,6 +3707,10 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primary + '05',
         padding: Spacing.md,
     },
+    priorityActionRowPrimary: {
+        borderColor: Colors.accent + '88',
+        backgroundColor: Colors.accent + '12',
+    },
     priorityActionInfo: {
         flex: 1,
         flexDirection: 'row',
@@ -2895,6 +3727,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    priorityActionIconPrimary: {
+        borderColor: Colors.accent + '90',
+        backgroundColor: Colors.accent + '30',
+    },
     priorityActionTextWrap: { flex: 1 },
     priorityActionTitle: {
         fontSize: Typography.fontSize.sm,
@@ -2905,6 +3741,16 @@ const styles = StyleSheet.create({
         marginTop: 1,
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
+    },
+    priorityActionCta: {
+        minWidth: 144,
+        paddingHorizontal: Spacing.md,
+        borderRadius: BorderRadius.full,
+        elevation: 0,
+        shadowOpacity: 0,
+    },
+    priorityActionButtonIcon: {
+        marginRight: 6,
     },
     noActionState: {
         borderRadius: BorderRadius.md,

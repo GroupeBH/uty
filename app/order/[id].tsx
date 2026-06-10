@@ -9,6 +9,11 @@ import {
 } from '@/components/orders/RequestDeliveryModal';
 import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
+import {
+    useGetDirectionsMutation,
+    useLazyGeocodeQuery,
+    useLazyReverseGeocodeQuery,
+} from '@/store/api/googleMapsApi';
 import { useGetOrderQuery, useRequestDeliveryMutation, useUpdateOrderStatusMutation } from '@/store/api/ordersApi';
 import {
     OrderStatusValue,
@@ -25,9 +30,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
+    ActivityIndicator,
     Image,
     Linking,
     Modal,
+    Platform,
     ScrollView,
     StyleSheet,
     Text,
@@ -35,6 +42,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const STATUS_ACTION_LABELS: Record<OrderStatusValue, string> = {
@@ -51,6 +59,35 @@ const STATUS_ACTION_ICONS: Record<OrderStatusValue, keyof typeof Ionicons.glyphM
     shipped: 'cube-outline',
     delivered: 'checkmark-done-outline',
     cancelled: 'close-circle-outline',
+};
+
+type LatLng = { latitude: number; longitude: number };
+
+type DirectionsWaypointPayload = {
+    address?: string;
+    lat?: number;
+    lng?: number;
+    placeId?: string;
+};
+
+type RoutePreviewStep = {
+    instruction: string;
+    distanceMeters: number;
+    durationSeconds: number;
+};
+
+type RoutePreview = {
+    summary: string;
+    distanceMeters: number;
+    durationSeconds: number;
+    steps: RoutePreviewStep[];
+    coordinates: LatLng[];
+};
+
+type ResolvedRoutePoint = {
+    address: string;
+    point: LatLng;
+    coordinateLabel: string;
 };
 
 const formatAmount = (value: number | undefined, currency?: unknown) =>
@@ -72,7 +109,7 @@ const formatDateTime = (value?: string) => {
 
 const parseCoordinateLabel = (
     value?: string | null,
-): { latitude: number; longitude: number } | null => {
+): LatLng | null => {
     if (!value?.trim()) return null;
     const match = value.trim().match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
     if (!match) return null;
@@ -83,14 +120,256 @@ const parseCoordinateLabel = (
     return { latitude, longitude };
 };
 
-const formatGeoPointLabel = (value?: { coordinates?: number[] } | null): string => {
+const parseGeoPoint = (value?: { coordinates?: number[] } | null): LatLng | null => {
     const coordinates = value?.coordinates;
-    if (!Array.isArray(coordinates) || coordinates.length < 2) return '';
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
     const longitude = Number(coordinates[0]);
     const latitude = Number(coordinates[1]);
-    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return '';
-    return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+    return { latitude, longitude };
 };
+
+const coordinateLabelFromPoint = (point: LatLng): string =>
+    `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
+
+const buildRegionForCoordinates = (points: LatLng[]) => {
+    const fallback = points[0] || { latitude: 5.3365, longitude: -4.0244 };
+    if (points.length < 2) {
+        return {
+            latitude: fallback.latitude,
+            longitude: fallback.longitude,
+            latitudeDelta: 0.035,
+            longitudeDelta: 0.035,
+        };
+    }
+
+    const latitudes = points.map((point) => point.latitude);
+    const longitudes = points.map((point) => point.longitude);
+    const minLat = Math.min(...latitudes);
+    const maxLat = Math.max(...latitudes);
+    const minLng = Math.min(...longitudes);
+    const maxLng = Math.max(...longitudes);
+
+    return {
+        latitude: (minLat + maxLat) / 2,
+        longitude: (minLng + maxLng) / 2,
+        latitudeDelta: Math.max((maxLat - minLat) * 1.6, 0.018),
+        longitudeDelta: Math.max((maxLng - minLng) * 1.6, 0.018),
+    };
+};
+
+const isCoordinateLabel = (value: string): boolean => Boolean(parseCoordinateLabel(value));
+
+const isMissingLocationLabel = (value: string): boolean =>
+    !value.trim() ||
+    /a confirmer|not provided|non renseignee/i.test(value);
+
+const isLikelyDefaultMapPoint = (point: LatLng | null): boolean => {
+    if (!point) return false;
+    return Math.abs(point.latitude - 37.41794) < 0.0002 && Math.abs(point.longitude + 122.08326) < 0.0002;
+};
+
+const formatGeoPointLabel = (value?: { coordinates?: number[] } | null): string => {
+    const point = parseGeoPoint(value);
+    if (!point) return '';
+    return coordinateLabelFromPoint(point);
+};
+
+const stripHtml = (value?: string): string =>
+    (value || '')
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&amp;/g, '&')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const parseMetric = (value: unknown): number => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (value && typeof value === 'object') {
+        const candidate = Number((value as Record<string, unknown>).value ?? 0);
+        return Number.isFinite(candidate) ? candidate : 0;
+    }
+    const candidate = Number(value);
+    return Number.isFinite(candidate) ? candidate : 0;
+};
+
+const formatDistance = (meters: number): string => {
+    if (!Number.isFinite(meters) || meters <= 0) return '--';
+    return meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`;
+};
+
+const formatDuration = (seconds: number): string => {
+    if (!Number.isFinite(seconds) || seconds <= 0) return '--';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return remainingMinutes ? `${hours} h ${remainingMinutes} min` : `${hours} h`;
+};
+
+const decodePolyline = (encoded: string): LatLng[] => {
+    if (!encoded) return [];
+
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+    const coordinates: LatLng[] = [];
+
+    while (index < encoded.length) {
+        let shift = 0;
+        let result = 0;
+        let byte = 0;
+
+        do {
+            byte = encoded.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20 && index < encoded.length);
+
+        lat += (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+        shift = 0;
+        result = 0;
+
+        do {
+            byte = encoded.charCodeAt(index++) - 63;
+            result |= (byte & 0x1f) << shift;
+            shift += 5;
+        } while (byte >= 0x20 && index < encoded.length);
+
+        lng += (result & 1) !== 0 ? ~(result >> 1) : result >> 1;
+        coordinates.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
+    }
+
+    return coordinates;
+};
+
+const parseRouteNumeric = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (value && typeof value === 'object') {
+        const record = value as Record<string, unknown>;
+        return parseRouteNumeric(record.value) ?? parseRouteNumeric(record.amount);
+    }
+    return null;
+};
+
+const parseRoutePoint = (value: unknown): LatLng | null => {
+    if (Array.isArray(value) && value.length >= 2) {
+        const first = parseRouteNumeric(value[0]);
+        const second = parseRouteNumeric(value[1]);
+        if (first === null || second === null) return null;
+
+        let longitude = first;
+        let latitude = second;
+        if (Math.abs(first) <= 90 && Math.abs(second) > 90 && Math.abs(second) <= 180) {
+            latitude = first;
+            longitude = second;
+        }
+        if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+        return { latitude, longitude };
+    }
+
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, unknown>;
+    if (Array.isArray(record.coordinates)) return parseRoutePoint(record.coordinates);
+
+    const latitude = parseRouteNumeric(record.latitude ?? record.lat);
+    const longitude = parseRouteNumeric(record.longitude ?? record.lng ?? record.lon ?? record.long);
+    if (latitude === null || longitude === null) return null;
+    if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+    return { latitude, longitude };
+};
+
+const parseRouteCoordinates = (value: unknown): LatLng[] => {
+    if (!Array.isArray(value)) return [];
+    return value
+        .map((item) => parseRoutePoint(item))
+        .filter((point): point is LatLng => Boolean(point));
+};
+
+const buildDirectionsWaypoint = (
+    point: LatLng | null,
+    address: string,
+): DirectionsWaypointPayload | null => {
+    if (point) return { lat: point.latitude, lng: point.longitude };
+    const trimmedAddress = address.trim();
+    if (!trimmedAddress || /a confirmer/i.test(trimmedAddress)) return null;
+    return { address: trimmedAddress };
+};
+
+const getOrderProductLocationAddress = (product: unknown): string => {
+    if (!product || typeof product !== 'object') return '';
+    const asRecord = product as Record<string, any>;
+    const pickupAddress = typeof asRecord.pickupLocation?.address === 'string'
+        ? asRecord.pickupLocation.address.trim()
+        : '';
+    if (pickupAddress) return pickupAddress;
+
+    const address = Array.isArray(asRecord.address)
+        ? asRecord.address.find((item: unknown) => typeof item === 'string' && item.trim())
+        : '';
+    if (typeof address === 'string' && address.trim()) return address.trim();
+
+    const location = Array.isArray(asRecord.location)
+        ? asRecord.location.find((item: unknown) => typeof item === 'string' && item.trim())
+        : '';
+    return typeof location === 'string' ? location.trim() : '';
+};
+
+const parseDirectionsPreview = (value: unknown): RoutePreview | null => {
+    if (!value || typeof value !== 'object') return null;
+    const record = value as Record<string, any>;
+    const legs = Array.isArray(record.legs) ? record.legs : [];
+    if (legs.length === 0) return null;
+    const directCoordinates = parseRouteCoordinates(
+        record.coordinates ??
+        record.routeCoordinates ??
+        record.path ??
+        record.routePath ??
+        record.points,
+    );
+    const polylineCandidate =
+        record.overviewPolyline ??
+        record.encodedPolyline ??
+        record.routePolyline ??
+        (typeof record.polyline === 'string' ? record.polyline : record.polyline?.points) ??
+        record.overview_polyline?.points;
+    const decodedCoordinates =
+        typeof polylineCandidate === 'string' ? decodePolyline(polylineCandidate) : [];
+    const coordinates =
+        directCoordinates.length >= 2
+            ? directCoordinates
+            : decodedCoordinates.length >= 2
+                ? decodedCoordinates
+                : [];
+
+    const steps = legs
+        .flatMap((leg: any) => (Array.isArray(leg?.steps) ? leg.steps : []))
+        .map((step: any): RoutePreviewStep => ({
+            instruction: stripHtml(step?.htmlInstructions || step?.html_instructions || step?.instruction) || 'Continuer',
+            distanceMeters: parseMetric(step?.distance ?? step?.distanceMeters),
+            durationSeconds: parseMetric(step?.duration ?? step?.durationSeconds),
+        }));
+
+    return {
+        summary: typeof record.summary === 'string' && record.summary.trim() ? record.summary.trim() : 'Itineraire recommande',
+        distanceMeters: legs.reduce((sum: number, leg: any) => sum + parseMetric(leg?.distance ?? leg?.distanceMeters), 0),
+        durationSeconds: legs.reduce((sum: number, leg: any) => sum + parseMetric(leg?.duration ?? leg?.durationSeconds), 0),
+        steps,
+        coordinates,
+    };
+};
+
+const parseApiError = (error: any, fallback: string): string =>
+    (Array.isArray(error?.data?.message) && String(error.data.message[0])) ||
+    error?.data?.message ||
+    error?.data?.error ||
+    error?.message ||
+    fallback;
 
 const getOrderPartyPhone = (party: unknown): string | null => {
     if (!party || typeof party !== 'object') return null;
@@ -128,6 +407,9 @@ export default function OrderDetailScreen() {
     const { user } = useAuth();
     const [updateOrderStatus, { isLoading: isUpdatingStatus }] = useUpdateOrderStatusMutation();
     const [requestDelivery, { isLoading: isRequestingDelivery }] = useRequestDeliveryMutation();
+    const [fetchDirections, { isLoading: isRouteLoading }] = useGetDirectionsMutation();
+    const [triggerGeocode] = useLazyGeocodeQuery();
+    const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
     const { data: order, isLoading, refetch } = useGetOrderQuery(id || '', { skip: !id });
     const [deliveryId, setDeliveryId] = React.useState<string | null>(null);
     const [deliveryIdInput, setDeliveryIdInput] = React.useState('');
@@ -138,6 +420,11 @@ export default function OrderDetailScreen() {
     const [deliveryRequestModalVisible, setDeliveryRequestModalVisible] = React.useState(false);
     const [profileModalVisible, setProfileModalVisible] = React.useState(false);
     const [routeModalVisible, setRouteModalVisible] = React.useState(false);
+    const [routePreview, setRoutePreview] = React.useState<RoutePreview | null>(null);
+    const [routeError, setRouteError] = React.useState('');
+    const [routeRequestKey, setRouteRequestKey] = React.useState('');
+    const [resolvedPickupPoint, setResolvedPickupPoint] = React.useState<ResolvedRoutePoint | null>(null);
+    const [resolvedDeliveryPoint, setResolvedDeliveryPoint] = React.useState<ResolvedRoutePoint | null>(null);
     const [itemsModalVisible, setItemsModalVisible] = React.useState(false);
     const [deliveryRequestForm, setDeliveryRequestForm] = React.useState<RequestDeliveryFormValues>(
         INITIAL_DELIVERY_REQUEST_FORM,
@@ -502,6 +789,20 @@ export default function OrderDetailScreen() {
     const orderCurrency = order.items
         .map((item) => getOrderItemProduct(item)?.currency)
         .find(Boolean);
+    const pickupAddressFromProducts =
+        order.items
+            .map((item) => getOrderProductLocationAddress(getOrderItemProduct(item)))
+            .find(Boolean) || '';
+    const orderPickupLocation = order.pickupLocation || null;
+    const orderPickupAddress =
+        orderPickupLocation?.address?.trim?.() ||
+        order.pickupLocationLabel?.trim?.() ||
+        pickupAddressFromProducts;
+    const storedPickupPoint = parseGeoPoint(orderPickupLocation);
+    const storedPickupLabel =
+        isLikelyDefaultMapPoint(storedPickupPoint) && !orderPickupAddress
+            ? ''
+            : formatGeoPointLabel(orderPickupLocation);
     const progressMeta = getOrderProgressMeta(order.status);
     const showSellerActionsDock = isSeller;
     const canRequestDeliveryNow = isSeller && order.status === 'confirmed' && !deliveryId;
@@ -509,13 +810,31 @@ export default function OrderDetailScreen() {
     const hasSellerStatusActions = nextStatuses.length > 0;
     const pickupLocationLabel =
         pickupLocationInput.trim() ||
-        formatGeoPointLabel((order as any)?.pickupLocation) ||
+        orderPickupAddress ||
+        storedPickupLabel ||
         'Point de retrait a confirmer';
     const deliveryLocationLabel =
         deliveryLocationInput.trim() ||
         order.deliveryAddress?.trim() ||
         formatGeoPointLabel(order.deliveryLocation) ||
         'Adresse de livraison a confirmer';
+    const rawPickupPoint =
+        parseCoordinateLabel(pickupLocationInput) ||
+        storedPickupPoint;
+    const pickupPoint =
+        isLikelyDefaultMapPoint(rawPickupPoint) && !orderPickupAddress
+            ? null
+            : rawPickupPoint;
+    const deliveryPoint =
+        parseCoordinateLabel(deliveryLocationInput) ||
+        parseGeoPoint(order.deliveryLocation);
+    const routeSourceRequestKey = JSON.stringify({
+        pickupLabel: pickupLocationLabel,
+        pickupPoint,
+        rawPickupPoint,
+        deliveryLabel: deliveryLocationLabel,
+        deliveryPoint,
+    });
     const deliveryPanelStatus = deliveryId
         ? 'Livraison creee'
         : canRequestDeliveryNow
@@ -597,6 +916,146 @@ export default function OrderDetailScreen() {
         }));
         setDeliveryRequestModalVisible(true);
     };
+    const resolveRoutePoint = async ({
+        point,
+        addressCandidates,
+        missingMessage,
+        defaultPointMessage,
+    }: {
+        point: LatLng | null;
+        addressCandidates: string[];
+        missingMessage: string;
+        defaultPointMessage?: string;
+    }): Promise<ResolvedRoutePoint> => {
+        const address = addressCandidates
+            .map((candidate) => (candidate || '').trim())
+            .find((candidate) => candidate && !isCoordinateLabel(candidate) && !isMissingLocationLabel(candidate));
+
+        if (address) {
+            try {
+                const response = await triggerGeocode({
+                    address,
+                    language: 'fr',
+                    region: 'cd',
+                }).unwrap();
+                const lat = Number(response?.lat);
+                const lng = Number(response?.lng);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    const resolvedPoint = { latitude: lat, longitude: lng };
+                    return {
+                        address: response?.formattedAddress || address,
+                        point: resolvedPoint,
+                        coordinateLabel: coordinateLabelFromPoint(resolvedPoint),
+                    };
+                }
+            } catch {
+                // Le reverse geocode ci-dessous servira de filet si une coordonnee fiable existe.
+            }
+
+            if (point && !isLikelyDefaultMapPoint(point)) {
+                return {
+                    address,
+                    point,
+                    coordinateLabel: coordinateLabelFromPoint(point),
+                };
+            }
+        }
+
+        if (point && !isLikelyDefaultMapPoint(point)) {
+            try {
+                const response = await triggerReverseGeocode({
+                    lat: point.latitude,
+                    lng: point.longitude,
+                    language: 'fr',
+                }).unwrap();
+                return {
+                    address: response?.formattedAddress || coordinateLabelFromPoint(point),
+                    point,
+                    coordinateLabel: coordinateLabelFromPoint(point),
+                };
+            } catch {
+                return {
+                    address: coordinateLabelFromPoint(point),
+                    point,
+                    coordinateLabel: coordinateLabelFromPoint(point),
+                };
+            }
+        }
+
+        if (point && isLikelyDefaultMapPoint(point)) {
+            throw new Error(defaultPointMessage || missingMessage);
+        }
+
+        throw new Error(missingMessage);
+    };
+    const loadRoutePreview = async () => {
+        setRouteError('');
+        try {
+            const [pickupResolved, deliveryResolved] = await Promise.all([
+                resolveRoutePoint({
+                    point: rawPickupPoint,
+                    addressCandidates: [
+                        pickupLocationInput,
+                        orderPickupAddress,
+                        pickupLocationLabel,
+                    ],
+                    missingMessage: 'Le point de retrait vendeur est manquant pour calculer le trajet.',
+                    defaultPointMessage:
+                        'Le point de retrait utilise une coordonnee par defaut. Ajoutez une adresse ou un point exact de retrait.',
+                }),
+                resolveRoutePoint({
+                    point: deliveryPoint,
+                    addressCandidates: [
+                        deliveryLocationInput,
+                        order.deliveryAddress,
+                        deliveryLocationLabel,
+                    ],
+                    missingMessage: 'La destination client est manquante pour calculer le trajet.',
+                }),
+            ]);
+            setResolvedPickupPoint(pickupResolved);
+            setResolvedDeliveryPoint(deliveryResolved);
+
+            const nextRequestKey = JSON.stringify({
+                pickup: pickupResolved.coordinateLabel,
+                delivery: deliveryResolved.coordinateLabel,
+                source: routeSourceRequestKey,
+            });
+            if (routePreview && routeRequestKey === nextRequestKey) return;
+
+            const origin = buildDirectionsWaypoint(pickupResolved.point, pickupResolved.address);
+            const destination = buildDirectionsWaypoint(deliveryResolved.point, deliveryResolved.address);
+            if (!origin || !destination) {
+                throw new Error('Impossible de preparer les deux points du trajet.');
+            }
+            const response = await fetchDirections({
+                origin,
+                destination,
+                language: 'fr',
+                region: 'cd',
+            }).unwrap();
+            const parsedRoute = parseDirectionsPreview(
+                response?.routes?.[0] ?? response?.route ?? response,
+            );
+            if (!parsedRoute) {
+                throw new Error('Aucun itineraire disponible.');
+            }
+            setRoutePreview(parsedRoute);
+            setRouteRequestKey(nextRequestKey);
+            setRouteError(
+                parsedRoute.coordinates.length >= 2
+                    ? ''
+                    : 'La Directions API n a pas renvoye de trace routiere pour ces points.',
+            );
+        } catch (error) {
+            setRoutePreview(null);
+            setRouteError(parseApiError(error, 'Impossible de recuperer le trajet pour cette adresse.'));
+        }
+    };
+    const openRouteModal = () => {
+        setRouteModalVisible(true);
+        void loadRoutePreview();
+    };
     const sellerDockBottomInset = Math.max(insets.bottom, Spacing.sm);
     const sellerDockEstimatedHeight = hasSellerStatusActions
         ? 176
@@ -609,6 +1068,22 @@ export default function OrderDetailScreen() {
         ? sellerDockEstimatedHeight + sellerDockBottomInset + Spacing.lg
         : Spacing.xxxl;
     const modalBottomPadding = Math.max(insets.bottom, Spacing.lg);
+    const pickupRouteAddress = resolvedPickupPoint?.address || pickupLocationLabel;
+    const pickupRouteCoordinates =
+        resolvedPickupPoint?.coordinateLabel ||
+        (rawPickupPoint && !isLikelyDefaultMapPoint(rawPickupPoint) ? coordinateLabelFromPoint(rawPickupPoint) : '');
+    const deliveryRouteAddress = resolvedDeliveryPoint?.address || deliveryLocationLabel;
+    const deliveryRouteCoordinates =
+        resolvedDeliveryPoint?.coordinateLabel ||
+        (deliveryPoint ? coordinateLabelFromPoint(deliveryPoint) : '');
+    const routeStartPoint = resolvedPickupPoint?.point || pickupPoint;
+    const routeEndPoint = resolvedDeliveryPoint?.point || deliveryPoint;
+    const routeLineCoordinates = routePreview?.coordinates || [];
+    const routeMapPoints =
+        routeLineCoordinates.length >= 2
+            ? routeLineCoordinates
+            : [routeStartPoint, routeEndPoint].filter((point): point is LatLng => Boolean(point));
+    const routeMapRegion = buildRegionForCoordinates(routeMapPoints);
 
     return (
         <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -678,7 +1153,7 @@ export default function OrderDetailScreen() {
 
                     <TouchableOpacity
                         style={styles.quickCard}
-                        onPress={() => setRouteModalVisible(true)}
+                        onPress={openRouteModal}
                         activeOpacity={0.88}
                     >
                         <View style={[styles.quickCardIconWrap, styles.quickCardIconSoft]}>
@@ -1054,23 +1529,101 @@ export default function OrderDetailScreen() {
                         </View>
 
                         <View style={styles.routeMapCard}>
-                            <View style={styles.routeMapGridLine} />
-                            <View style={[styles.routeMapLine, styles.routeMapLineFirst]} />
-                            <View style={[styles.routeMapLine, styles.routeMapLineSecond]} />
-                            <View style={[styles.routeMapPin, styles.routeMapPinStart]}>
-                                <Ionicons name="storefront-outline" size={15} color={Colors.white} />
+                            <MapView
+                                key={`${routeRequestKey}-${routeLineCoordinates.length}`}
+                                style={styles.routeMap}
+                                {...(Platform.OS === 'android' ? { provider: PROVIDER_GOOGLE } : {})}
+                                initialRegion={routeMapRegion}
+                                scrollEnabled={false}
+                                zoomEnabled={false}
+                                rotateEnabled={false}
+                                pitchEnabled={false}
+                            >
+                                {routeStartPoint ? (
+                                    <Marker
+                                        coordinate={routeStartPoint}
+                                        title="Retrait vendeur"
+                                        description={pickupRouteAddress}
+                                        anchor={{ x: 0.5, y: 0.5 }}
+                                        tracksViewChanges={false}
+                                        tracksInfoWindowChanges={false}
+                                    >
+                                        <View style={[styles.routeMapMarker, styles.routeMapMarkerStart]}>
+                                            <Ionicons name="storefront" size={15} color={Colors.white} />
+                                        </View>
+                                    </Marker>
+                                ) : null}
+                                {routeEndPoint ? (
+                                    <Marker
+                                        coordinate={routeEndPoint}
+                                        title="Destination client"
+                                        description={deliveryRouteAddress}
+                                        anchor={{ x: 0.5, y: 0.5 }}
+                                        tracksViewChanges={false}
+                                        tracksInfoWindowChanges={false}
+                                    >
+                                        <View style={[styles.routeMapMarker, styles.routeMapMarkerEnd]}>
+                                            <Ionicons name="location" size={15} color={Colors.white} />
+                                        </View>
+                                    </Marker>
+                                ) : null}
+                                {routeLineCoordinates.length >= 2 ? (
+                                    <>
+                                        <Polyline coordinates={routeLineCoordinates} strokeWidth={9} strokeColor={Colors.white + 'E8'} />
+                                        <Polyline coordinates={routeLineCoordinates} strokeWidth={5} strokeColor={Colors.primary} />
+                                    </>
+                                ) : null}
+                            </MapView>
+                            <View style={styles.routeSourcePill}>
+                                {isRouteLoading ? (
+                                    <ActivityIndicator size="small" color={Colors.white} />
+                                ) : (
+                                    <Ionicons name="cloud-done-outline" size={13} color={Colors.white} />
+                                )}
+                                <Text style={styles.routeSourceText}>Directions API</Text>
                             </View>
-                            <View style={[styles.routeMapPin, styles.routeMapPinEnd]}>
-                                <Ionicons name="location-outline" size={15} color={Colors.white} />
-                            </View>
+                            {!isRouteLoading && routeLineCoordinates.length < 2 ? (
+                                <View style={styles.routeMapNotice}>
+                                    <Ionicons name="trail-sign-outline" size={13} color={Colors.primary} />
+                                    <Text style={styles.routeMapNoticeText}>Trace routiere en attente</Text>
+                                </View>
+                            ) : null}
                         </View>
+
+                        {routeError ? (
+                            <View style={styles.routeErrorBox}>
+                                <Ionicons name="alert-circle-outline" size={18} color={Colors.warning} />
+                                <Text style={styles.routeErrorText}>{routeError}</Text>
+                            </View>
+                        ) : null}
+
+                        {routePreview ? (
+                            <View style={styles.routeMetricsCard}>
+                                <View style={styles.routeMetric}>
+                                    <Text style={styles.routeMetricLabel}>Distance</Text>
+                                    <Text style={styles.routeMetricValue}>
+                                        {formatDistance(routePreview.distanceMeters)}
+                                    </Text>
+                                </View>
+                                <View style={styles.routeMetricDivider} />
+                                <View style={styles.routeMetric}>
+                                    <Text style={styles.routeMetricLabel}>Duree estimee</Text>
+                                    <Text style={styles.routeMetricValue}>
+                                        {formatDuration(routePreview.durationSeconds)}
+                                    </Text>
+                                </View>
+                            </View>
+                        ) : null}
 
                         <View style={styles.routeSteps}>
                             <View style={styles.routeStep}>
                                 <View style={styles.routeStepMarker} />
                                 <View style={styles.routeStepCopy}>
                                     <Text style={styles.routeStepLabel}>Retrait vendeur</Text>
-                                    <Text style={styles.routeStepValue}>{pickupLocationLabel}</Text>
+                                    <Text style={styles.routeStepValue}>{pickupRouteAddress}</Text>
+                                    {pickupRouteCoordinates ? (
+                                        <Text style={styles.routeStepCoordinates}>{pickupRouteCoordinates}</Text>
+                                    ) : null}
                                 </View>
                             </View>
                             <View style={styles.routeStepConnector} />
@@ -1078,10 +1631,44 @@ export default function OrderDetailScreen() {
                                 <View style={[styles.routeStepMarker, styles.routeStepMarkerEnd]} />
                                 <View style={styles.routeStepCopy}>
                                     <Text style={styles.routeStepLabel}>Destination client</Text>
-                                    <Text style={styles.routeStepValue}>{deliveryLocationLabel}</Text>
+                                    <Text style={styles.routeStepValue}>{deliveryRouteAddress}</Text>
+                                    {deliveryRouteCoordinates ? (
+                                        <Text style={styles.routeStepCoordinates}>{deliveryRouteCoordinates}</Text>
+                                    ) : null}
                                 </View>
                             </View>
                         </View>
+
+                        {routePreview?.steps.length ? (
+                            <View style={styles.routeInstructions}>
+                                <View style={styles.routeInstructionsHeader}>
+                                    <Text style={styles.routeInstructionsTitle}>{routePreview.summary}</Text>
+                                    <Text style={styles.routeInstructionsMeta}>
+                                        {routePreview.steps.length} etapes
+                                    </Text>
+                                </View>
+                                {routePreview.steps.slice(0, 4).map((step, index) => (
+                                    <View key={`${step.instruction}-${index}`} style={styles.routeInstructionRow}>
+                                        <View style={styles.routeInstructionIndex}>
+                                            <Text style={styles.routeInstructionIndexText}>{index + 1}</Text>
+                                        </View>
+                                        <View style={styles.routeInstructionCopy}>
+                                            <Text style={styles.routeInstructionText} numberOfLines={2}>
+                                                {step.instruction}
+                                            </Text>
+                                            <Text style={styles.routeInstructionMeta}>
+                                                {formatDistance(step.distanceMeters)} - {formatDuration(step.durationSeconds)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ))}
+                            </View>
+                        ) : isRouteLoading ? (
+                            <View style={styles.routeLoadingBox}>
+                                <ActivityIndicator size="small" color={Colors.primary} />
+                                <Text style={styles.routeLoadingText}>Calcul du trajet...</Text>
+                            </View>
+                        ) : null}
                     </View>
                 </View>
             </Modal>
@@ -1658,61 +2245,120 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
     },
     routeMapCard: {
-        height: 168,
+        height: 220,
         borderRadius: BorderRadius.lg,
         overflow: 'hidden',
-        backgroundColor: Colors.primary + '08',
+        backgroundColor: '#EAF1FB',
         borderWidth: 1,
         borderColor: Colors.primary + '12',
         marginBottom: Spacing.md,
     },
-    routeMapGridLine: {
-        position: 'absolute',
-        left: -24,
-        right: -24,
-        top: 78,
-        height: 1,
-        backgroundColor: Colors.primary + '10',
-        transform: [{ rotate: '-18deg' }],
+    routeMap: {
+        width: '100%',
+        height: '100%',
     },
-    routeMapLine: {
-        position: 'absolute',
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: Colors.primary,
-    },
-    routeMapLineFirst: {
-        left: 58,
-        top: 52,
-        width: 118,
-        transform: [{ rotate: '18deg' }],
-    },
-    routeMapLineSecond: {
-        right: 62,
-        top: 102,
-        width: 122,
-        transform: [{ rotate: '-24deg' }],
-    },
-    routeMapPin: {
-        position: 'absolute',
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+    routeMapMarker: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
         backgroundColor: Colors.primary,
-        borderWidth: 4,
+        borderWidth: 3,
         borderColor: Colors.white,
         ...Shadows.sm,
     },
-    routeMapPinStart: {
-        left: 36,
-        top: 34,
+    routeMapMarkerStart: {
+        backgroundColor: Colors.primary,
     },
-    routeMapPinEnd: {
-        right: 36,
-        bottom: 30,
+    routeMapMarkerEnd: {
         backgroundColor: Colors.accentDark,
+    },
+    routeSourcePill: {
+        position: 'absolute',
+        left: Spacing.md,
+        bottom: Spacing.md,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+    },
+    routeMapNotice: {
+        position: 'absolute',
+        right: Spacing.md,
+        bottom: Spacing.md,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white + 'F2',
+        borderWidth: 1,
+        borderColor: Colors.primary + '1E',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+    },
+    routeMapNoticeText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    routeSourceText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    routeErrorBox: {
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.warning + '12',
+        borderWidth: 1,
+        borderColor: Colors.warning + '22',
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    routeErrorText: {
+        flex: 1,
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 19,
+    },
+    routeMetricsCard: {
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        backgroundColor: Colors.primary + '08',
+        padding: Spacing.md,
+        marginBottom: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    routeMetric: {
+        flex: 1,
+        minWidth: 0,
+    },
+    routeMetricLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+    routeMetricValue: {
+        marginTop: 3,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    routeMetricDivider: {
+        width: 1,
+        alignSelf: 'stretch',
+        backgroundColor: Colors.primary + '16',
+        marginHorizontal: Spacing.md,
     },
     routeSteps: {
         borderRadius: BorderRadius.lg,
@@ -1720,6 +2366,85 @@ const styles = StyleSheet.create({
         borderColor: Colors.gray100,
         backgroundColor: Colors.gray50,
         padding: Spacing.md,
+    },
+    routeInstructions: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+        gap: Spacing.sm,
+    },
+    routeInstructionsHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+        paddingBottom: Spacing.xs,
+        borderBottomWidth: 1,
+        borderBottomColor: Colors.gray100,
+    },
+    routeInstructionsTitle: {
+        flex: 1,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    routeInstructionsMeta: {
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    routeInstructionRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    routeInstructionIndex: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+    },
+    routeInstructionIndexText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    routeInstructionCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    routeInstructionText: {
+        color: Colors.gray700,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
+        lineHeight: 18,
+    },
+    routeInstructionMeta: {
+        marginTop: 2,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+    },
+    routeLoadingBox: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+    },
+    routeLoadingText: {
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.semibold,
     },
     routeStep: {
         flexDirection: 'row',
@@ -1759,6 +2484,12 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontWeight: Typography.fontWeight.bold,
         lineHeight: 19,
+    },
+    routeStepCoordinates: {
+        marginTop: 3,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
     },
     modalScroll: {
         maxHeight: 440,

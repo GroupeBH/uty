@@ -31,6 +31,13 @@ export interface OrderItem {
         imageUrl?: string;
         images?: string[];
         currency?: string;
+        address?: string[];
+        location?: string[];
+        pickupLocation?: {
+            type?: string;
+            coordinates?: number[];
+            address?: string;
+        } | null;
     } | null;
     name?: string;
     title?: string;
@@ -56,6 +63,8 @@ export interface Order {
     totalAmount: number;
     deliveryAddress: string;
     deliveryLocation?: OrderGeoPoint | null;
+    pickupLocation?: (OrderGeoPoint & { address?: string }) | null;
+    pickupLocationLabel?: string | null;
     status: OrderStatusValue;
     deliveryPersonId?: string | Record<string, any> | null;
     viewerIsBuyer?: boolean;
