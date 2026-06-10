@@ -4,12 +4,14 @@
 
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { useAuth } from '@/hooks/useAuth';
 import { OTP_DISABLED } from '@/utils/featureFlags';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
+    ActivityIndicator,
     ScrollView,
     StyleSheet,
     Switch,
@@ -49,16 +51,49 @@ type SettingsSection = {
 
 export default function SettingsScreen() {
     const router = useRouter();
+    const { deleteAccount } = useAuth();
     const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
 
     const [emailNotifications, setEmailNotifications] = useState(true);
     const [pushNotifications, setPushNotifications] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
     const [biometricAuth, setBiometricAuth] = useState(false);
+    const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
     const showComingSoon = React.useCallback(() => {
         showStyledAlert('Info', 'Fonctionnalite a venir', undefined, 'info');
     }, [showStyledAlert]);
+
+    const handleDeleteAccount = React.useCallback(async () => {
+        if (isDeletingAccount) {
+            return;
+        }
+
+        setIsDeletingAccount(true);
+        try {
+            await deleteAccount();
+            showStyledAlert(
+                'Compte supprime',
+                'Votre compte a ete supprime avec succes. Vous avez ete deconnecte.',
+                [
+                    {
+                        text: 'OK',
+                        onPress: () => router.replace('/(tabs)' as any),
+                    },
+                ],
+                'success',
+            );
+        } catch (error: any) {
+            showStyledAlert(
+                'Erreur',
+                error?.message || 'Impossible de supprimer votre compte pour le moment.',
+                undefined,
+                'error',
+            );
+        } finally {
+            setIsDeletingAccount(false);
+        }
+    }, [deleteAccount, isDeletingAccount, router, showStyledAlert]);
 
     const settingsSections: SettingsSection[] = [
         {
@@ -133,6 +168,14 @@ export default function SettingsScreen() {
             items: [
                 {
                     kind: 'action',
+                    icon: 'location-outline',
+                    label: 'Adresses',
+                    subtitle: 'Retrait, livraison et lieux habituels',
+                    gradient: Gradients.cool,
+                    onPress: () => router.push('/addresses'),
+                },
+                {
+                    kind: 'action',
                     icon: 'card-outline',
                     label: 'Moyens de paiement',
                     subtitle: 'Paiement a la livraison et options locales',
@@ -164,7 +207,9 @@ export default function SettingsScreen() {
                     kind: 'action',
                     icon: 'trash-outline',
                     label: 'Supprimer mon compte',
-                    subtitle: 'Supprimer definitivement mon compte',
+                    subtitle: isDeletingAccount
+                        ? 'Suppression en cours...'
+                        : 'Supprimer definitivement mon compte',
                     gradient: Gradients.warm,
                     isDestructive: true,
                     onPress: () => {
@@ -176,7 +221,9 @@ export default function SettingsScreen() {
                                 {
                                     text: 'Supprimer',
                                     style: 'destructive',
-                                    onPress: showComingSoon,
+                                    onPress: () => {
+                                        void handleDeleteAccount();
+                                    },
                                 },
                             ],
                             'warning',
@@ -250,7 +297,7 @@ export default function SettingsScreen() {
                                     ]}
                                     onPress={item.kind === 'action' ? item.onPress : undefined}
                                     activeOpacity={0.7}
-                                    disabled={item.kind !== 'action'}
+                                    disabled={item.kind !== 'action' || (item.isDestructive && isDeletingAccount)}
                                 >
                                     <View style={styles.settingItemLeft}>
                                         <LinearGradient
@@ -285,6 +332,8 @@ export default function SettingsScreen() {
                                             }}
                                             thumbColor={item.value ? Colors.primary : Colors.gray400}
                                         />
+                                    ) : item.isDestructive && isDeletingAccount ? (
+                                        <ActivityIndicator size="small" color={Colors.error} />
                                     ) : (
                                         <Ionicons
                                             name="chevron-forward"

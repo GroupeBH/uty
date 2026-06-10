@@ -8,6 +8,7 @@ import { CategoryIcon } from '@/components/CategoryIcon';
 import { useAuth } from '@/hooks/useAuth';
 import { useDeleteAnnouncementMutation, useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { isOutOfStockQuantity } from '@/utils/productAvailability';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -258,8 +259,6 @@ export default function MyAnnouncementsScreen() {
             : alertState.variant === 'error'
               ? 'Petit soucis'
               : 'Petit conseil';
-    const alertPointsText =
-        alertState.variant === 'success' ? '+10 XP' : 'Astuce';
     const alertProgress =
         alertState.variant === 'success'
             ? 0.8
@@ -267,12 +266,15 @@ export default function MyAnnouncementsScreen() {
               ? 0.35
               : 0.55;
 
-    const renderAnnouncementCard = ({ item }: any) => (
-        <TouchableOpacity
-            style={styles.card}
-            onPress={() => router.push(`/product/${item._id}`)}
-            activeOpacity={0.9}
-        >
+    const renderAnnouncementCard = ({ item }: any) => {
+        const isOutOfStock = isOutOfStockQuantity(item.quantity);
+
+        return (
+            <TouchableOpacity
+                style={styles.card}
+                onPress={() => router.push(`/product/${item._id}`)}
+                activeOpacity={0.9}
+            >
             <View style={styles.cardContent}>
                 {/* Image */}
                 <View style={styles.imageContainer}>
@@ -286,6 +288,11 @@ export default function MyAnnouncementsScreen() {
                     {item.isSold && (
                         <View style={styles.soldBadge}>
                             <Text style={styles.soldText}>VENDU</Text>
+                        </View>
+                    )}
+                    {isOutOfStock && (
+                        <View style={styles.outOfStockBadge}>
+                            <Text style={styles.outOfStockText} numberOfLines={1}>Rupture de stock</Text>
                         </View>
                     )}
                 </View>
@@ -307,7 +314,12 @@ export default function MyAnnouncementsScreen() {
                         </Text>
                     </View>
                     <View style={styles.cardFooter}>
-                        <Text style={styles.cardPrice}>
+                        <Text
+                            style={styles.cardPrice}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.65}
+                        >
                             {formatCurrencyAmount(item.price, item.currency)}
                         </Text>
                         <View style={styles.cardStats}>
@@ -331,8 +343,9 @@ export default function MyAnnouncementsScreen() {
                     <Ionicons name="ellipsis-vertical" size={20} color={Colors.textSecondary} />
                 </TouchableOpacity>
             </View>
-        </TouchableOpacity>
-    );
+            </TouchableOpacity>
+        );
+    };
 
     const renderEmpty = () => (
         <View style={styles.emptyContainer}>
@@ -606,10 +619,6 @@ export default function MyAnnouncementsScreen() {
                                 <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
                                     <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
                                 </View>
-                                <View style={styles.alertPoints}>
-                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
-                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
-                                </View>
                             </View>
                         </View>
                         <Text style={styles.alertTitle}>{alertState.title}</Text>
@@ -709,6 +718,8 @@ const styles = StyleSheet.create({
     },
     imageContainer: {
         position: 'relative',
+        width: 100,
+        height: 100,
     },
     image: {
         width: 100,
@@ -734,6 +745,24 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.white,
+    },
+    outOfStockBadge: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: Colors.error,
+        paddingHorizontal: Spacing.xs,
+        paddingVertical: Spacing.xs,
+        alignItems: 'center',
+        borderBottomLeftRadius: BorderRadius.lg,
+        borderBottomRightRadius: BorderRadius.lg,
+    },
+    outOfStockText: {
+        color: Colors.white,
+        fontSize: 9,
+        fontWeight: Typography.fontWeight.extrabold,
+        textTransform: 'uppercase',
     },
     cardInfo: {
         flex: 1,
@@ -768,6 +797,9 @@ const styles = StyleSheet.create({
         marginTop: Spacing.sm,
     },
     cardPrice: {
+        flex: 1,
+        minWidth: 0,
+        marginRight: Spacing.sm,
         fontSize: Typography.fontSize.lg,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.primary,
@@ -775,6 +807,7 @@ const styles = StyleSheet.create({
     cardStats: {
         flexDirection: 'row',
         gap: Spacing.md,
+        flexShrink: 0,
     },
     stat: {
         flexDirection: 'row',
@@ -1111,20 +1144,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
-    },
-    alertPoints: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs / 2,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-    },
-    alertPointsText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textSecondary,
     },
     alertTitle: {
         fontSize: Typography.fontSize.lg,

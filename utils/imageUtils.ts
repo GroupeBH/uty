@@ -1,4 +1,22 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import * as ImageManipulator from 'expo-image-manipulator';
+
+const ANNOUNCEMENT_IMAGE_MAX_DIMENSION = 1600;
+const ANNOUNCEMENT_IMAGE_COMPRESS_QUALITY = 0.72;
+
+export interface AnnouncementImageInput {
+    uri: string;
+    fileName?: string | null;
+    width?: number | null;
+    height?: number | null;
+}
+
+export interface PreparedAnnouncementImage {
+    uri: string;
+    name: string;
+    type: string;
+    size?: number;
+}
 
 /**
  * Convertit une URI d'image en base64
@@ -56,6 +74,87 @@ export const getImageMimeType = (uri: string): string => {
         default:
             return 'image/jpeg';
     }
+};
+
+const buildCompressedImageName = (name?: string | null): string => {
+    const fallback = `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const baseName = (name || fallback)
+        .replace(/\.[^.]+$/, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80) || fallback;
+
+    return `${baseName}.jpg`;
+};
+
+const getResizeAction = (
+    width?: number | null,
+    height?: number | null,
+): ImageManipulator.Action[] => {
+    const numericWidth = Number(width);
+    const numericHeight = Number(height);
+
+    if (
+        !Number.isFinite(numericWidth) ||
+        !Number.isFinite(numericHeight) ||
+        numericWidth <= 0 ||
+        numericHeight <= 0
+    ) {
+        return [{ resize: { width: ANNOUNCEMENT_IMAGE_MAX_DIMENSION } }];
+    }
+
+    const longestSide = Math.max(numericWidth, numericHeight);
+    if (longestSide <= ANNOUNCEMENT_IMAGE_MAX_DIMENSION) {
+        return [];
+    }
+
+    const ratio = ANNOUNCEMENT_IMAGE_MAX_DIMENSION / longestSide;
+    return [
+        {
+            resize: {
+                width: Math.round(numericWidth * ratio),
+                height: Math.round(numericHeight * ratio),
+            },
+        },
+    ];
+};
+
+export const prepareAnnouncementImage = async (
+    image: AnnouncementImageInput,
+): Promise<PreparedAnnouncementImage> => {
+    const manipulated = await ImageManipulator.manipulateAsync(
+        image.uri,
+        getResizeAction(image.width, image.height),
+        {
+            compress: ANNOUNCEMENT_IMAGE_COMPRESS_QUALITY,
+            format: ImageManipulator.SaveFormat.JPEG,
+        },
+    );
+
+    let size: number | undefined;
+    try {
+        const info = await FileSystem.getInfoAsync(manipulated.uri);
+        size = info.exists && typeof info.size === 'number' ? info.size : undefined;
+    } catch {
+        size = undefined;
+    }
+
+    return {
+        uri: manipulated.uri,
+        name: buildCompressedImageName(image.fileName),
+        type: 'image/jpeg',
+        size,
+    };
+};
+
+export const prepareAnnouncementImages = async (
+    images: AnnouncementImageInput[],
+): Promise<PreparedAnnouncementImage[]> => {
+    const preparedImages: PreparedAnnouncementImage[] = [];
+    for (const image of images) {
+        preparedImages.push(await prepareAnnouncementImage(image));
+    }
+    return preparedImages;
 };
 
 /**

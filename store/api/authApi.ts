@@ -17,6 +17,7 @@ export interface RegisterDto {
     image?: string;
     pin: string;
     googleRegistrationToken?: string;
+    appleRegistrationToken?: string;
 }
 
 export interface LoginDto {
@@ -28,9 +29,27 @@ export interface GoogleMobileAuthDto {
     idToken: string;
 }
 
+export interface AppleMobileAuthDto {
+    identityToken: string;
+    authorizationCode?: string;
+    nonce?: string;
+    fullName?: {
+        givenName?: string | null;
+        familyName?: string | null;
+    };
+}
+
 export interface ChangePinDto {
     currentPin: string;
     newPin: string;
+}
+
+export interface UpdateProfileDto {
+    username?: string;
+    firstName: string;
+    lastName: string;
+    email?: string;
+    image?: string;
 }
 
 export interface ResetPinDto {
@@ -48,7 +67,7 @@ export interface GoogleRegistrationRequiredResponse {
     message: string;
     registrationToken: string;
     profile: {
-        provider: 'google';
+        provider: 'google' | 'apple';
         email?: string;
         image?: string;
         firstName: string;
@@ -57,6 +76,7 @@ export interface GoogleRegistrationRequiredResponse {
 }
 
 export type GoogleMobileAuthResponse = AuthResponse | GoogleRegistrationRequiredResponse;
+export type AppleMobileAuthResponse = AuthResponse | GoogleRegistrationRequiredResponse;
 
 export interface User {
     _id: string;
@@ -124,15 +144,37 @@ export const authApi = baseApi.injectEndpoints({
                 body: dto,
             }),
         }),
+        appleMobile: builder.mutation<AppleMobileAuthResponse, AppleMobileAuthDto>({
+            query: (dto) => ({
+                url: '/auth/apple/mobile',
+                method: 'POST',
+                body: dto,
+            }),
+        }),
         logout: builder.mutation<{ message: string }, void>({
             query: () => ({
                 url: '/auth/logout',
                 method: 'POST',
             }),
         }),
+        deleteAccount: builder.mutation<{ deleted: boolean; message: string }, void>({
+            query: () => ({
+                url: '/users/me',
+                method: 'DELETE',
+            }),
+            invalidatesTags: ['User', 'Cart', 'Order', 'Messaging'],
+        }),
         getProfile: builder.query<User, void>({
             query: () => '/users/profile',
             providesTags: ['User'],
+        }),
+        updateProfile: builder.mutation<User, UpdateProfileDto>({
+            query: (dto) => ({
+                url: '/users/profile',
+                method: 'PATCH',
+                body: dto,
+            }),
+            invalidatesTags: ['User'],
         }),
         refreshToken: builder.mutation<AuthResponse, { refresh_token: string }>({
             query: () => ({
@@ -159,8 +201,11 @@ export const {
     useChangePinMutation,
     useResetPinMutation,
     useGoogleMobileMutation,
+    useAppleMobileMutation,
     useLogoutMutation,
+    useDeleteAccountMutation,
     useGetProfileQuery,
+    useUpdateProfileMutation,
     useRefreshTokenMutation,
     useUpdateFcmTokenMutation,
 } = authApi;

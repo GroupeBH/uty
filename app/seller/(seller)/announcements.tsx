@@ -3,6 +3,7 @@ import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { formatCurrencyAmount } from '@/utils/currency';
+import { isOutOfStockQuantity } from '@/utils/productAvailability';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
@@ -66,6 +67,7 @@ export default function SellerAnnouncementsTab() {
                 ) : (
                     sortedAnnouncements.map((announcement) => {
                         const image = announcement.images?.[0];
+                        const isOutOfStock = isOutOfStockQuantity(announcement.quantity);
                         return (
                             <TouchableOpacity
                                 key={announcement._id}
@@ -81,12 +83,22 @@ export default function SellerAnnouncementsTab() {
                                             <Ionicons name="image-outline" size={18} color={Colors.gray400} />
                                         </View>
                                     )}
+                                    {isOutOfStock && (
+                                        <View style={styles.outOfStockBadge}>
+                                            <Text style={styles.outOfStockText}>Rupture{'\n'}de stock</Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <View style={styles.cardBody}>
                                     <Text style={styles.cardTitle} numberOfLines={2}>
                                         {announcement.name || 'Annonce'}
                                     </Text>
-                                    <Text style={styles.cardPrice}>
+                                    <Text
+                                        style={styles.cardPrice}
+                                        numberOfLines={1}
+                                        adjustsFontSizeToFit
+                                        minimumFontScale={0.7}
+                                    >
                                         {formatCurrencyAmount(announcement.price, announcement.currency)}
                                     </Text>
                                     <Text style={styles.cardMeta}>
@@ -170,6 +182,23 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
     },
+    outOfStockBadge: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: Colors.error,
+        paddingVertical: 3,
+        alignItems: 'center',
+    },
+    outOfStockText: {
+        color: Colors.white,
+        fontSize: 8,
+        fontWeight: Typography.fontWeight.extrabold,
+        lineHeight: 9,
+        textAlign: 'center',
+        textTransform: 'uppercase',
+    },
     cardBody: {
         flex: 1,
     },
@@ -183,6 +212,7 @@ const styles = StyleSheet.create({
         color: Colors.accentDark,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.extrabold,
+        minWidth: 0,
     },
     cardMeta: {
         marginTop: 2,

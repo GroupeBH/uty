@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const IOS_DEPLOYMENT_TARGET = '15.5';
+type ExpoPluginConfig = NonNullable<ExpoConfig['plugins']>[number] | ConfigPlugin;
 
 const hasPackage = (packageName: string): boolean => {
     try {
@@ -19,12 +20,12 @@ const readWebClientIdFromGoogleServices = (filePath: string): string | undefined
         const resolvedPath = path.resolve(process.cwd(), filePath);
         const raw = fs.readFileSync(resolvedPath, 'utf-8');
         const parsed = JSON.parse(raw) as {
-            client?: Array<{
-                oauth_client?: Array<{
+            client?: {
+                oauth_client?: {
                     client_id?: string;
                     client_type?: number;
-                }>;
-            }>;
+                }[];
+            }[];
         };
 
         for (const client of parsed.client ?? []) {
@@ -154,6 +155,7 @@ end
 export default ({ config }: ConfigContext): ExpoConfig => {
     const hasFirebaseApp = hasPackage('@react-native-firebase/app');
     const hasGoogleSignin = hasPackage('@react-native-google-signin/google-signin');
+    const hasAppleAuthentication = hasPackage('expo-apple-authentication');
     const androidGoogleServicesFile =
         process.env.GOOGLE_SERVICES_JSON?.trim() || './google-services.json';
     const iosGoogleServicesFile =
@@ -174,7 +176,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         config.version ||
         '1.0.0';
 
-    const plugins: NonNullable<ExpoConfig['plugins']> = [
+    const plugins: ExpoPluginConfig[] = [
         'expo-router',
         'expo-secure-store',
         [
@@ -214,6 +216,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         plugins.push('@react-native-firebase/app');
     }
 
+    if (hasAppleAuthentication) {
+        plugins.push('expo-apple-authentication');
+    }
+
     if (hasGoogleSignin) {
         if (googleIosUrlScheme) {
             plugins.push([
@@ -251,6 +257,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ios: {
             bundleIdentifier: 'com.gbh.uty',
             supportsTablet: true,
+            ...(hasAppleAuthentication ? { usesAppleSignIn: true } : {}),
             ...(hasFirebaseApp ? { googleServicesFile: iosGoogleServicesFile } : {}),
             config: {
                 googleMapsApiKey: process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY,
@@ -280,7 +287,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             output: 'static',
             favicon: './assets/images/uty.png',
         },
-        plugins,
+        plugins: plugins as NonNullable<ExpoConfig['plugins']>,
         experiments: {
             typedRoutes: true,
             reactCompiler: true,

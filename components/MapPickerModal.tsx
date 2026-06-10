@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Animated,
     FlatList,
     Modal,
     Platform,
@@ -49,6 +50,75 @@ type MapPickerModalProps = {
     onConfirm: (location: MapPickerLocation) => void;
 };
 
+const normalizeString = (value: unknown): string => {
+    if (typeof value !== 'string') return '';
+    return value.trim();
+};
+
+const firstNonEmptyString = (...values: unknown[]): string => {
+    for (const value of values) {
+        const normalized = normalizeString(value);
+        if (normalized) return normalized;
+    }
+    return '';
+};
+
+const toNumber = (value: unknown): number | null => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+};
+
+const formatCoordinateAddress = (latitude: number, longitude: number) =>
+    `Point GPS: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+
+const formatExpoAddress = (address?: Partial<Location.LocationGeocodedAddress> | null): string => {
+    if (!address) return '';
+    const streetLine = [address.streetNumber, address.street].filter(Boolean).join(' ').trim();
+    return Array.from(
+        new Set(
+            [
+                (address as any)?.name,
+                streetLine,
+                address.district,
+                address.city || address.subregion,
+                address.region,
+                address.country,
+            ]
+                .map((value) => normalizeString(value))
+                .filter(Boolean),
+        ),
+    ).join(', ');
+};
+
+const getResponseAddress = (response: any, fallback?: string): string =>
+    firstNonEmptyString(
+        response?.formattedAddress,
+        response?.formatted_address,
+        response?.address,
+        response?.name,
+        response?.result?.formattedAddress,
+        response?.result?.formatted_address,
+        response?.data?.formattedAddress,
+        response?.data?.formatted_address,
+        fallback,
+    );
+
+const getResponseLatitude = (response: any): number | null =>
+    toNumber(response?.lat) ??
+    toNumber(response?.latitude) ??
+    toNumber(response?.geometry?.location?.lat) ??
+    toNumber(response?.result?.lat) ??
+    toNumber(response?.result?.geometry?.location?.lat) ??
+    toNumber(response?.data?.lat);
+
+const getResponseLongitude = (response: any): number | null =>
+    toNumber(response?.lng) ??
+    toNumber(response?.longitude) ??
+    toNumber(response?.geometry?.location?.lng) ??
+    toNumber(response?.result?.lng) ??
+    toNumber(response?.result?.geometry?.location?.lng) ??
+    toNumber(response?.data?.lng);
+
 export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     visible,
     initialLocation,
@@ -65,10 +135,12 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     const [searchResults, setSearchResults] = useState<MapSearchResult[]>([]);
     const [mapRegion, setMapRegion] = useState<Region | null>(null);
     const [isEditingSearch, setIsEditingSearch] = useState(false);
+    const [isConfirming, setIsConfirming] = useState(false);
     const mapRef = useRef<MapView | null>(null);
     const reverseGeocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastGeocodedRef = useRef<MapPickerLocation | null>(null);
     const isUpdatingFromMapRef = useRef(false);
+    const pinLiftAnim = useRef(new Animated.Value(0)).current;
 
     const [triggerAutocomplete, { data: autocompleteData, isFetching: isAutocompleteLoading }] =
         useLazyPlacesAutocompleteQuery();
@@ -96,6 +168,76 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         return Array.from(new Set([...configHints, ...fallbackHints])).slice(0, 10);
     }, [appConfig?.geography?.featuredCommunes, appConfig?.geography?.featuredLandmarks]);
     const addressExample = appConfig?.geography?.addressExamples?.[0] || KINSHASA_ADDRESS_EXAMPLES[0];
+    const selectedAddress = normalizeString(selected?.address);
+    const selectedDisplayAddress =
+        selected && selectedAddress.toLowerCase() !== 'adresse non trouvée'
+            ? selectedAddress
+            : selected
+              ? formatCoordinateAddress(selected.latitude, selected.longitude)
+              : '';
+    const coordinateLabel = selected
+        ? `${selected.latitude.toFixed(5)}, ${selected.longitude.toFixed(5)}`
+        : '';
+    const footerTitle = isPanning
+        ? 'Point en cours de selection'
+        : isReverseGeocoding
+          ? "Recherche de l'adresse"
+          : selectedDisplayAddress
+            ? 'Point selectionne'
+            : 'Deplacez la carte pour choisir un point';
+    const footerSubtitle = isPanning
+        ? 'Relachez la carte quand le marqueur est sur le bon endroit.'
+        : isReverseGeocoding
+          ? 'Nous recuperons le libelle du lieu.'
+          : selectedDisplayAddress || 'Touchez un point, cherchez une adresse ou utilisez votre position.';
+    const pinAnimatedStyle = {
+        transform: [
+            {
+                translateY: pinLiftAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0, -18],
+                }),
+            },
+            {
+                scale: pinLiftAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 1.08],
+                }),
+            },
+        ],
+    };
+    const pinShadowAnimatedStyle = {
+        opacity: pinLiftAnim.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0.22, 0.1],
+        }),
+        transform: [
+            {
+                scale: pinLiftAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [1, 0.55],
+                }),
+            },
+        ],
+    };
+
+    const liftPin = () => {
+        Animated.spring(pinLiftAnim, {
+            toValue: 1,
+            useNativeDriver: true,
+            friction: 7,
+            tension: 90,
+        }).start();
+    };
+
+    const dropPin = () => {
+        Animated.spring(pinLiftAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+            friction: 6,
+            tension: 75,
+        }).start();
+    };
 
     useEffect(() => {
         if (!visible) {
@@ -136,6 +278,20 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     }, [visible, initialLocation, defaultCenter]);
 
     useEffect(() => {
+        if (!visible) {
+            pinLiftAnim.setValue(0);
+        }
+    }, [visible, pinLiftAnim]);
+
+    useEffect(() => {
+        return () => {
+            if (reverseGeocodeTimer.current) {
+                clearTimeout(reverseGeocodeTimer.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
         if (!selected) return;
         if (isUpdatingFromMapRef.current) {
             isUpdatingFromMapRef.current = false;
@@ -164,12 +320,16 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         const timeout = setTimeout(() => {
             triggerAutocomplete({
                 input: searchQuery,
+                locationLat: defaultCenter.latitude,
+                locationLng: defaultCenter.longitude,
+                radius: 100000,
                 language: 'fr',
+                region: 'cd',
             });
         }, 350);
 
         return () => clearTimeout(timeout);
-    }, [searchQuery, triggerAutocomplete, visible]);
+    }, [defaultCenter, searchQuery, triggerAutocomplete, visible]);
 
     const reverseGeocodeLocation = async (
         latitude: number,
@@ -182,13 +342,31 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                 lng: longitude,
                 language: "fr",
             }).unwrap();
-            const address = response?.formattedAddress;
-            setSelected((prev) => (prev ? { ...prev, address } : { latitude, longitude, address }));
+            let address = getResponseAddress(response);
+            if (!address) {
+                try {
+                    const [expoAddress] = await Location.reverseGeocodeAsync({ latitude, longitude });
+                    address = formatExpoAddress(expoAddress);
+                } catch {
+                    address = '';
+                }
+            }
+            const resolvedAddress = address || formatCoordinateAddress(latitude, longitude);
+            setSelected((prev) =>
+                prev
+                    ? { ...prev, latitude, longitude, address: resolvedAddress }
+                    : { latitude, longitude, address: resolvedAddress },
+            );
             if (address && shouldUpdateSearch && !isEditingSearch) {
                 setSearchQuery(address);
             }
-        } catch (error) {
-            setSelected((prev) => (prev ? { ...prev } : { latitude, longitude }));
+        } catch {
+            const fallbackAddress = formatCoordinateAddress(latitude, longitude);
+            setSelected((prev) =>
+                prev
+                    ? { ...prev, latitude, longitude, address: fallbackAddress }
+                    : { latitude, longitude, address: fallbackAddress },
+            );
         }
     };
 
@@ -213,7 +391,14 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         }
 
         setSelected((prev) =>
-            prev ? { ...prev, latitude, longitude } : { latitude, longitude }
+            prev
+                ? {
+                      ...prev,
+                      latitude,
+                      longitude,
+                      address: prev.address || formatCoordinateAddress(latitude, longitude),
+                  }
+                : { latitude, longitude, address: formatCoordinateAddress(latitude, longitude) },
         );
 
         const last = lastGeocodedRef.current;
@@ -237,12 +422,14 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
     const handleRegionChangeComplete = (region: Region) => {
         setSuggestionsVisible(false);
         setIsPanning(false);
+        dropPin();
         scheduleReverseGeocode(region.latitude, region.longitude, true);
     };
 
     const handleRegionChange = (region: Region) => {
         if (!isPanning) {
             setIsPanning(true);
+            liftPin();
         }
         setSuggestionsVisible(false);
     };
@@ -272,17 +459,21 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         setSuggestionsVisible(false);
         setSearchResults([]);
         try {
-            const response = await triggerGeocode({ address: description, language: "fr" }).unwrap();
-            const latitude = response?.lat;
-            const longitude = response?.lng;
+            const response = await triggerGeocode({
+                address: description,
+                language: "fr",
+                region: 'cd',
+            }).unwrap();
+            const latitude = getResponseLatitude(response);
+            const longitude = getResponseLongitude(response);
             if (typeof latitude === "number" && typeof longitude === "number") {
                 setSelected({
                     latitude,
                     longitude,
-                    address: response?.formattedAddress || description,
+                    address: getResponseAddress(response, description),
                 });
             }
-        } catch (error) {
+        } catch {
             // noop
         }
     };
@@ -291,7 +482,7 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         setSelected({
             latitude: result.latitude,
             longitude: result.longitude,
-            address: result.address,
+            address: result.address || result.title || formatCoordinateAddress(result.latitude, result.longitude),
         });
         setSearchQuery(result.title);
         setSearchResults([]);
@@ -308,18 +499,26 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
 
         setSuggestionsVisible(false);
         try {
-            const response = await triggerTextSearch({ query, language: "fr" }).unwrap();
+            const response = await triggerTextSearch({
+                query,
+                language: "fr",
+                locationLat: defaultCenter.latitude,
+                locationLng: defaultCenter.longitude,
+                radius: 100000,
+            }).unwrap();
             const results = (Array.isArray(response) ? response : [])
                 .map((item: any, index: number) => {
-                    const latitude = item?.lat;
-                    const longitude = item?.lng;
+                    const latitude = getResponseLatitude(item);
+                    const longitude = getResponseLongitude(item);
                     if (typeof latitude !== "number" || typeof longitude !== "number") {
                         return null;
                     }
+                    const title = firstNonEmptyString(item?.name, item?.mainText, item?.formattedAddress, query);
+                    const address = getResponseAddress(item, title || query);
                     return {
                         id: item?.placeId || `${latitude}-${longitude}-${index}`,
-                        title: item?.name || item?.formattedAddress || query,
-                        address: item?.formattedAddress || item?.name || query,
+                        title,
+                        address: address || formatCoordinateAddress(latitude, longitude),
                         latitude,
                         longitude,
                     } as MapSearchResult;
@@ -328,10 +527,30 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                 .slice(0, 6) as MapSearchResult[];
 
             setSearchResults(results);
-            if (results.length === 1) {
+            if (results.length > 0) {
                 handleSearchResultSelect(results[0]);
+                return;
             }
-        } catch (error) {
+
+            const geocodeResponse = await triggerGeocode({
+                address: `${query}, Kinshasa, République démocratique du Congo`,
+                language: "fr",
+                region: 'cd',
+            }).unwrap();
+            const latitude = getResponseLatitude(geocodeResponse);
+            const longitude = getResponseLongitude(geocodeResponse);
+            if (typeof latitude === 'number' && typeof longitude === 'number') {
+                handleSearchResultSelect({
+                    id: `geocode-${latitude}-${longitude}`,
+                    title: query,
+                    address:
+                        getResponseAddress(geocodeResponse, query) ||
+                        formatCoordinateAddress(latitude, longitude),
+                    latitude,
+                    longitude,
+                });
+            }
+        } catch {
             setSearchResults([]);
         }
     };
@@ -346,11 +565,63 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
         void handleSearchSubmit(value);
     };
 
-    const handleConfirm = () => {
-        if (selected) {
-            onConfirm(selected);
+    const handleUseCurrentLocation = async () => {
+        if (isLocating) return null;
+        setIsLocating(true);
+        try {
+            const { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                return null;
+            }
+            const current = await Location.getCurrentPositionAsync({
+                accuracy: Location.Accuracy.Balanced,
+            });
+            const location = {
+                latitude: current.coords.latitude,
+                longitude: current.coords.longitude,
+            };
+            scheduleReverseGeocode(location.latitude, location.longitude);
+            return location;
+        } catch {
+            return null;
+        } finally {
+            setIsLocating(false);
         }
-        onClose();
+    };
+
+    const handleConfirm = async () => {
+        if (isConfirming) return;
+        setIsConfirming(true);
+        try {
+            let finalSelection = selected;
+            if (!finalSelection) {
+                const currentLocation = await handleUseCurrentLocation();
+                if (currentLocation) {
+                    finalSelection = {
+                        ...currentLocation,
+                        address: `${currentLocation.latitude.toFixed(5)}, ${currentLocation.longitude.toFixed(5)}`,
+                    };
+                }
+            }
+
+            if (!finalSelection) {
+                return;
+            }
+
+            const finalAddress =
+                firstNonEmptyString(finalSelection.address).toLowerCase() === 'adresse non trouvée'
+                    ? ''
+                    : firstNonEmptyString(finalSelection.address);
+            onConfirm({
+                ...finalSelection,
+                address:
+                    finalAddress ||
+                    `${finalSelection.latitude.toFixed(5)}, ${finalSelection.longitude.toFixed(5)}`,
+            });
+            onClose();
+        } finally {
+            setIsConfirming(false);
+        }
     };
 
     const centerCoordinate = selected
@@ -366,11 +637,22 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
             <SafeAreaView style={styles.container} edges={['top']}>
                 <View style={styles.header}>
                     <TouchableOpacity style={styles.headerButton} onPress={onClose}>
-                        <Ionicons name="close" size={24} color={Colors.textPrimary} />
+                        <Ionicons name="arrow-back" size={23} color={Colors.textPrimary} />
                     </TouchableOpacity>
-                    <Text style={styles.headerTitle}>Choisir un point</Text>
-                    <TouchableOpacity style={styles.headerButton} onPress={handleConfirm}>
-                        <Ionicons name="checkmark" size={24} color={Colors.primary} />
+                    <View style={styles.headerCopy}>
+                        <Text style={styles.headerTitle}>Choisir un point</Text>
+                        <Text style={styles.headerSubtitle}>Recherche, carte ou position actuelle</Text>
+                    </View>
+                    <TouchableOpacity
+                        style={[styles.headerButton, styles.headerConfirmButton]}
+                        onPress={handleConfirm}
+                        disabled={isConfirming}
+                    >
+                        {isConfirming ? (
+                            <ActivityIndicator size="small" color={Colors.primary} />
+                        ) : (
+                            <Ionicons name="checkmark" size={22} color={Colors.primary} />
+                        )}
                     </TouchableOpacity>
                 </View>
 
@@ -396,31 +678,59 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                                 setIsEditingSearch(false);
                                 setSuggestionsVisible(false);
                             }}
+                            autoComplete="off"
+                            autoCorrect={false}
+                            autoCapitalize="none"
                         />
                         {(isAutocompleteLoading || isGeocoding || isTextSearching) && (
                             <ActivityIndicator size="small" color={Colors.primary} />
                         )}
-                    </View>
-                    <ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.hintsScrollContent}
-                    >
-                        {featuredHints.map((hint) => (
+                        {searchQuery.trim().length > 0 &&
+                        !(isAutocompleteLoading || isGeocoding || isTextSearching) ? (
                             <TouchableOpacity
-                                key={hint}
-                                style={styles.hintChip}
-                                onPress={() => handleHintPress(hint)}
-                                activeOpacity={0.85}
+                                style={styles.searchIconButton}
+                                onPress={() => {
+                                    setSearchQuery('');
+                                    setSearchResults([]);
+                                    setSuggestionsVisible(false);
+                                }}
                             >
-                                <Ionicons name="navigate-outline" size={14} color={Colors.primary} />
-                                <Text style={styles.hintChipText}>{hint}</Text>
+                                <Ionicons name="close-circle" size={18} color={Colors.gray400} />
                             </TouchableOpacity>
-                        ))}
-                    </ScrollView>
-                    <Text style={styles.searchHelpText}>
-                        Commencez par un repere connu de Kinshasa si vous ne connaissez pas l adresse exacte.
-                    </Text>
+                        ) : null}
+                        <TouchableOpacity
+                            style={styles.searchSubmitButton}
+                            onPress={() => handleSearchSubmit()}
+                            disabled={isAutocompleteLoading || isGeocoding || isTextSearching}
+                        >
+                            <Ionicons name="arrow-forward" size={18} color={Colors.white} />
+                        </TouchableOpacity>
+                    </View>
+                    {!searchQuery.trim() ? (
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={styles.hintsScrollContent}
+                        >
+                            {featuredHints.map((hint) => (
+                                <TouchableOpacity
+                                    key={hint}
+                                    style={styles.hintChip}
+                                    onPress={() => handleHintPress(hint)}
+                                    activeOpacity={0.85}
+                                >
+                                    <Ionicons name="navigate-outline" size={14} color={Colors.primary} />
+                                    <Text style={styles.hintChipText}>{hint}</Text>
+                                </TouchableOpacity>
+                            ))}
+                        </ScrollView>
+                    ) : null}
+                    <View style={styles.pickerHint}>
+                        <Ionicons name="move-outline" size={16} color={Colors.primary} />
+                        <Text style={styles.searchHelpText}>
+                            Deplacez la carte, touchez un point ou cherchez une adresse. Confirmez quand le marqueur est bien place.
+                        </Text>
+                    </View>
                     {suggestionsVisible && suggestions.length > 0 && (
                         <View style={styles.suggestions}>
                             <FlatList
@@ -487,9 +797,11 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                     />
 
                     <View style={styles.centerPinContainer} pointerEvents="none">
-                        <View style={styles.centerPinHalo} />
-                        <Ionicons name="location" size={38} color={Colors.primary} />
-                        <View style={styles.centerPinShadow} />
+                        <Animated.View style={[styles.centerPinGraphic, pinAnimatedStyle]}>
+                            <View style={styles.centerPinHalo} />
+                            <Ionicons name="location" size={40} color={Colors.primary} style={styles.centerPinIcon} />
+                        </Animated.View>
+                        <Animated.View style={[styles.centerPinShadow, pinShadowAnimatedStyle]} />
                     </View>
 
                     {showGoogleKeyWarning && (
@@ -504,20 +816,8 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                     <View style={styles.mapActions}>
                         <TouchableOpacity
                             style={styles.mapActionButton}
-                            onPress={async () => {
-                                if (isLocating) return;
-                                setIsLocating(true);
-                                const { status } = await Location.requestForegroundPermissionsAsync();
-                                if (status === 'granted') {
-                                    const current = await Location.getCurrentPositionAsync({});
-                                    const location = {
-                                        latitude: current.coords.latitude,
-                                        longitude: current.coords.longitude,
-                                    };
-                                    scheduleReverseGeocode(location.latitude, location.longitude);
-                                }
-                                setIsLocating(false);
-                            }}
+                            onPress={handleUseCurrentLocation}
+                            disabled={isLocating}
                         >
                             <LinearGradient colors={Gradients.primary} style={styles.mapActionGradient}>
                                 {isLocating || isReverseGeocoding ? (
@@ -536,22 +836,39 @@ export const MapPickerModal: React.FC<MapPickerModalProps> = ({
                 {selected && (
                     <BottomActionBar style={styles.footer}>
                         <View style={styles.footerInfo}>
+                            <View style={styles.footerIcon}>
                             {isPanning || isReverseGeocoding ? (
                                 <ActivityIndicator size="small" color={Colors.primary} />
                             ) : (
                                 <Ionicons name="pin" size={18} color={Colors.primary} />
                             )}
+                            </View>
+                            <View style={styles.footerCopy}>
+                                <Text style={styles.footerTitle} numberOfLines={1}>
+                                    {footerTitle}
+                                </Text>
                             <Text style={styles.footerText} numberOfLines={2}>
-                                {isPanning
-                                    ? "Déplacez la carte pour sélectionner le point"
-                                    : isReverseGeocoding
-                                      ? "Recherche de l'adresse..."
-                                      : selected.address || "Adresse non trouvée"}
+                                {footerSubtitle}
                             </Text>
+                                {coordinateLabel ? (
+                                    <Text style={styles.footerCoords}>{coordinateLabel}</Text>
+                                ) : null}
+                            </View>
                         </View>
-                        <TouchableOpacity style={styles.confirmButton} onPress={handleConfirm}>
+                        <TouchableOpacity
+                            style={[styles.confirmButton, isConfirming && styles.confirmButtonDisabled]}
+                            onPress={handleConfirm}
+                            disabled={isConfirming}
+                        >
                             <LinearGradient colors={Gradients.primary} style={styles.confirmGradient}>
-                                <Text style={styles.confirmText}>Valider</Text>
+                                {isConfirming ? (
+                                    <ActivityIndicator size="small" color={Colors.white} />
+                                ) : (
+                                    <>
+                                        <Ionicons name="checkmark" size={17} color={Colors.white} />
+                                        <Text style={styles.confirmText}>Confirmer</Text>
+                                    </>
+                                )}
                             </LinearGradient>
                         </TouchableOpacity>
                     </BottomActionBar>
@@ -580,11 +897,26 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
     },
+    headerCopy: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: Spacing.sm,
+    },
+    headerSubtitle: {
+        marginTop: 2,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
     headerButton: {
         width: 40,
         height: 40,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    headerConfirmButton: {
+        backgroundColor: Colors.primary + '10',
     },
     searchWrapper: {
         paddingHorizontal: Spacing.lg,
@@ -625,7 +957,7 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.semibold,
     },
     searchHelpText: {
-        marginTop: Spacing.sm,
+        flex: 1,
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
         lineHeight: 20,
@@ -634,6 +966,33 @@ const styles = StyleSheet.create({
         flex: 1,
         fontSize: Typography.fontSize.base,
         color: Colors.textPrimary,
+    },
+    searchIconButton: {
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    searchSubmitButton: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+    },
+    pickerHint: {
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.primary + '08',
+        borderWidth: 1,
+        borderColor: Colors.primary + '12',
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
     },
     suggestions: {
         marginTop: Spacing.sm,
@@ -677,10 +1036,18 @@ const styles = StyleSheet.create({
         position: "absolute",
         top: "50%",
         left: "50%",
-        marginLeft: -12,
-        marginTop: -32,
+        width: 56,
+        height: 72,
+        marginLeft: -28,
+        marginTop: -52,
         alignItems: "center",
         justifyContent: "center",
+    },
+    centerPinGraphic: {
+        width: 56,
+        height: 56,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     centerPinHalo: {
         position: "absolute",
@@ -690,12 +1057,17 @@ const styles = StyleSheet.create({
         backgroundColor: Colors.primary,
         opacity: 0.15,
     },
+    centerPinIcon: {
+        textShadowColor: 'rgba(0, 0, 0, 0.18)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 5,
+    },
     centerPinShadow: {
-        width: 12,
-        height: 4,
-        borderRadius: 2,
+        width: 20,
+        height: 6,
+        borderRadius: 3,
         backgroundColor: "rgba(0, 0, 0, 0.2)",
-        marginTop: -2,
+        marginTop: -4,
     },
     mapActions: {
         position: 'absolute',
@@ -770,21 +1142,53 @@ const styles = StyleSheet.create({
     },
     footerInfo: {
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         gap: Spacing.sm,
         marginBottom: Spacing.md,
     },
+    footerIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+    },
+    footerCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    footerTitle: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
     footerText: {
         flex: 1,
+        marginTop: 2,
         fontSize: Typography.fontSize.sm,
-        color: Colors.textPrimary,
+        color: Colors.gray600,
+        lineHeight: 19,
+    },
+    footerCoords: {
+        marginTop: 4,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
     },
     confirmButton: {
         borderRadius: BorderRadius.lg,
         overflow: 'hidden',
     },
+    confirmButtonDisabled: {
+        opacity: 0.68,
+    },
     confirmGradient: {
+        minHeight: 48,
         alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: Spacing.xs,
         paddingVertical: Spacing.md,
     },
     confirmText: {

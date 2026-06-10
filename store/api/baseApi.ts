@@ -132,6 +132,7 @@ export const baseApi = createApi({
         'Currencies',
         'Notification',
         'Messaging',
+        'ContactRequest',
     ],
     endpoints: () => ({}),
 });

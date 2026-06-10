@@ -11,6 +11,54 @@ export type DeliveryStatusValue =
     | 'failed'
     | 'cancelled';
 
+export type DeliveryBusinessStatus =
+    | 'RECHERCHE_LIVREUR'
+    | 'LIVREUR_ASSIGNE'
+    | 'EN_ROUTE_VERS_VENDEUR'
+    | 'LIVREUR_ARRIVE_CHEZ_VENDEUR'
+    | 'COLIS_RECUPERE'
+    | 'EN_ROUTE_VERS_CLIENT'
+    | 'LIVREUR_ARRIVE_CHEZ_CLIENT'
+    | 'LIVRAISON_TERMINEE'
+    | 'LIVRAISON_ANNULEE'
+    | 'LIVRAISON_ECHOUEE';
+
+export type DeliveryWorkflowActorRole =
+    | 'buyer'
+    | 'seller'
+    | 'delivery_person'
+    | 'delivery_person_candidate'
+    | 'observer';
+
+export interface DeliveryWorkflowAction {
+    key: string;
+    actorRole?: DeliveryWorkflowActorRole;
+    title: string;
+    description: string;
+}
+
+export interface DeliveryWorkflowMilestone {
+    code: DeliveryBusinessStatus;
+    label: string;
+    done: boolean;
+    current: boolean;
+}
+
+export interface DeliveryWorkflow {
+    actorRole: DeliveryWorkflowActorRole;
+    businessStatus: DeliveryBusinessStatus;
+    businessLabel: string;
+    currentStepIndex: number;
+    totalSteps: number;
+    progressPercent: number;
+    isTerminal: boolean;
+    trackingActive: boolean;
+    requiresPickupQr: boolean;
+    requiresDropoffQr: boolean;
+    milestones: DeliveryWorkflowMilestone[];
+    nextAction: DeliveryWorkflowAction;
+}
+
 export interface DeliveryGeoPoint {
     type: string;
     coordinates: number[];
@@ -72,6 +120,7 @@ export interface Delivery {
     sellerId: string | OrderParty;
     deliveryPersonId?: string | { _id?: string; userId?: string | OrderParty } | null;
     status: DeliveryStatusValue;
+    workflow?: DeliveryWorkflow;
     pickupLocation: string;
     deliveryLocation: string;
     pickupCoordinates?: DeliveryGeoPoint | null;
@@ -104,6 +153,7 @@ export interface Delivery {
 export interface DeliveryTracking {
     id: string;
     status: DeliveryStatusValue;
+    workflow?: DeliveryWorkflow;
     trackingActive: boolean;
     currentLocation: DeliveryGeoPoint | null;
     pickupLocation: string;
@@ -132,6 +182,10 @@ export interface DeliveryTracking {
 export interface RequestDeliveryDto {
     pickupLocation?: string;
     deliveryLocation?: string;
+    scheduledPickupAt?: string;
+    scheduledDeliveryAt?: string;
+    comment?: string;
+    deliveryMode?: string;
 }
 
 export interface DeliveryQrPayload {
@@ -149,16 +203,40 @@ export interface RateOrderDto {
 }
 
 export const DELIVERY_STATUS_LABELS: Record<DeliveryStatusValue, string> = {
-    pending: 'En attente',
-    assigned: 'Assignee',
-    at_pickup: 'Arrive chez vendeur',
-    picked_up: 'Recuperee',
-    in_transit: 'En transit',
-    at_dropoff: 'Arrive chez acheteur',
-    delivered: 'Livree',
-    failed: 'Echouee',
-    cancelled: 'Annulee',
+    pending: 'Recherche livreur',
+    assigned: 'En route vendeur',
+    at_pickup: 'Chez le vendeur',
+    picked_up: 'Colis recupere',
+    in_transit: 'En route client',
+    at_dropoff: 'Chez le client',
+    delivered: 'Livraison terminee',
+    failed: 'Livraison echouee',
+    cancelled: 'Livraison annulee',
 };
+
+export const DELIVERY_BUSINESS_STATUS_LABELS: Record<DeliveryBusinessStatus, string> = {
+    RECHERCHE_LIVREUR: 'Recherche livreur',
+    LIVREUR_ASSIGNE: 'Livreur assigne',
+    EN_ROUTE_VERS_VENDEUR: 'En route vers le vendeur',
+    LIVREUR_ARRIVE_CHEZ_VENDEUR: 'Livreur arrive chez le vendeur',
+    COLIS_RECUPERE: 'Colis recupere',
+    EN_ROUTE_VERS_CLIENT: 'En route vers le client',
+    LIVREUR_ARRIVE_CHEZ_CLIENT: 'Livreur arrive chez le client',
+    LIVRAISON_TERMINEE: 'Livraison terminee',
+    LIVRAISON_ANNULEE: 'Livraison annulee',
+    LIVRAISON_ECHOUEE: 'Livraison echouee',
+};
+
+export const DELIVERY_BUSINESS_STEPS: DeliveryBusinessStatus[] = [
+    'RECHERCHE_LIVREUR',
+    'LIVREUR_ASSIGNE',
+    'EN_ROUTE_VERS_VENDEUR',
+    'LIVREUR_ARRIVE_CHEZ_VENDEUR',
+    'COLIS_RECUPERE',
+    'EN_ROUTE_VERS_CLIENT',
+    'LIVREUR_ARRIVE_CHEZ_CLIENT',
+    'LIVRAISON_TERMINEE',
+];
 
 export const DELIVERY_STATUS_STEPS: DeliveryStatusValue[] = [
     'pending',
@@ -169,6 +247,66 @@ export const DELIVERY_STATUS_STEPS: DeliveryStatusValue[] = [
     'at_dropoff',
     'delivered',
 ];
+
+export const getDeliveryBusinessStatus = (
+    status?: DeliveryStatusValue | string | null,
+): DeliveryBusinessStatus => {
+    switch (status) {
+        case 'pending':
+            return 'RECHERCHE_LIVREUR';
+        case 'assigned':
+            return 'EN_ROUTE_VERS_VENDEUR';
+        case 'at_pickup':
+            return 'LIVREUR_ARRIVE_CHEZ_VENDEUR';
+        case 'picked_up':
+            return 'COLIS_RECUPERE';
+        case 'in_transit':
+            return 'EN_ROUTE_VERS_CLIENT';
+        case 'at_dropoff':
+            return 'LIVREUR_ARRIVE_CHEZ_CLIENT';
+        case 'delivered':
+            return 'LIVRAISON_TERMINEE';
+        case 'cancelled':
+            return 'LIVRAISON_ANNULEE';
+        case 'failed':
+            return 'LIVRAISON_ECHOUEE';
+        default:
+            return 'RECHERCHE_LIVREUR';
+    }
+};
+
+export const getDeliveryBusinessLabel = (
+    status?: DeliveryStatusValue | string | null,
+    workflow?: DeliveryWorkflow,
+): string => {
+    if (workflow?.businessLabel) {
+        return workflow.businessLabel;
+    }
+
+    return DELIVERY_BUSINESS_STATUS_LABELS[getDeliveryBusinessStatus(status)];
+};
+
+export const getDeliveryWorkflowProgress = (
+    status?: DeliveryStatusValue | string | null,
+    workflow?: DeliveryWorkflow,
+): { currentStepIndex: number; totalSteps: number; progressPercent: number } => {
+    if (workflow) {
+        return {
+            currentStepIndex: workflow.currentStepIndex,
+            totalSteps: workflow.totalSteps,
+            progressPercent: workflow.progressPercent,
+        };
+    }
+
+    const businessStatus = getDeliveryBusinessStatus(status);
+    const currentStepIndex = Math.max(DELIVERY_BUSINESS_STEPS.indexOf(businessStatus), 0);
+    const totalSteps = DELIVERY_BUSINESS_STEPS.length;
+    return {
+        currentStepIndex,
+        totalSteps,
+        progressPercent: Math.round((currentStepIndex / (totalSteps - 1)) * 100),
+    };
+};
 
 export const getDeliveryPersonRefId = (
     value: string | { _id?: string; userId?: string | OrderParty } | null | undefined,

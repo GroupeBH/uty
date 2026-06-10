@@ -19,7 +19,7 @@ import { useGetCurrenciesQuery } from '@/store/api/currenciesApi';
 import { useLazyGeocodeQuery } from '@/store/api/googleMapsApi';
 import { Category, CategoryAttribute } from '@/types/category';
 import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectionValue } from '@/utils/currency';
-import { getImageMimeType } from '@/utils/imageUtils';
+import { prepareAnnouncementImage, prepareAnnouncementImages } from '@/utils/imageUtils';
 import { localDrafts } from '@/utils/localDrafts';
 import { formatKinshasaAddress, hasKinshasaAddressValue, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { normalizeTextInputValue } from '@/utils/textInput';
@@ -278,7 +278,7 @@ export default function PublishScreen() {
         pickupLongitude: '',
     });
     const [dynamicAttributes, setDynamicAttributes] = useState<Record<string, any>>({});
-    const [images, setImages] = useState<{ uri: string; name: string; type: string }[]>([]);
+    const [images, setImages] = useState<{ uri: string; name: string; type: string; size?: number }[]>([]);
     const [isConvertingImages, setIsConvertingImages] = useState(false);
     const [errors, setErrors] = useState<Record<string, string>>({});
     const [mapVisible, setMapVisible] = useState(false);
@@ -741,13 +741,6 @@ export default function PublishScreen() {
     };
 
     // Gestion des images
-    const buildImageFile = (uri: string, name?: string) => {
-        const mimeType = getImageMimeType(uri);
-        const extension = mimeType.split('/')[1] || 'jpg';
-        const safeName = name || `photo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extension}`;
-        return { uri, name: safeName, type: mimeType };
-    };
-
     const pickImages = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
@@ -758,20 +751,27 @@ export default function PublishScreen() {
         const result = await ImagePicker.launchImageLibraryAsync({
             mediaTypes: ['images'],
             allowsMultipleSelection: true,
-            quality: 0.8,
+            quality: 0.65,
             selectionLimit: 10 - images.length,
+            base64: false,
+            exif: false,
         });
 
         if (!result.canceled && result.assets) {
             setIsConvertingImages(true);
             try {
-                const newImages = result.assets.map((asset) =>
-                    buildImageFile(asset.uri, asset.fileName ?? undefined)
+                const newImages = await prepareAnnouncementImages(
+                    result.assets.map((asset) => ({
+                        uri: asset.uri,
+                        fileName: asset.fileName ?? undefined,
+                        width: asset.width,
+                        height: asset.height,
+                    })),
                 );
                 setImages((prev) => [...prev, ...newImages].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing selected images:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de préparer les images', variant: 'error' });
+                showAlert({ title: 'Erreur', message: "Impossible d'ajouter les images", variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -786,7 +786,9 @@ export default function PublishScreen() {
         }
 
         const result = await ImagePicker.launchCameraAsync({
-            quality: 0.8,
+            quality: 0.65,
+            base64: false,
+            exif: false,
         });
 
         console.log('result of takePhoto', result);
@@ -795,11 +797,16 @@ export default function PublishScreen() {
             const asset = result.assets[0];
             setIsConvertingImages(true);
             try {
-                const newImage = buildImageFile(asset.uri, asset.fileName ?? undefined);
+                const newImage = await prepareAnnouncementImage({
+                    uri: asset.uri,
+                    fileName: asset.fileName ?? undefined,
+                    width: asset.width,
+                    height: asset.height,
+                });
                 setImages((prev) => [...prev, newImage].slice(0, 10));
             } catch (error) {
                 console.error('Error preparing captured photo:', error);
-                showAlert({ title: 'Erreur', message: 'Impossible de préparer la photo', variant: 'error' });
+                showAlert({ title: 'Erreur', message: "Impossible d'ajouter la photo", variant: 'error' });
             } finally {
                 setIsConvertingImages(false);
             }
@@ -1583,11 +1590,11 @@ export default function PublishScreen() {
                                     </View>
                                 ))}
 
-                                {/* Loader pendant la conversion */}
+                                {/* Loader pendant l'ajout */}
                                 {isConvertingImages && (
                                     <View style={styles.imageLoadingItem}>
                                         <ActivityIndicator size="large" color={Colors.primary} />
-                                        <Text style={styles.loadingText}>Conversion...</Text>
+                                        <Text style={styles.loadingText}>Ajout en cours...</Text>
                                     </View>
                                 )}
 
@@ -2427,20 +2434,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
-    },
-    alertPoints: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs / 2,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-    },
-    alertPointsText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textSecondary,
     },
     alertIcon_success: {
         backgroundColor: Colors.success,

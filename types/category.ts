@@ -25,6 +25,7 @@ export interface Category {
     description: string;
     icon: string;
     isActive: boolean;
+    transactionMode?: 'cart' | 'contact';
     parentId?: string;
     ancestors?: string[];
     isLeaf: boolean;

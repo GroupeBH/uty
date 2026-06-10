@@ -6,16 +6,17 @@ import { ProductCard } from '@/components/ProductCard';
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
-import { useGetAppConfigQuery } from '@/store/api/appConfigApi';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
 import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
 import { Announcement } from '@/types/announcement';
+import { getAvailableQuantity } from '@/utils/productAvailability';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
+    Alert,
     FlatList,
     ScrollView,
     StyleSheet,
@@ -42,6 +43,13 @@ const SEARCH_ALIASES: Record<string, string[]> = {
 };
 
 type QuickFilter = 'all' | 'deliverable' | 'in_stock' | 'recent';
+
+const QUICK_FILTERS: { id: QuickFilter; label: string }[] = [
+    { id: 'all', label: 'Tout' },
+    { id: 'deliverable', label: 'Livrable' },
+    { id: 'in_stock', label: 'En stock' },
+    { id: 'recent', label: 'Nouveaux' },
+];
 
 const matchesSearchToken = (token: string, searchableText: string): boolean => {
     if (!token) return true;
@@ -78,6 +86,7 @@ export default function SearchScreen() {
     const { categoryId: categoryIdFromParams } = useLocalSearchParams<{ categoryId?: string | string[] }>();
     const [searchQuery, setSearchQuery] = useState('');
     const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+    const [showFilters, setShowFilters] = useState(false);
     const normalizedCategoryFromParams = useMemo(
         () =>
             Array.isArray(categoryIdFromParams)
@@ -87,7 +96,6 @@ export default function SearchScreen() {
     );
     const [category, setCategory] = useState<string | undefined>(normalizedCategoryFromParams);
     const { user, requireAuth } = useAuth();
-    const { data: appConfig } = useGetAppConfigQuery();
     const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
 
     const { data: announcements, isLoading } = useGetAnnouncementsQuery();
@@ -133,7 +141,7 @@ export default function SearchScreen() {
             const matchesCategory = category
                 ? itemCategoryId === category || itemCategoryAncestors.includes(category)
                 : true;
-            const quantity = typeof item.quantity === 'number' ? item.quantity : undefined;
+            const quantity = getAvailableQuantity(item.quantity);
             const isRecent = Boolean(item.createdAt) &&
                 Date.now() - new Date(item.createdAt).getTime() <= 1000 * 60 * 60 * 24 * 14;
             const matchesQuickFilter =
@@ -145,14 +153,20 @@ export default function SearchScreen() {
             return matchesSearch && matchesCategory && matchesQuickFilter;
         });
     }, [announcements, category, quickFilter, searchQuery]);
-    const featuredTerms = appConfig?.search?.featuredTerms || ['telephone', 'frigo', 'ordinateur', 'chaussures'];
-
     const activeCategoryMeta = useMemo(() => {
         if (!category) return { icon: null, label: 'Toutes les categories' };
         const found = categories.find((entry) => entry.id === category);
         if (!found) return { icon: null, label: 'Categorie' };
         return { icon: found.icon, label: found.label };
     }, [categories, category]);
+    const activeQuickFilterLabel = QUICK_FILTERS.find((entry) => entry.id === quickFilter)?.label || 'Tout';
+    const hasActiveFilters = Boolean(category) || quickFilter !== 'all';
+    const filterSummary = hasActiveFilters
+        ? [
+            category ? activeCategoryMeta.label : null,
+            quickFilter !== 'all' ? activeQuickFilterLabel : null,
+        ].filter(Boolean).join(' / ')
+        : 'Categories et disponibilite';
 
     const handleAddToCart = (product: Announcement) => {
         console.log('Add to cart:', product._id);
@@ -193,9 +207,16 @@ export default function SearchScreen() {
         },
         [isTogglingLike, requireAuth, toggleLike],
     );
+    const handleSmartPress = React.useCallback(() => {
+        Alert.alert('Smart', 'La fonctionnalite Smart sera bientot disponible.');
+    }, []);
+    const resetFilters = React.useCallback(() => {
+        setCategory(undefined);
+        setQuickFilter('all');
+    }, []);
 
     return (
-        <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <LinearGradient colors={Gradients.primary} style={styles.header}>
                 <View pointerEvents="none" style={styles.headerGlowOne} />
                 <View pointerEvents="none" style={styles.headerGlowTwo} />
@@ -205,10 +226,16 @@ export default function SearchScreen() {
                         <Text style={styles.headerEyebrow}>EXPLORER</Text>
                         <Text style={styles.headerTitle}>Recherche produits</Text>
                     </View>
-                    <View style={styles.headerBadge}>
+                    <TouchableOpacity
+                        style={styles.headerBadge}
+                        onPress={handleSmartPress}
+                        activeOpacity={0.85}
+                        accessibilityRole="button"
+                        accessibilityLabel="Smart"
+                    >
                         <Ionicons name="sparkles-outline" size={14} color={Colors.primary} />
                         <Text style={styles.headerBadgeText}>Smart</Text>
-                    </View>
+                    </TouchableOpacity>
                 </View>
 
                 <Text style={styles.headerSubtitle}>
@@ -266,23 +293,39 @@ export default function SearchScreen() {
             </LinearGradient>
 
             <View style={styles.categoriesContainer}>
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.featuredTermsContainer}
+                <TouchableOpacity
+                    style={styles.filtersToggle}
+                    onPress={() => setShowFilters((value) => !value)}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={showFilters ? 'Cacher les filtres' : 'Afficher les filtres'}
                 >
-                    {featuredTerms.map((term) => (
-                        <TouchableOpacity
-                            key={term}
-                            style={styles.featuredTermChip}
-                            onPress={() => setSearchQuery(term)}
-                            activeOpacity={0.85}
-                        >
-                            <Ionicons name="flash-outline" size={13} color={Colors.primary} />
-                            <Text style={styles.featuredTermText}>{term}</Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                    <View style={styles.filtersToggleIcon}>
+                        <Ionicons name="options-outline" size={17} color={Colors.primary} />
+                    </View>
+                    <View style={styles.filtersToggleCopy}>
+                        <Text style={styles.filtersToggleTitle}>
+                            {showFilters ? 'Cacher les filtres' : 'Afficher les filtres'}
+                        </Text>
+                        <Text style={styles.filtersToggleSubtitle} numberOfLines={1}>
+                            {filterSummary}
+                        </Text>
+                    </View>
+                    {hasActiveFilters && <View style={styles.filtersActiveDot} />}
+                    <Ionicons
+                        name={showFilters ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={Colors.gray600}
+                    />
+                </TouchableOpacity>
+                {showFilters && hasActiveFilters && (
+                    <TouchableOpacity style={styles.clearFiltersButton} onPress={resetFilters}>
+                        <Ionicons name="refresh-outline" size={13} color={Colors.primary} />
+                        <Text style={styles.clearFiltersText}>Reinitialiser les filtres</Text>
+                    </TouchableOpacity>
+                )}
+                {showFilters && (
+                    <>
                 <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -328,18 +371,13 @@ export default function SearchScreen() {
                     showsHorizontalScrollIndicator={false}
                     contentContainerStyle={styles.quickFiltersContainer}
                 >
-                    {[
-                        { id: 'all', label: 'Tout' },
-                        { id: 'deliverable', label: 'Livrable' },
-                        { id: 'in_stock', label: 'En stock' },
-                        { id: 'recent', label: 'Nouveaux' },
-                    ].map((filter) => {
+                    {QUICK_FILTERS.map((filter) => {
                         const isActive = quickFilter === filter.id;
                         return (
                             <TouchableOpacity
                                 key={filter.id}
                                 style={[styles.quickFilterChip, isActive && styles.quickFilterChipActive]}
-                                onPress={() => setQuickFilter(filter.id as QuickFilter)}
+                                onPress={() => setQuickFilter(filter.id)}
                             >
                                 <Text
                                     style={[
@@ -353,6 +391,8 @@ export default function SearchScreen() {
                         );
                     })}
                 </ScrollView>
+                    </>
+                )}
             </View>
 
             {isLoading ? (
@@ -567,30 +607,70 @@ const styles = StyleSheet.create({
     },
     categoriesContainer: {
         marginTop: -Spacing.sm,
-        paddingTop: Spacing.md,
+        paddingTop: Spacing.sm,
         paddingBottom: Spacing.sm,
     },
-    featuredTermsContainer: {
-        paddingHorizontal: Spacing.lg,
-        gap: Spacing.sm,
-        paddingBottom: Spacing.sm,
-    },
-    featuredTermChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        borderRadius: BorderRadius.full,
-        paddingVertical: 8,
-        paddingHorizontal: Spacing.md,
+    filtersToggle: {
+        marginHorizontal: Spacing.lg,
+        marginBottom: Spacing.sm,
+        minHeight: 52,
+        borderRadius: BorderRadius.lg,
         backgroundColor: Colors.white,
         borderWidth: 1,
-        borderColor: Colors.primary + '1F',
+        borderColor: Colors.gray200,
+        paddingHorizontal: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
         ...Shadows.sm,
     },
-    featuredTermText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
+    filtersToggleIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '12',
+    },
+    filtersToggleCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    filtersToggleTitle: {
         color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    filtersToggleSubtitle: {
+        marginTop: 1,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.medium,
+    },
+    filtersActiveDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: Colors.accent,
+    },
+    clearFiltersButton: {
+        alignSelf: 'flex-start',
+        marginLeft: Spacing.lg,
+        marginBottom: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 6,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '30',
+    },
+    clearFiltersText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     categoriesScrollContent: {
         paddingHorizontal: Spacing.lg,
@@ -669,7 +749,7 @@ const styles = StyleSheet.create({
     listContent: {
         paddingHorizontal: Spacing.lg,
         paddingTop: Spacing.sm,
-        paddingBottom: 110,
+        paddingBottom: Spacing.lg,
     },
     listContentEmpty: {
         flexGrow: 1,

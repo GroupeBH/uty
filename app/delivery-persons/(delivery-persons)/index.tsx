@@ -49,10 +49,58 @@ export default function DeliveryPersonsDashboardTab() {
                 !['delivered', 'failed', 'cancelled'].includes(delivery.status),
         );
     });
+    const featuredDelivery = myActiveDeliveries[0] || pendingPool[0] || null;
+    const featuredIsMine = Boolean(
+        featuredDelivery &&
+            myActiveDeliveries.some((delivery) => delivery._id === featuredDelivery._id),
+    );
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+                {featuredDelivery ? (
+                    <TouchableOpacity
+                        style={[styles.focusCard, featuredIsMine && styles.focusCardActive]}
+                        activeOpacity={0.9}
+                        onPress={() =>
+                            router.push(
+                                featuredIsMine
+                                    ? (`/delivery/deliver-persons/${featuredDelivery._id}` as any)
+                                    : '/delivery-persons/pool',
+                            )
+                        }
+                    >
+                        <View style={styles.focusTopRow}>
+                            <View style={styles.focusIcon}>
+                                <Ionicons
+                                    name={featuredIsMine ? 'navigate' : 'flash-outline'}
+                                    size={18}
+                                    color={Colors.primary}
+                                />
+                            </View>
+                            <View style={styles.focusCopy}>
+                                <Text style={styles.focusLabel}>
+                                    {featuredIsMine ? 'Course en cours' : 'Course disponible'}
+                                </Text>
+                                <Text style={styles.focusTitle}>
+                                    Livraison #{featuredDelivery._id.slice(-8).toUpperCase()}
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={Colors.primary} />
+                        </View>
+                        <Text style={styles.focusText} numberOfLines={2}>
+                            {featuredIsMine
+                                ? 'Reprendre le suivi, scanner les QR ou confirmer la prochaine etape.'
+                                : 'Une demande attend un livreur. Ouvrez le pool pour la prendre rapidement.'}
+                        </Text>
+                        <View style={styles.focusButton}>
+                            <Text style={styles.focusButtonText}>
+                                {featuredIsMine ? 'Continuer la livraison' : 'Voir les courses'}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                ) : null}
+
                 <View style={styles.heroCard}>
                     <Text style={styles.eyebrow}>ESPACE LIVREUR</Text>
                     <Text style={styles.title}>Operations de livraison</Text>
@@ -151,6 +199,66 @@ const styles = StyleSheet.create({
         color: Colors.white + 'DE',
         fontSize: Typography.fontSize.sm,
         lineHeight: 20,
+    },
+    focusCard: {
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.accent + '55',
+        backgroundColor: Colors.white,
+        padding: Spacing.lg,
+    },
+    focusCardActive: {
+        borderColor: Colors.primary + '30',
+        backgroundColor: Colors.primary + '08',
+    },
+    focusTopRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    focusIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.accent,
+    },
+    focusCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    focusLabel: {
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+    focusTitle: {
+        marginTop: 2,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    focusText: {
+        marginTop: Spacing.sm,
+        color: Colors.gray600,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 20,
+    },
+    focusButton: {
+        marginTop: Spacing.md,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.accent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 42,
+    },
+    focusButtonText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     metricsRow: {
         flexDirection: 'row',

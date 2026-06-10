@@ -5,7 +5,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { useGetMyAnnouncementsQuery } from '@/store/api/announcementsApi';
 import { useGetOrdersQuery } from '@/store/api/ordersApi';
 import { useGetMyShopQuery } from '@/store/api/shopsApi';
-import { Order, OrderStatusValue, isOrderBuyerForUser, isOrderSellerForUser } from '@/types/order';
+import {
+    Order,
+    OrderStatusValue,
+    isOrderBuyerForUser,
+    isOrderSellerForUser,
+    toIdString,
+} from '@/types/order';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -44,6 +50,18 @@ const sortByDateDesc = (orders: Order[]) =>
         const second = new Date(b.createdAt || b.updatedAt || 0).getTime();
         return second - first;
     });
+
+const getOrderDeliveryRef = (order: Order): string | null => {
+    const record = order as Record<string, any>;
+    return toIdString(record.deliveryId ?? record.delivery?._id ?? record.delivery);
+};
+
+const isOrderInDelivery = (order: Order) =>
+    order.status === 'shipped' ||
+    Boolean(order.deliveryPersonId) ||
+    Boolean(getOrderDeliveryRef(order));
+
+const getOrderShortId = (order: Order) => order._id.slice(-8).toUpperCase();
 
 export default function OrdersScreen() {
     const { user, isAuthenticated, requireAuth } = useAuth();
@@ -113,6 +131,21 @@ export default function OrdersScreen() {
         if (selectedStatus === 'all') return sortByDateDesc(base);
         return sortByDateDesc(base.filter((order) => order.status === selectedStatus));
     }, [activeView, buyerOrders, receivedOrders, selectedStatus]);
+
+    const deliveryFocusOrders = React.useMemo(() => {
+        const base = activeView === 'seller' ? receivedOrders : buyerOrders;
+        return sortByDateDesc(base.filter(isOrderInDelivery)).slice(0, 3);
+    }, [activeView, buyerOrders, receivedOrders]);
+
+    const openOrderDetails = React.useCallback((order: Order) => {
+        router.push({
+            pathname: '/order/[id]',
+            params: {
+                id: order._id,
+                view: activeView === 'seller' ? 'sales' : 'purchases',
+            },
+        });
+    }, [activeView, router]);
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -256,6 +289,43 @@ export default function OrdersScreen() {
                     </Text>
                     <Ionicons name="chevron-forward" size={16} color={Colors.primary} />
                 </TouchableOpacity>
+            ) : null}
+
+            {deliveryFocusOrders.length > 0 ? (
+                <View style={styles.deliveryFocusSection}>
+                    <View style={styles.deliveryFocusHeader}>
+                        <View style={styles.deliveryFocusHeadingCopy}>
+                            <Text style={styles.deliveryFocusEyebrow}>EN LIVRAISON</Text>
+                            <Text style={styles.deliveryFocusHeading}>
+                                {activeView === 'seller'
+                                    ? 'Ventes a suivre maintenant'
+                                    : 'Commandes en route'}
+                            </Text>
+                        </View>
+                        <Ionicons name="navigate-circle-outline" size={24} color={Colors.accent} />
+                    </View>
+                    {deliveryFocusOrders.map((order) => (
+                        <TouchableOpacity
+                            key={`delivery-focus-${order._id}`}
+                            style={styles.deliveryFocusCard}
+                            onPress={() => openOrderDetails(order)}
+                            activeOpacity={0.9}
+                        >
+                            <View style={styles.deliveryFocusIcon}>
+                                <Ionicons name="trail-sign-outline" size={16} color={Colors.primary} />
+                            </View>
+                            <View style={styles.deliveryFocusCopy}>
+                                <Text style={styles.deliveryFocusOrder}>
+                                    Commande #{getOrderShortId(order)}
+                                </Text>
+                                <Text style={styles.deliveryFocusAddress} numberOfLines={1}>
+                                    {order.deliveryAddress?.trim() || 'Adresse a confirmer'}
+                                </Text>
+                            </View>
+                            <Text style={styles.deliveryFocusAction}>Suivre</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
             ) : null}
 
             <View style={styles.filtersContainer}>
@@ -487,6 +557,78 @@ const styles = StyleSheet.create({
         color: Colors.primary,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.semibold,
+    },
+    deliveryFocusSection: {
+        marginHorizontal: Spacing.lg,
+        marginBottom: Spacing.sm,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '25',
+        backgroundColor: Colors.primary,
+        padding: Spacing.md,
+        gap: Spacing.sm,
+    },
+    deliveryFocusHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+    },
+    deliveryFocusHeadingCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deliveryFocusEyebrow: {
+        color: Colors.accent,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+        letterSpacing: 0.5,
+    },
+    deliveryFocusHeading: {
+        marginTop: 2,
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    deliveryFocusCard: {
+        minHeight: 58,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.white + '22',
+        backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: Spacing.sm,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    deliveryFocusIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.accent,
+    },
+    deliveryFocusCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deliveryFocusOrder: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    deliveryFocusAddress: {
+        marginTop: 2,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    deliveryFocusAction: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     filtersContainer: {
         paddingHorizontal: Spacing.lg,

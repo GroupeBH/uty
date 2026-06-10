@@ -3,14 +3,13 @@ export type KycStatus = 'not_submitted' | 'pending' | 'approved' | 'rejected';
 export type KycIdType =
     | 'national_id'
     | 'passport'
-    | 'driver_license'
-    | 'voter_card'
-    | 'residence_permit';
+    | 'driving_license'
+    | 'voter_card';
 
 export interface KycPayload {
     fullName: string;
-    idType: KycIdType | string;
-    idNumber: string;
+    idType?: KycIdType | string;
+    idNumber?: string;
     documentFrontUrl: string;
     documentBackUrl?: string;
     selfieUrl: string;

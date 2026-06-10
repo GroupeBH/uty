@@ -4,7 +4,7 @@
 
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { CustomAlert } from '@/components/ui/CustomAlert';
-import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
 import { authFlowService } from '@/services/authFlowService';
 import {
     useLoginMutation,
@@ -34,6 +34,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 type AuthMode = 'register' | 'login';
 type LoginStep = 'phone' | 'pin';
 type RegisterStep = 'phone' | 'identity' | 'security' | 'preferences';
+type OAuthProvider = 'google' | 'apple';
 
 const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
@@ -42,7 +43,7 @@ const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'preferences', label: 'Preferences' },
 ];
 
-const GOOGLE_REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
+const OAUTH_REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
     { step: 'preferences', label: 'Preferences' },
 ];
@@ -54,10 +55,15 @@ const LOGIN_PROGRESS: { step: LoginStep; label: string }[] = [
 
 const isPinValid = (value: string) => /^\d{4}$/.test(value);
 const generateFourDigitPin = () => String(Math.floor(1000 + Math.random() * 9000));
-const GOOGLE_REGISTRATION_INFO_MESSAGE =
+const OAUTH_REGISTRATION_INFO_MESSAGE =
     'Pour une utilisation optimale et fluide de l application, completez ces 2 etapes:\n' +
     '1. Ajoutez votre numero de telephone.\n' +
     '2. Choisissez vos preferences.';
+
+const OAUTH_PROVIDER_LABEL: Record<OAuthProvider, string> = {
+    google: 'Google',
+    apple: 'Apple',
+};
 
 const toNormalizedMessage = (message: string) =>
     message
@@ -81,12 +87,16 @@ const readApiErrorMessage = (error: any): string => {
     return '';
 };
 
-const isGoogleRegistrationSessionExpired = (message: string): boolean => {
+const isOAuthRegistrationSessionExpired = (
+    provider: OAuthProvider,
+    message: string
+): boolean => {
     const normalized = toNormalizedMessage(message);
+    const providerKey = provider.toLowerCase();
     return (
-        (normalized.includes('session google') && normalized.includes('expire')) ||
-        normalized.includes('google_registration') ||
-        normalized.includes('google registration')
+        (normalized.includes(`session ${providerKey}`) && normalized.includes('expire')) ||
+        normalized.includes(`${providerKey}_registration`) ||
+        normalized.includes(`${providerKey} registration`)
     );
 };
 
@@ -102,8 +112,6 @@ export default function AuthModal() {
     const insets = useSafeAreaInsets();
     const params = useLocalSearchParams<{
         mode?: string | string[];
-        title?: string | string[];
-        reason?: string | string[];
         source?: string | string[];
         returnUrl?: string | string[];
         phone?: string | string[];
@@ -135,14 +143,20 @@ export default function AuthModal() {
     const [googleRegistrationToken, setGoogleRegistrationToken] = useState<string | undefined>(
         undefined
     );
+    const [appleRegistrationToken, setAppleRegistrationToken] = useState<string | undefined>(
+        undefined
+    );
     const [googleProfileImage, setGoogleProfileImage] = useState<string | undefined>(undefined);
     const [googleAutoPin, setGoogleAutoPin] = useState<string | undefined>(undefined);
+    const [appleAutoPin, setAppleAutoPin] = useState<string | undefined>(undefined);
     const [isPhoneFocused, setIsPhoneFocused] = useState(false);
     const [isPinFocused, setIsPinFocused] = useState(false);
     const [isFirstNameFocused, setIsFirstNameFocused] = useState(false);
     const [isLastNameFocused, setIsLastNameFocused] = useState(false);
     const [isConfirmPinFocused, setIsConfirmPinFocused] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+    const [isAppleLoading, setIsAppleLoading] = useState(false);
+    const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
 
     // Alert state
     const [alert, setAlert] = useState<{
@@ -179,11 +193,15 @@ export default function AuthModal() {
     const isRegisterIdentityStep = !isLoginMode && registerStep === 'identity';
     const isRegisterSecurityStep = !isLoginMode && registerStep === 'security';
     const isRegisterPreferencesStep = !isLoginMode && registerStep === 'preferences';
-    const isGoogleRegistrationFlow = !isLoginMode && Boolean(googleRegistrationToken);
-
-    const authRequiredTitle = readParam(params.title).trim();
-    const authRequiredMessage = readParam(params.reason).trim();
-    const showAuthRequiredNotice = authRequiredTitle.length > 0 || authRequiredMessage.length > 0;
+    const oauthRegistrationProvider: OAuthProvider | null = googleRegistrationToken
+        ? 'google'
+        : appleRegistrationToken
+          ? 'apple'
+          : null;
+    const isOAuthRegistrationFlow = !isLoginMode && Boolean(oauthRegistrationProvider);
+    const oauthProviderLabel = oauthRegistrationProvider
+        ? OAUTH_PROVIDER_LABEL[oauthRegistrationProvider]
+        : 'Google';
 
     useEffect(() => {
         if (readParam(params.mode) === 'register') {
@@ -194,14 +212,28 @@ export default function AuthModal() {
     }, [params.mode]);
 
     useEffect(() => {
-        if (!isGoogleRegistrationFlow) {
+        let isMounted = true;
+
+        void authFlowService.isAppleSignInAvailable().then((isAvailable) => {
+            if (isMounted) {
+                setIsAppleSignInAvailable(isAvailable);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isOAuthRegistrationFlow) {
             return;
         }
 
         if (registerStep === 'identity' || registerStep === 'security') {
             setRegisterStep('preferences');
         }
-    }, [isGoogleRegistrationFlow, registerStep]);
+    }, [isOAuthRegistrationFlow, registerStep]);
 
     useEffect(() => {
         Animated.parallel([
@@ -284,8 +316,10 @@ export default function AuthModal() {
         setShowConfirmPin(false);
         setSelectedCategories([]);
         setGoogleRegistrationToken(undefined);
+        setAppleRegistrationToken(undefined);
         setGoogleProfileImage(undefined);
         setGoogleAutoPin(undefined);
+        setAppleAutoPin(undefined);
         setIsFirstNameFocused(false);
         setIsLastNameFocused(false);
         setIsPinFocused(false);
@@ -340,7 +374,7 @@ export default function AuthModal() {
         if (!normalizedPhone) return;
 
         setPhone(normalizedPhone);
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             setRegisterStep('preferences');
             return;
         }
@@ -356,13 +390,18 @@ export default function AuthModal() {
         );
     };
 
-    const resolveGoogleRegistrationPin = () => {
-        if (googleAutoPin && isPinValid(googleAutoPin)) {
-            return googleAutoPin;
+    const resolveOAuthRegistrationPin = (provider: OAuthProvider) => {
+        const cachedPin = provider === 'apple' ? appleAutoPin : googleAutoPin;
+        if (cachedPin && isPinValid(cachedPin)) {
+            return cachedPin;
         }
 
         const generatedPin = generateFourDigitPin();
-        setGoogleAutoPin(generatedPin);
+        if (provider === 'apple') {
+            setAppleAutoPin(generatedPin);
+        } else {
+            setGoogleAutoPin(generatedPin);
+        }
         return generatedPin;
     };
 
@@ -372,9 +411,9 @@ export default function AuthModal() {
             return;
         }
 
-        const usingGoogleDraft = Boolean(googleRegistrationToken);
+        const usingOAuthDraft = Boolean(oauthRegistrationProvider);
 
-        if (usingGoogleDraft) {
+        if (usingOAuthDraft) {
             if (!validatePreferencesStep()) {
                 return;
             }
@@ -382,11 +421,15 @@ export default function AuthModal() {
             return;
         }
 
-        const resolvedFirstName = usingGoogleDraft
+        const resolvedFirstName = usingOAuthDraft
             ? firstName.trim() || 'Utilisateur'
             : firstName.trim();
-        const resolvedLastName = usingGoogleDraft ? lastName.trim() || 'Google' : lastName.trim();
-        const resolvedPin = usingGoogleDraft ? resolveGoogleRegistrationPin() : pin;
+        const resolvedLastName = usingOAuthDraft
+            ? lastName.trim() || oauthProviderLabel
+            : lastName.trim();
+        const resolvedPin = oauthRegistrationProvider
+            ? resolveOAuthRegistrationPin(oauthRegistrationProvider)
+            : pin;
 
         try {
             const response = await register({
@@ -397,6 +440,7 @@ export default function AuthModal() {
                 preferredCategoryIds: selectedCategories,
                 image: googleProfileImage,
                 googleRegistrationToken,
+                appleRegistrationToken,
             }).unwrap();
 
             await completeAuthSession(response.access_token, response.refresh_token);
@@ -407,13 +451,16 @@ export default function AuthModal() {
             console.error('Register error:', error);
             const errorMessage = readApiErrorMessage(error);
 
-            if (usingGoogleDraft && isGoogleRegistrationSessionExpired(errorMessage)) {
+            if (
+                oauthRegistrationProvider &&
+                isOAuthRegistrationSessionExpired(oauthRegistrationProvider, errorMessage)
+            ) {
                 showAlert(
-                    'Session Google expiree',
-                    'Votre session Google a expire. Appuyez sur OK pour vous reconnecter et continuer sans perdre vos informations.',
+                    `Session ${oauthProviderLabel} expiree`,
+                    `Votre session ${oauthProviderLabel} a expire. Appuyez sur OK pour vous reconnecter et continuer sans perdre vos informations.`,
                     'warning',
                     () => {
-                        void refreshGoogleRegistrationSession();
+                        void refreshOAuthRegistrationSession(oauthRegistrationProvider);
                     }
                 );
                 return;
@@ -465,10 +512,68 @@ export default function AuthModal() {
         }
     };
 
-    const handleGoogleAuth = async () => {
-        setIsGoogleLoading(true);
+    const setOAuthLoading = (provider: OAuthProvider, isLoading: boolean) => {
+        if (provider === 'apple') {
+            setIsAppleLoading(isLoading);
+            return;
+        }
+        setIsGoogleLoading(isLoading);
+    };
+
+    const runOAuthLogin = (provider: OAuthProvider) =>
+        provider === 'apple'
+            ? authFlowService.loginWithApple()
+            : authFlowService.loginWithGoogle();
+
+    const applyOAuthRegistrationDraft = (
+        provider: OAuthProvider,
+        result: {
+            registrationToken: string;
+            profile: {
+                firstName: string;
+                lastName: string;
+                image?: string;
+            };
+        },
+        options?: {
+            preserveNames?: boolean;
+        }
+    ) => {
+        const generatedPin = generateFourDigitPin();
+
+        if (provider === 'apple') {
+            setAppleRegistrationToken(result.registrationToken);
+            setAppleAutoPin(generatedPin);
+            setGoogleRegistrationToken(undefined);
+            setGoogleProfileImage(undefined);
+            setGoogleAutoPin(undefined);
+        } else {
+            setGoogleRegistrationToken(result.registrationToken);
+            setGoogleProfileImage(result.profile.image);
+            setGoogleAutoPin(generatedPin);
+            setAppleRegistrationToken(undefined);
+            setAppleAutoPin(undefined);
+        }
+
+        if (options?.preserveNames) {
+            if (!firstName.trim()) {
+                setFirstName(result.profile.firstName || '');
+            }
+            if (!lastName.trim()) {
+                setLastName(result.profile.lastName || '');
+            }
+            return;
+        }
+
+        setFirstName(result.profile.firstName || '');
+        setLastName(result.profile.lastName || '');
+    };
+
+    const handleOAuthAuth = async (provider: OAuthProvider) => {
+        const label = OAUTH_PROVIDER_LABEL[provider];
+        setOAuthLoading(provider, true);
         try {
-            const result = await authFlowService.loginWithGoogle();
+            const result = await runOAuthLogin(provider);
 
             if (result.kind === 'registration_required') {
                 setMode('register');
@@ -481,72 +586,69 @@ export default function AuthModal() {
                 setShowConfirmPin(false);
                 setIsPinFocused(false);
                 setIsConfirmPinFocused(false);
-                setGoogleRegistrationToken(result.registrationToken);
-                setGoogleProfileImage(result.profile.image);
-                setGoogleAutoPin(generateFourDigitPin());
-                setFirstName(result.profile.firstName || '');
-                setLastName(result.profile.lastName || '');
+                applyOAuthRegistrationDraft(provider, result);
                 showAlert(
                     'Inscription requise',
-                    GOOGLE_REGISTRATION_INFO_MESSAGE,
+                    OAUTH_REGISTRATION_INFO_MESSAGE,
                     'info'
                 );
                 return;
             }
 
             await completeAuthSession(result.tokens.accessToken, result.tokens.refreshToken);
-            showAlert('Succes', 'Connexion Google reussie', 'success', () => {
+            showAlert('Succes', `Connexion ${label} reussie`, 'success', () => {
                 redirectAfterSuccess();
             });
         } catch (error: any) {
-            console.error('Google auth error:', error);
+            console.error(`${label} auth error:`, error);
             showAlert(
                 'Erreur',
-                error?.message || 'Impossible de se connecter avec Google.',
+                error?.message || `Impossible de se connecter avec ${label}.`,
                 'error'
             );
         } finally {
-            setIsGoogleLoading(false);
+            setOAuthLoading(provider, false);
         }
     };
 
-    const refreshGoogleRegistrationSession = async () => {
-        setIsGoogleLoading(true);
+    const handleGoogleAuth = async () => {
+        await handleOAuthAuth('google');
+    };
+
+    const handleAppleAuth = async () => {
+        await handleOAuthAuth('apple');
+    };
+
+    const refreshOAuthRegistrationSession = async (provider: OAuthProvider) => {
+        const label = OAUTH_PROVIDER_LABEL[provider];
+        setOAuthLoading(provider, true);
         try {
-            const result = await authFlowService.loginWithGoogle();
+            const result = await runOAuthLogin(provider);
 
             if (result.kind === 'authenticated') {
                 await completeAuthSession(result.tokens.accessToken, result.tokens.refreshToken);
-                showAlert('Succes', 'Connexion Google reussie', 'success', () => {
+                showAlert('Succes', `Connexion ${label} reussie`, 'success', () => {
                     redirectAfterSuccess();
                 });
                 return;
             }
 
-            setGoogleRegistrationToken(result.registrationToken);
-            setGoogleProfileImage(result.profile.image);
-            setGoogleAutoPin(generateFourDigitPin());
-            if (!firstName.trim()) {
-                setFirstName(result.profile.firstName || '');
-            }
-            if (!lastName.trim()) {
-                setLastName(result.profile.lastName || '');
-            }
+            applyOAuthRegistrationDraft(provider, result, { preserveNames: true });
 
             showAlert(
                 'Session actualisee',
-                'Connexion Google actualisee. Vous pouvez continuer l inscription.',
+                `Connexion ${label} actualisee. Vous pouvez continuer l inscription.`,
                 'success'
             );
         } catch (error: any) {
-            console.error('Google refresh error:', error);
+            console.error(`${label} refresh error:`, error);
             showAlert(
                 'Erreur',
-                error?.message || 'Impossible de reinitialiser la session Google.',
+                error?.message || `Impossible de reinitialiser la session ${label}.`,
                 'error'
             );
         } finally {
-            setIsGoogleLoading(false);
+            setOAuthLoading(provider, false);
         }
     };
 
@@ -579,7 +681,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             if (registerStep === 'preferences') {
                 setRegisterStep('phone');
                 return;
@@ -613,7 +715,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             if (isRegisterPhoneStep) {
                 handleContinueToRegisterStep();
                 return;
@@ -644,7 +746,7 @@ export default function AuthModal() {
     };
 
     const isSubmitting = isRegistering || isLoggingIn;
-    const isBusy = isSubmitting || isGoogleLoading;
+    const isBusy = isSubmitting || isGoogleLoading || isAppleLoading;
 
     const keyboardVerticalOffset = Platform.select({
         ios: 0,
@@ -660,69 +762,66 @@ export default function AuthModal() {
 
     const modeTitle = isLoginMode
         ? isLoginPhoneStep
-            ? 'Connexion rapide'
-            : 'Verification PIN'
-        : isGoogleRegistrationFlow
+            ? 'Connexion'
+            : 'Code PIN'
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Ajoutez votre numero'
-            : 'Choisissez vos preferences'
+            ? 'Numero de telephone'
+            : 'Preferences'
         : isRegisterPhoneStep
-          ? 'Demarrage'
+          ? 'Creer un compte'
           : isRegisterIdentityStep
-              ? 'Completez votre profil'
+              ? 'Vos informations'
               : isRegisterSecurityStep
-                ? 'Securisez votre compte'
-                : 'Choisissez vos preferences';
+                ? 'Code PIN'
+                : 'Preferences';
 
     const modeSubtitle = isLoginMode
         ? isLoginPhoneStep
-            ? 'Etape 1/2: saisissez votre numero de telephone.'
-            : `Etape 2/2: saisissez votre PIN${phone.trim() ? ` pour ${phone.trim()}` : ''}.`
-        : isGoogleRegistrationFlow
+            ? 'Entrez votre numero pour continuer.'
+            : `Saisissez votre PIN${phone.trim() ? ` pour ${phone.trim()}` : ''}.`
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Entrez votre numero pour finaliser votre compte Google.'
-            : 'Selectionnez les categories qui vous interessent.'
+            ? `Ajoutez le numero lie a votre compte ${oauthProviderLabel}.`
+            : 'Selectionnez vos categories preferees.'
         : isRegisterPhoneStep
-          ? 'Entrez votre numero pour commencer votre inscription.'
+          ? 'Un numero suffit pour demarrer.'
           : isRegisterIdentityStep
-              ? 'Renseignez vos informations personnelles.'
+              ? 'Ces informations identifient votre compte.'
               : isRegisterSecurityStep
-                ? 'Creez un code PIN pour proteger votre compte.'
-                : 'Selectionnez les categories qui vous interessent.';
+                ? 'Choisissez un code simple a retenir.'
+                : 'Selectionnez vos categories preferees.';
 
     const helperMessage = isLoginMode
         ? isLoginPhoneStep
-            ? 'Continuez avec PIN ou utilisez Google.'
+            ? isAppleSignInAvailable
+                ? 'Vous pouvez aussi utiliser Google ou Apple.'
+                : 'Vous pouvez aussi utiliser Google.'
             : 'Le PIN contient exactement 4 chiffres.'
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Numero requis pour lier votre compte Google.'
-            : 'Selectionnez au moins une categorie pour terminer.'
+            ? `Numero requis pour lier votre compte ${oauthProviderLabel}.`
+            : 'Au moins une categorie est requise.'
         : isRegisterPhoneStep
-          ? googleRegistrationToken
-            ? 'Compte Google detecte. Finalisez l inscription avec votre numero de telephone.'
-            : 'Continuez avec vos informations, ou utilisez Google.'
+          ? isAppleSignInAvailable
+            ? 'Google et Apple remplissent deja une partie du compte.'
+            : 'Google peut remplir une partie du compte.'
         : isRegisterIdentityStep
-              ? 'Utilisez vos vraies informations pour faciliter le support.'
+              ? 'Utilisez les informations du titulaire du compte.'
               : isRegisterSecurityStep
                 ? 'Votre PIN doit contenir exactement 4 chiffres.'
-                : 'Choisissez au moins une categorie pour continuer.';
+                : 'Au moins une categorie est requise.';
 
     const currentProgress = isLoginMode
         ? LOGIN_PROGRESS
-        : isGoogleRegistrationFlow
-          ? GOOGLE_REGISTER_PROGRESS
+        : isOAuthRegistrationFlow
+          ? OAUTH_REGISTER_PROGRESS
           : REGISTER_PROGRESS;
     const currentProgressStep = isLoginMode ? loginStep : registerStep;
     const currentProgressIndexRaw = currentProgress.findIndex(
         (item) => item.step === currentProgressStep
     );
     const currentProgressIndex = currentProgressIndexRaw >= 0 ? currentProgressIndexRaw : 0;
-    const modeCardColors = isLoginMode
-        ? Gradients.primary
-        : isRegisterSecurityStep
-          ? Gradients.primary
-          : Gradients.accent;
     const modeIconName: keyof typeof Ionicons.glyphMap = isLoginMode
         ? isLoginPhoneStep
             ? 'call-outline'
@@ -743,7 +842,7 @@ export default function AuthModal() {
             : isSubmitting
               ? 'Connexion...'
               : 'Se connecter'
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
             ? isSubmitting
               ? 'Traitement...'
@@ -760,7 +859,12 @@ export default function AuthModal() {
               : isSubmitting
                 ? 'Inscription...'
                 : 'Creer mon compte';
-    const showGoogleButton = isLoginPhoneStep || (isRegisterPhoneStep && !isGoogleRegistrationFlow);
+    const showOAuthButtons = isLoginPhoneStep || (isRegisterPhoneStep && !isOAuthRegistrationFlow);
+    const showGoogleButton = showOAuthButtons;
+    const showAppleButton = showOAuthButtons && isAppleSignInAvailable;
+    const activeAccentColor = isLoginMode ? Colors.primary : Colors.accentDark;
+    const activeAccentSoftColor = isLoginMode ? Colors.primary + '12' : Colors.accent + '18';
+    const activeProgressLabel = currentProgress[currentProgressIndex]?.label ?? '';
 
     return (
         <View style={styles.modalOverlay}>
@@ -787,18 +891,24 @@ export default function AuthModal() {
                             keyboardShouldPersistTaps="handled"
                             keyboardDismissMode="on-drag"
                         >
-                            <View pointerEvents="none" style={styles.colorOrbWarm} />
-                            <View pointerEvents="none" style={styles.colorOrbCool} />
                             <View style={styles.handle} />
 
                             <View style={styles.header}>
-                                <LinearGradient
-                                    colors={mode === 'register' ? Gradients.accent : Gradients.primary}
-                                    style={styles.brandBadge}
-                                >
-                                    <Ionicons name="shield-checkmark-outline" size={14} color={Colors.white} />
-                                    <Text style={styles.brandBadgeText}>UTY Secure</Text>
-                                </LinearGradient>
+                                <View style={styles.brandBadge}>
+                                    <View
+                                        style={[
+                                            styles.brandDot,
+                                            { backgroundColor: activeAccentSoftColor },
+                                        ]}
+                                    >
+                                        <Ionicons
+                                            name="shield-checkmark-outline"
+                                            size={15}
+                                            color={activeAccentColor}
+                                        />
+                                    </View>
+                                    <Text style={styles.brandBadgeText}>Compte UTY</Text>
+                                </View>
                                 <TouchableOpacity
                                     style={styles.closeButton}
                                     onPress={closeModal}
@@ -809,35 +919,20 @@ export default function AuthModal() {
                             </View>
 
                             <View style={styles.modeCard}>
-                                <LinearGradient colors={modeCardColors} style={styles.modeCardGradient}>
-                                    <View style={styles.modeIconCircle}>
-                                        <Ionicons name={modeIconName} size={22} color={Colors.white} />
-                                    </View>
-                                    <View style={styles.authRequiredTextWrap}>
-                                        <Text style={styles.modeStep}>{modeStepHeader}</Text>
-                                        <Text style={styles.heroTitle}>{modeTitle}</Text>
-                                        <Text style={styles.heroSubtitle}>{modeSubtitle}</Text>
-                                    </View>
-                                </LinearGradient>
-                            </View>
-
-                            {showAuthRequiredNotice ? (
-                                <View style={styles.authRequiredCard}>
-                                    <View style={styles.authRequiredTop}>
-                                        <View style={styles.authRequiredIconWrap}>
-                                            <Ionicons name="lock-closed-outline" size={18} color={Colors.accentDark} />
-                                        </View>
-                                        <View style={styles.authRequiredTextWrap}>
-                                            <Text style={styles.authRequiredTitle}>
-                                                {authRequiredTitle || 'Connexion requise'}
-                                            </Text>
-                                            <Text style={styles.authRequiredSubtitle}>
-                                                {authRequiredMessage || 'Connectez-vous pour continuer.'}
-                                            </Text>
-                                        </View>
-                                    </View>
+                                <View
+                                    style={[
+                                        styles.modeIconCircle,
+                                        { backgroundColor: activeAccentSoftColor },
+                                    ]}
+                                >
+                                    <Ionicons name={modeIconName} size={21} color={activeAccentColor} />
                                 </View>
-                            ) : null}
+                                <View style={styles.modeTextWrap}>
+                                    <Text style={styles.modeStep}>{modeStepHeader}</Text>
+                                    <Text style={styles.heroTitle}>{modeTitle}</Text>
+                                    <Text style={styles.heroSubtitle}>{modeSubtitle}</Text>
+                                </View>
+                            </View>
 
                             <View style={styles.tabsContainer}>
                                 <TouchableOpacity
@@ -854,7 +949,7 @@ export default function AuthModal() {
                                             mode === 'register' && styles.tabTextActive,
                                         ]}
                                     >
-                                        S&apos;inscrire
+                                        {"S'inscrire"}
                                     </Text>
                                 </TouchableOpacity>
                                 <TouchableOpacity
@@ -876,43 +971,27 @@ export default function AuthModal() {
                                 </TouchableOpacity>
                             </View>
 
-                            <View style={styles.progressRow}>
-                                {currentProgress.map((item, index) => {
-                                    const isDone = index < currentProgressIndex;
-                                    const isActive = index === currentProgressIndex;
-                                    return (
-                                        <View
-                                            key={item.step}
-                                            style={[
-                                                styles.progressChip,
-                                                isActive && styles.progressChipActive,
-                                                isDone && styles.progressChipDone,
-                                            ]}
-                                        >
-                                            {isDone ? (
-                                                <Ionicons name="checkmark" size={14} color={Colors.white} />
-                                            ) : (
-                                                <Text
-                                                    style={[
-                                                        styles.progressChipIndex,
-                                                        isActive && styles.progressChipIndexActive,
-                                                    ]}
-                                                >
-                                                    {index + 1}
-                                                </Text>
-                                            )}
-                                            <Text
+                            <View style={styles.progressBlock}>
+                                <View style={styles.progressTrack}>
+                                    {currentProgress.map((item, index) => {
+                                        const isReached = index <= currentProgressIndex;
+                                        return (
+                                            <View
+                                                key={item.step}
                                                 style={[
-                                                    styles.progressChipText,
-                                                    isActive && styles.progressChipTextActive,
-                                                    isDone && styles.progressChipTextDone,
+                                                    styles.progressSegment,
+                                                    isReached && { backgroundColor: activeAccentColor },
                                                 ]}
-                                            >
-                                                {item.label}
-                                            </Text>
-                                        </View>
-                                    );
-                                })}
+                                            />
+                                        );
+                                    })}
+                                </View>
+                                <View style={styles.progressMetaRow}>
+                                    <Text style={[styles.progressMetaText, { color: activeAccentColor }]}>
+                                        Etape {currentProgressIndex + 1}/{currentProgress.length}
+                                    </Text>
+                                    <Text style={styles.progressMetaHint}>{activeProgressLabel}</Text>
+                                </View>
                             </View>
 
                             <View style={styles.form}>
@@ -1024,7 +1103,7 @@ export default function AuthModal() {
                                     </View>
                                 )}
 
-                                {isRegisterIdentityStep && !isGoogleRegistrationFlow && (
+                                {isRegisterIdentityStep && !isOAuthRegistrationFlow && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Prenom</Text>
@@ -1076,7 +1155,7 @@ export default function AuthModal() {
                                     </>
                                 )}
 
-                                {isRegisterSecurityStep && !isGoogleRegistrationFlow && (
+                                {isRegisterSecurityStep && !isOAuthRegistrationFlow && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Code PIN (4 chiffres)</Text>
@@ -1238,7 +1317,7 @@ export default function AuthModal() {
                                         disabled={isBusy}
                                     >
                                         <LinearGradient
-                                            colors={mode === 'register' ? Gradients.accent : Gradients.primary}
+                                            colors={[activeAccentColor, activeAccentColor]}
                                             style={styles.submitGradient}
                                         >
                                             <Text style={styles.submitButtonText}>{primaryActionText}</Text>
@@ -1257,14 +1336,14 @@ export default function AuthModal() {
                                                             : 'arrow-forward'
                                                     }
                                                     size={18}
-                                                    color={Colors.primary}
+                                                    color={activeAccentColor}
                                                 />
                                             </View>
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 </View>
 
-                                {showGoogleButton ? (
+                                {showOAuthButtons ? (
                                     <>
                                         <View style={styles.dividerRow}>
                                             <View style={styles.dividerLine} />
@@ -1272,18 +1351,37 @@ export default function AuthModal() {
                                             <View style={styles.dividerLine} />
                                         </View>
 
-                                        <TouchableOpacity
-                                            style={[styles.googleButton, isGoogleLoading && styles.disabledButton]}
-                                            onPress={() => void handleGoogleAuth()}
-                                            disabled={isBusy}
-                                        >
-                                            <Ionicons name="logo-google" size={18} color={Colors.primary} />
-                                            <Text style={styles.googleButtonText}>
-                                                {isGoogleLoading
-                                                    ? 'Connexion Google...'
-                                                    : 'Continuer avec Google'}
-                                            </Text>
-                                        </TouchableOpacity>
+                                        <View style={styles.oauthButtonsColumn}>
+                                            {showGoogleButton ? (
+                                                <TouchableOpacity
+                                                    style={[styles.googleButton, isGoogleLoading && styles.disabledButton]}
+                                                    onPress={() => void handleGoogleAuth()}
+                                                    disabled={isBusy}
+                                                >
+                                                    <Ionicons name="logo-google" size={18} color={Colors.primary} />
+                                                    <Text style={styles.googleButtonText}>
+                                                        {isGoogleLoading
+                                                            ? 'Connexion Google...'
+                                                            : 'Continuer avec Google'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ) : null}
+
+                                            {showAppleButton ? (
+                                                <TouchableOpacity
+                                                    style={[styles.appleButton, isAppleLoading && styles.disabledButton]}
+                                                    onPress={() => void handleAppleAuth()}
+                                                    disabled={isBusy}
+                                                >
+                                                    <Ionicons name="logo-apple" size={20} color={Colors.textPrimary} />
+                                                    <Text style={styles.appleButtonText}>
+                                                        {isAppleLoading
+                                                            ? 'Connexion Apple...'
+                                                            : 'Continuer avec Apple'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ) : null}
+                                        </View>
                                     </>
                                 ) : null}
 
@@ -1338,35 +1436,17 @@ const styles = StyleSheet.create({
     },
     animatedContainer: {
         flex: 1,
-        backgroundColor: '#F7FAFF',
-        borderTopLeftRadius: BorderRadius.xxxl,
-        borderTopRightRadius: BorderRadius.xxxl,
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xxl,
+        borderTopRightRadius: BorderRadius.xxl,
         marginTop: Platform.OS === 'ios' ? Spacing.xxxl : Spacing.xxl,
-        ...Shadows.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
     },
     scrollContent: {
         flexGrow: 1,
-        paddingHorizontal: Spacing.xxl,
+        paddingHorizontal: Spacing.xl,
         paddingBottom: Spacing.huge,
-        position: 'relative',
-    },
-    colorOrbWarm: {
-        position: 'absolute',
-        top: 82,
-        right: -26,
-        width: 108,
-        height: 108,
-        borderRadius: 54,
-        backgroundColor: Colors.accent + '33',
-    },
-    colorOrbCool: {
-        position: 'absolute',
-        top: 158,
-        left: -38,
-        width: 130,
-        height: 130,
-        borderRadius: 65,
-        backgroundColor: Colors.info + '26',
     },
     handle: {
         alignSelf: 'center',
@@ -1381,122 +1461,84 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginBottom: Spacing.md,
+        marginBottom: Spacing.lg,
     },
     brandBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: Spacing.xs,
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 6,
-        ...Shadows.sm,
-    },
-    brandBadgeText: {
-        color: Colors.white,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    closeButton: {
-        width: 42,
-        height: 42,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.white,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        ...Shadows.sm,
-    },
-    modeCard: {
-        marginBottom: Spacing.lg,
-    },
-    modeCardGradient: {
-        borderRadius: BorderRadius.xxl,
-        paddingHorizontal: Spacing.lg,
-        paddingVertical: Spacing.md + 2,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.md,
-        ...Shadows.lg,
-    },
-    modeIconCircle: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        backgroundColor: '#FFFFFF33',
-        borderWidth: 1,
-        borderColor: '#FFFFFF55',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    modeStep: {
-        color: Colors.white + 'D9',
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        letterSpacing: 0.3,
-        textTransform: 'uppercase',
-    },
-    heroTitle: {
-        color: Colors.white,
-        marginTop: 2,
-        fontSize: Typography.fontSize.md,
-        fontWeight: Typography.fontWeight.extrabold,
-    },
-    heroSubtitle: {
-        color: Colors.white + 'E0',
-        marginTop: 2,
-        fontSize: Typography.fontSize.xs,
-        lineHeight: 18,
-    },
-    authRequiredCard: {
-        borderRadius: BorderRadius.xl,
-        backgroundColor: Colors.white,
-        borderWidth: 1,
-        borderColor: Colors.accent + '55',
-        marginBottom: Spacing.md,
-        ...Shadows.md,
-    },
-    authRequiredTop: {
-        flexDirection: 'row',
-        alignItems: 'center',
         gap: Spacing.sm,
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.md,
     },
-    authRequiredIconWrap: {
+    brandDot: {
         width: 34,
         height: 34,
         borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.accent + '1F',
-        borderWidth: 1,
-        borderColor: Colors.accent + '60',
     },
-    authRequiredTextWrap: {
-        flex: 1,
-    },
-    authRequiredTitle: {
+    brandBadgeText: {
         color: Colors.textPrimary,
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.extrabold,
     },
-    authRequiredSubtitle: {
+    closeButton: {
+        width: 40,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+    },
+    modeCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.gray50,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+        marginBottom: Spacing.md,
+    },
+    modeIconCircle: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    modeStep: {
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+    },
+    heroTitle: {
+        color: Colors.textPrimary,
         marginTop: 3,
-        color: Colors.gray700,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    heroSubtitle: {
+        color: Colors.gray600,
+        marginTop: 4,
         fontSize: Typography.fontSize.sm,
-        lineHeight: 19,
+        lineHeight: 20,
+    },
+    modeTextWrap: {
+        flex: 1,
     },
     tabsContainer: {
         flexDirection: 'row',
-        backgroundColor: Colors.primary + '0A',
-        borderRadius: BorderRadius.xxl,
-        padding: 5,
-        marginBottom: Spacing.lg,
+        backgroundColor: Colors.gray50,
+        borderRadius: BorderRadius.xl,
+        padding: 4,
+        marginBottom: Spacing.md,
         borderWidth: 1,
-        borderColor: Colors.primary + '18',
-        ...Shadows.sm,
+        borderColor: Colors.gray200,
     },
     tab: {
         flex: 1,
@@ -1507,11 +1549,9 @@ const styles = StyleSheet.create({
     },
     tabActiveRegister: {
         backgroundColor: Colors.accentDark,
-        ...Shadows.sm,
     },
     tabActiveLogin: {
         backgroundColor: Colors.primary,
-        ...Shadows.sm,
     },
     tabText: {
         fontSize: Typography.fontSize.base,
@@ -1522,50 +1562,36 @@ const styles = StyleSheet.create({
         color: Colors.white,
         fontWeight: Typography.fontWeight.extrabold,
     },
-    progressRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
+    progressBlock: {
         gap: Spacing.xs,
         marginBottom: Spacing.lg,
     },
-    progressChip: {
-        minHeight: 36,
+    progressTrack: {
+        flexDirection: 'row',
+        gap: 6,
+    },
+    progressSegment: {
+        flex: 1,
+        height: 5,
         borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.gray200,
+    },
+    progressMetaRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        paddingHorizontal: Spacing.sm,
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
     },
-    progressChipActive: {
-        borderColor: Colors.primary + '66',
-        backgroundColor: Colors.primary + '12',
-    },
-    progressChipDone: {
-        borderColor: Colors.primary,
-        backgroundColor: Colors.primary,
-    },
-    progressChipIndex: {
+    progressMetaText: {
         fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.extrabold,
     },
-    progressChipIndexActive: {
-        color: Colors.primary,
-    },
-    progressChipText: {
+    progressMetaHint: {
+        flex: 1,
+        textAlign: 'right',
         fontSize: Typography.fontSize.xs,
         color: Colors.gray500,
         fontWeight: Typography.fontWeight.semibold,
-    },
-    progressChipTextActive: {
-        color: Colors.primary,
-    },
-    progressChipTextDone: {
-        color: Colors.white,
     },
     form: {
         gap: Spacing.md,
@@ -1588,15 +1614,14 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
         borderWidth: 1,
         borderColor: Colors.gray200,
-        ...Shadows.sm,
     },
     inputContainerFocusedWarm: {
         borderColor: Colors.accentDark,
-        backgroundColor: Colors.accent + '12',
+        backgroundColor: Colors.white,
     },
     inputContainerFocusedCool: {
         borderColor: Colors.primary,
-        backgroundColor: Colors.primary + '0A',
+        backgroundColor: Colors.white,
     },
     input: {
         flex: 1,
@@ -1641,7 +1666,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.md,
         paddingVertical: Spacing.md,
         gap: Spacing.xs,
-        ...Shadows.sm,
     },
     phoneSummaryLabel: {
         color: Colors.gray500,
@@ -1705,7 +1729,6 @@ const styles = StyleSheet.create({
         borderColor: Colors.gray200,
         backgroundColor: Colors.white,
         position: 'relative',
-        ...Shadows.sm,
     },
     categoryChipSelected: {
         borderColor: Colors.primary,
@@ -1778,7 +1801,6 @@ const styles = StyleSheet.create({
         flex: 1.2,
         borderRadius: BorderRadius.xxl,
         overflow: 'hidden',
-        ...Shadows.lg,
     },
     submitGradient: {
         flexDirection: 'row',
@@ -1837,10 +1859,28 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.sm,
-        ...Shadows.sm,
+    },
+    oauthButtonsColumn: {
+        gap: Spacing.sm,
     },
     googleButtonText: {
         color: Colors.primary,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    appleButton: {
+        minHeight: 52,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+    },
+    appleButtonText: {
+        color: Colors.textPrimary,
         fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.bold,
     },

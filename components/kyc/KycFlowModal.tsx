@@ -48,6 +48,9 @@ const KYC_STEPS = [
     { id: 3, title: 'Confirmation' },
 ] as const;
 
+const KYC_ID_TYPES: KycIdType[] = ['national_id', 'passport', 'driving_license', 'voter_card'];
+const ID_NUMBER_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._/-]*$/;
+
 const AUTO_CAPTURE_DELAY_MS = 750;
 const SELFIE_STREAK_TARGET = 3;
 const DOCUMENT_STREAK_TARGET = 2;
@@ -61,8 +64,8 @@ export type KycFlowResult = {
 
 type KycIdentityInput = {
     fullName: string;
-    idType: KycIdType;
-    idNumber: string;
+    idType?: KycIdType;
+    idNumber?: string;
 };
 
 interface KycFlowModalProps {
@@ -212,6 +215,12 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
         [cameraTarget],
     );
     const { detectFaces, stopListeners } = useFaceDetector(faceDetectionOptions);
+
+    const normalizedFullName = identity.fullName.trim().replace(/\s+/g, ' ');
+    const normalizedIdNumber = identity.idNumber?.trim() || '';
+    const idTypeIsSupported = !identity.idType || KYC_ID_TYPES.includes(identity.idType);
+    const hasRequiredCaptures = Boolean(selfie && documentFront);
+    const canSubmit = hasRequiredCaptures && consentChecked && !isSubmitting;
 
     const showAlert = React.useCallback((title: string, message: string, type: AlertType = 'info') => {
         setAlertState({ visible: true, title, message, type });
@@ -535,6 +544,35 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
         [cameraTarget, detectFaces, runDetectionOnJS],
     );
 
+    const validateIdentityInput = () => {
+        if (normalizedFullName.length < 3) {
+            setErrorMessage('Renseignez le nom complet du titulaire avant l envoi.');
+            return null;
+        }
+
+        if (!idTypeIsSupported) {
+            setErrorMessage('Selectionnez un type de document valide.');
+            return null;
+        }
+
+        if (!normalizedIdNumber) {
+            setErrorMessage('');
+            return { fullName: normalizedFullName, idNumber: undefined };
+        }
+
+        if (normalizedIdNumber.length < 4) {
+            setErrorMessage('Le numero du document doit contenir au moins 4 caracteres s il est renseigne.');
+            return null;
+        }
+
+        if (!ID_NUMBER_PATTERN.test(normalizedIdNumber)) {
+            setErrorMessage('Le numero du document contient des caracteres non autorises.');
+            return null;
+        }
+
+        return { fullName: normalizedFullName, idNumber: normalizedIdNumber };
+    };
+
     const validateStep = () => {
         if (step === 1 && !selfie) {
             setErrorMessage('Prenez un selfie pour continuer.');
@@ -576,25 +614,23 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
             return;
         }
 
-        const fullName = identity.fullName.trim();
-        const idNumber = identity.idNumber.trim();
-        if (!fullName || !idNumber) {
-            showAlert(
-                'Identite manquante',
-                'Renseignez le nom complet et le numero du document avant le KYC.',
-                'warning',
-            );
+        const identityValidation = validateIdentityInput();
+        if (!identityValidation) {
             return;
         }
 
         try {
-            const response = await submitKyc({
-                fullName,
-                idType: identity.idType,
-                idNumber,
+            const payload = {
+                fullName: identityValidation.fullName,
                 selfieUrl: selfie.dataUrl,
                 documentFrontUrl: documentFront.dataUrl,
                 documentBackUrl: documentBack?.dataUrl,
+                ...(identity.idType ? { idType: identity.idType } : {}),
+                ...(identityValidation.idNumber ? { idNumber: identityValidation.idNumber } : {}),
+            };
+
+            const response = await submitKyc({
+                ...payload,
             }).unwrap();
 
             const returnedStatus =
@@ -603,6 +639,12 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                     : undefined;
 
             if (returnedStatus === 'rejected') {
+                onSuccess?.({
+                    selfieUrl: response?.kyc?.selfieUrl || selfie.dataUrl,
+                    documentFrontUrl: response?.kyc?.documentFrontUrl || documentFront.dataUrl,
+                    documentBackUrl: response?.kyc?.documentBackUrl || documentBack?.dataUrl,
+                    kycStatus: returnedStatus,
+                });
                 showAlert(
                     'KYC rejete',
                     'Verification automatique echouee. Reprenez des images plus nettes et reessayez.',
@@ -611,13 +653,22 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                 return;
             }
 
-            showAlert('KYC envoye', 'Votre dossier KYC a ete soumis avec succes.', 'success');
             onSuccess?.({
-                selfieUrl: selfie.dataUrl,
-                documentFrontUrl: documentFront.dataUrl,
-                documentBackUrl: documentBack?.dataUrl,
+                selfieUrl: response?.kyc?.selfieUrl || selfie.dataUrl,
+                documentFrontUrl: response?.kyc?.documentFrontUrl || documentFront.dataUrl,
+                documentBackUrl: response?.kyc?.documentBackUrl || documentBack?.dataUrl,
                 kycStatus: returnedStatus,
             });
+
+            if (returnedStatus === 'approved') {
+                showAlert('KYC approuve', 'Votre identite a ete verifiee avec succes.', 'success');
+            } else {
+                showAlert(
+                    'KYC envoye',
+                    'Votre dossier KYC a ete transmis et attend la validation.',
+                    'success',
+                );
+            }
         } catch (error: any) {
             const message = parseApiErrorMessage(
                 error,
@@ -753,7 +804,7 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
             <View style={styles.block}>
                 <Text style={styles.blockTitle}>Confirmation finale</Text>
                 <Text style={styles.blockHint}>
-                    Le verso est optionnel. Activez la capture automatique puis confirmez l envoi.
+                    Le verso est optionnel. Confirmez l envoi apres verification.
                 </Text>
 
                 <TouchableOpacity style={styles.captureCardSmall} onPress={() => openCaptureCamera('back')}>
@@ -800,9 +851,15 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                 </TouchableOpacity>
 
                 <View style={styles.reviewRow}>
-                    <Text style={styles.reviewItem}>Selfie: {selfie ? 'Capturee' : 'Manquante'}</Text>
-                    <Text style={styles.reviewItem}>Recto: {documentFront ? 'Capture' : 'Manquant'}</Text>
-                    <Text style={styles.reviewItem}>Verso: {documentBack ? 'Capture' : 'Optionnel'}</Text>
+                    <Text style={[styles.reviewItem, !selfie && styles.reviewItemMissing]}>
+                        Selfie: {selfie ? 'Capturee' : 'Manquante'}
+                    </Text>
+                    <Text style={[styles.reviewItem, !documentFront && styles.reviewItemMissing]}>
+                        Recto: {documentFront ? 'Capture' : 'Manquant'}
+                    </Text>
+                    <Text style={styles.reviewItem}>
+                        Verso: {documentBack ? 'Capture' : 'Optionnel'}
+                    </Text>
                 </View>
             </View>
         );
@@ -983,9 +1040,9 @@ export function KycFlowModal({ visible, identity, onClose, onSuccess }: KycFlowM
                                     </TouchableOpacity>
                                 ) : (
                                     <TouchableOpacity
-                                        style={[styles.footerCta, isSubmitting && styles.footerCtaDisabled]}
+                                        style={[styles.footerCta, !canSubmit && styles.footerCtaDisabled]}
                                         onPress={handleSubmit}
-                                        disabled={isSubmitting}
+                                        disabled={!canSubmit}
                                     >
                                         <LinearGradient colors={Gradients.accent} style={styles.footerGradient}>
                                             {isSubmitting ? (
@@ -1317,6 +1374,10 @@ const styles = StyleSheet.create({
         color: Colors.gray600,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.medium,
+    },
+    reviewItemMissing: {
+        color: Colors.error,
+        fontWeight: Typography.fontWeight.bold,
     },
     errorText: {
         marginTop: Spacing.sm,
