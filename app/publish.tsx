@@ -2435,20 +2435,6 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
     },
-    alertPoints: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs / 2,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-    },
-    alertPointsText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textSecondary,
-    },
     alertIcon_success: {
         backgroundColor: Colors.success,
     },

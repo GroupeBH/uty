@@ -1,5 +1,5 @@
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
-import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { BorderRadius, Colors, Gradients, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
     useDeleteNotificationMutation,
@@ -71,6 +71,7 @@ export default function NotificationsScreen() {
     }
 
     const unreadCount = notifications.filter((item) => !item.isReaded).length;
+    const readCount = Math.max(notifications.length - unreadCount, 0);
 
     const handleOpenNotification = async (item: AppNotification) => {
         if (!item._id) return;
@@ -140,6 +141,27 @@ export default function NotificationsScreen() {
                 </TouchableOpacity>
             </View>
 
+            <View style={styles.summaryBand}>
+                <View style={styles.summaryIconWrap}>
+                    <Ionicons name="notifications-outline" size={20} color={Colors.primary} />
+                </View>
+                <View style={styles.summaryCopy}>
+                    <Text style={styles.summaryTitle}>
+                        {unreadCount > 0 ? 'A traiter' : 'Boite a jour'}
+                    </Text>
+                    <Text style={styles.summaryText}>
+                        {notifications.length} notification(s) - {readCount} lue(s)
+                    </Text>
+                </View>
+                {unreadCount > 0 ? (
+                    <View style={styles.unreadPill}>
+                        <Text style={styles.unreadPillText}>{unreadCount}</Text>
+                    </View>
+                ) : (
+                    <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
+                )}
+            </View>
+
             <FlatList
                 data={notifications}
                 keyExtractor={(item) => item._id}
@@ -180,15 +202,28 @@ export default function NotificationsScreen() {
                             activeOpacity={0.88}
                         >
                             <View style={styles.cardMain}>
-                                <View style={[styles.dot, isUnread && styles.dotUnread]} />
+                                <View style={[styles.notificationIcon, isUnread && styles.notificationIconUnread]}>
+                                    <Ionicons
+                                        name={isUnread ? 'mail-unread-outline' : 'mail-open-outline'}
+                                        size={17}
+                                        color={isUnread ? Colors.primary : Colors.gray500}
+                                    />
+                                </View>
                                 <View style={styles.cardTextWrap}>
+                                    <View style={styles.cardMetaRow}>
+                                        <Text style={styles.cardDate}>{formatRelativeDate(item.createdAt)}</Text>
+                                        {isUnread ? (
+                                            <View style={styles.newBadge}>
+                                                <Text style={styles.newBadgeText}>Nouveau</Text>
+                                            </View>
+                                        ) : null}
+                                    </View>
                                     <Text style={styles.cardTitle} numberOfLines={2}>
                                         {item.title || 'Notification'}
                                     </Text>
                                     <Text style={styles.cardBody} numberOfLines={3}>
                                         {item.body || ''}
                                     </Text>
-                                    <Text style={styles.cardDate}>{formatRelativeDate(item.createdAt)}</Text>
                                 </View>
                             </View>
 
@@ -222,7 +257,7 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: Colors.backgroundSecondary,
+        backgroundColor: '#F4F7FC',
     },
     header: {
         flexDirection: 'row',
@@ -237,6 +272,8 @@ const styles = StyleSheet.create({
     headerBtn: {
         width: 40,
         height: 40,
+        borderRadius: 20,
+        backgroundColor: Colors.primary + '08',
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -274,8 +311,62 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
     },
+    summaryBand: {
+        marginHorizontal: Spacing.lg,
+        marginTop: Spacing.md,
+        marginBottom: Spacing.xs,
+        minHeight: 72,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
+        backgroundColor: Colors.white,
+        paddingHorizontal: Spacing.md,
+        paddingVertical: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    summaryIconWrap: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+    },
+    summaryCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    summaryTitle: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    summaryText: {
+        marginTop: 2,
+        color: Colors.gray500,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    unreadPill: {
+        minWidth: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.accent,
+        paddingHorizontal: Spacing.sm,
+    },
+    unreadPillText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
     listContent: {
-        padding: Spacing.lg,
+        paddingHorizontal: Spacing.lg,
+        paddingTop: Spacing.sm,
+        paddingBottom: 120,
         gap: Spacing.sm,
     },
     emptyListContent: {
@@ -287,12 +378,14 @@ const styles = StyleSheet.create({
         borderRadius: BorderRadius.lg,
         padding: Spacing.md,
         flexDirection: 'row',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         justifyContent: 'space-between',
-        ...Shadows.sm,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
     },
     cardUnread: {
-        backgroundColor: Colors.primary + '08',
+        backgroundColor: Colors.primary + '06',
+        borderColor: Colors.primary + '24',
     },
     cardMain: {
         flex: 1,
@@ -300,22 +393,30 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
         alignItems: 'flex-start',
     },
-    dot: {
-        marginTop: 4,
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: Colors.gray300,
+    notificationIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.gray100,
     },
-    dotUnread: {
-        backgroundColor: Colors.primary,
+    notificationIconUnread: {
+        backgroundColor: Colors.primary + '12',
     },
     cardTextWrap: {
         flex: 1,
+        minWidth: 0,
+    },
+    cardMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        marginBottom: 3,
     },
     cardTitle: {
         color: Colors.textPrimary,
-        fontSize: Typography.fontSize.sm,
+        fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.extrabold,
     },
     cardBody: {
@@ -325,10 +426,20 @@ const styles = StyleSheet.create({
         lineHeight: 20,
     },
     cardDate: {
-        marginTop: Spacing.xs,
         color: Colors.gray500,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.medium,
+    },
+    newBadge: {
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.accent + '28',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+    },
+    newBadgeText: {
+        color: Colors.accentDark,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     cardActions: {
         marginLeft: Spacing.sm,

@@ -780,8 +780,6 @@ export default function EditAnnouncementScreen() {
             : alertState.variant === 'error'
               ? 'Petite correction'
               : 'Petit conseil';
-    const alertPointsText =
-        alertState.variant === 'success' ? '+15 XP' : 'Astuce';
     const alertProgress =
         alertState.variant === 'success'
             ? 0.78
@@ -1270,10 +1268,6 @@ export default function EditAnnouncementScreen() {
                             <View style={styles.alertMeta}>
                                 <View style={[styles.alertBadge, styles[`alertBadge_${alertState.variant}`]]}>
                                     <Text style={styles.alertBadgeText}>{alertBadgeText}</Text>
-                                </View>
-                                <View style={styles.alertPoints}>
-                                    <Ionicons name="sparkles" size={14} color={Colors.accent} />
-                                    <Text style={styles.alertPointsText}>{alertPointsText}</Text>
                                 </View>
                             </View>
                         </View>
@@ -1848,20 +1842,6 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
         color: Colors.textPrimary,
-    },
-    alertPoints: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs / 2,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.gray50,
-    },
-    alertPointsText: {
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-        color: Colors.textSecondary,
     },
     alertTitle: {
         fontSize: Typography.fontSize.lg,

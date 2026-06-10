@@ -168,6 +168,14 @@ export default function SettingsScreen() {
             items: [
                 {
                     kind: 'action',
+                    icon: 'location-outline',
+                    label: 'Adresses',
+                    subtitle: 'Retrait, livraison et lieux habituels',
+                    gradient: Gradients.cool,
+                    onPress: () => router.push('/addresses'),
+                },
+                {
+                    kind: 'action',
                     icon: 'card-outline',
                     label: 'Moyens de paiement',
                     subtitle: 'Paiement a la livraison et options locales',

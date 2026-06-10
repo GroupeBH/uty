@@ -28,7 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function ProfileScreen() {
     const router = useRouter();
     const { user, logout, isLoading, isAuthenticated } = useAuth();
-    const { showAlert: showStyledAlert, alertNode } = useStyledAlert();
+    const { alertNode } = useStyledAlert();
     const { data: announcements } = useGetMyAnnouncementsQuery(undefined, {
         skip: !isAuthenticated,
     });
@@ -163,14 +163,14 @@ export default function ProfileScreen() {
                     label: 'Adresses',
                     subtitle: 'Gérer mes adresses',
                     gradient: Gradients.cool,
-                    onPress: () => router.push('/payment-methods'),
+                    onPress: () => router.push('/addresses'),
                 },
                 {
                     icon: 'card-outline',
                     label: 'Moyens de paiement',
                     subtitle: 'Paiement à la livraison et options locales',
                     gradient: Gradients.accent,
-                    onPress: () => router.push('/help-support'),
+                    onPress: () => router.push('/payment-methods'),
                 },
             ],
         },
@@ -203,7 +203,7 @@ export default function ProfileScreen() {
                     label: 'Aide & Support',
                     subtitle: 'Conseils simples, FAQ et contacts utiles',
                     gradient: Gradients.success,
-                    onPress: () => showStyledAlert('Info', 'Fonctionnalité à venir', undefined, 'info'),
+                    onPress: () => router.push('/help-support'),
                 },
             ],
         },
