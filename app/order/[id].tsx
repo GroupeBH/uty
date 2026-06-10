@@ -76,6 +76,15 @@ const parseCoordinateLabel = (
     return { latitude, longitude };
 };
 
+const formatGeoPointLabel = (value?: { coordinates?: number[] } | null): string => {
+    const coordinates = value?.coordinates;
+    if (!Array.isArray(coordinates) || coordinates.length < 2) return '';
+    const longitude = Number(coordinates[0]);
+    const latitude = Number(coordinates[1]);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return '';
+    return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
+};
+
 export default function OrderDetailScreen() {
     const { id } = useLocalSearchParams<{ id?: string }>();
     const router = useRouter();
@@ -86,6 +95,7 @@ export default function OrderDetailScreen() {
     const { data: order, isLoading, refetch } = useGetOrderQuery(id || '', { skip: !id });
     const [deliveryId, setDeliveryId] = React.useState<string | null>(null);
     const [deliveryIdInput, setDeliveryIdInput] = React.useState('');
+    const [showDeliveryIdInput, setShowDeliveryIdInput] = React.useState(false);
     const [pickupLocationInput, setPickupLocationInput] = React.useState('');
     const [deliveryLocationInput, setDeliveryLocationInput] = React.useState('');
     const [mapPickerField, setMapPickerField] = React.useState<'pickup' | 'delivery' | null>(null);
@@ -244,7 +254,7 @@ export default function OrderDetailScreen() {
                         const successTitle = isOrderConfirmed ? 'Commande confirmee' : 'Statut mis a jour';
                         const successMessage =
                             isOrderConfirmed
-                                ? 'La commande est acceptee. Prochaine etape: commander une livraison.'
+                                ? 'La commande est acceptee. Prochaine etape: demander une livraison.'
                                 : 'Le statut de la commande a ete modifie avec succes.';
                         showAlert({
                             title: successTitle,
@@ -253,7 +263,7 @@ export default function OrderDetailScreen() {
                             showCancel: isOrderConfirmed && !deliveryId,
                             confirmText:
                                 isOrderConfirmed && !deliveryId
-                                    ? 'Commander la livraison'
+                                    ? 'Demander la livraison'
                                     : 'OK',
                             cancelText: 'Plus tard',
                             onConfirm:
@@ -294,8 +304,10 @@ export default function OrderDetailScreen() {
 
             if (createdDeliveryId) {
                 setDeliveryId(String(createdDeliveryId));
+                setShowDeliveryIdInput(false);
                 await deliveryStorage.setDeliveryIdForOrder(order._id, String(createdDeliveryId));
             }
+            await refetch();
 
             showAlert({
                 title: 'Livraison demandee',
@@ -336,6 +348,7 @@ export default function OrderDetailScreen() {
             return;
         }
         setDeliveryId(candidate);
+        setShowDeliveryIdInput(false);
         await deliveryStorage.setDeliveryIdForOrder(order._id, candidate);
         router.push(resolveDeliveryRoute(candidate) as any);
     };
@@ -379,6 +392,29 @@ export default function OrderDetailScreen() {
     const canRequestDeliveryNow = isSeller && order.status === 'confirmed' && !deliveryId;
     const canTrackDeliveryNow = isSeller && Boolean(deliveryId);
     const hasSellerStatusActions = nextStatuses.length > 0;
+    const pickupLocationLabel =
+        pickupLocationInput.trim() ||
+        formatGeoPointLabel((order as any)?.pickupLocation) ||
+        'Point de retrait a confirmer';
+    const deliveryLocationLabel =
+        deliveryLocationInput.trim() ||
+        order.deliveryAddress?.trim() ||
+        formatGeoPointLabel(order.deliveryLocation) ||
+        'Adresse de livraison a confirmer';
+    const deliveryPanelStatus = deliveryId
+        ? 'Livraison creee'
+        : canRequestDeliveryNow
+            ? 'Pret a demander'
+            : order.status === 'pending'
+                ? 'Commande a confirmer'
+                : 'Livraison non disponible';
+    const deliveryPanelHint = deliveryId
+        ? `Course #${deliveryId.slice(-8).toUpperCase()} liee a cette commande.`
+        : canRequestDeliveryNow
+            ? 'Verifiez les points, puis envoyez la demande aux livreurs disponibles.'
+            : order.status === 'pending'
+                ? 'Confirmez la commande pour debloquer la demande de livraison.'
+                : 'La demande de livraison n est plus disponible pour ce statut.';
     const sellerDockBottomInset = Math.max(insets.bottom, Spacing.sm);
     const sellerDockEstimatedHeight = hasSellerStatusActions
         ? 176
@@ -487,96 +523,163 @@ export default function OrderDetailScreen() {
                     })}
                 </View>
 
-                <View style={styles.card}>
-                    <Text style={styles.cardTitle}>Livraison</Text>
+                <View style={[styles.card, styles.deliveryPanel]}>
+                    <View style={styles.deliveryPanelHeader}>
+                        <View style={styles.deliveryPanelIcon}>
+                            <Ionicons
+                                name={deliveryId ? 'navigate-circle-outline' : 'bicycle-outline'}
+                                size={20}
+                                color={Colors.primary}
+                            />
+                        </View>
+                        <View style={styles.deliveryPanelTitleWrap}>
+                            <Text style={styles.cardTitle}>Livraison</Text>
+                            <Text style={styles.deliveryPanelHint}>{deliveryPanelHint}</Text>
+                        </View>
+                        <View style={styles.deliveryStatusPill}>
+                            <Text style={styles.deliveryStatusPillText}>{deliveryPanelStatus}</Text>
+                        </View>
+                    </View>
+
                     {deliveryId ? (
+                        <TouchableOpacity
+                            style={styles.deliveryTrackButton}
+                            onPress={() => router.push(resolveDeliveryRoute(deliveryId) as any)}
+                        >
+                            <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                            <Text style={styles.deliveryTrackButtonText}>Suivre la livraison</Text>
+                        </TouchableOpacity>
+                    ) : isSeller && order.status === 'confirmed' ? (
                         <>
-                            <Text style={styles.mutedText}>
-                                Livraison liee a cette commande: #{deliveryId.slice(-8).toUpperCase()}
-                            </Text>
+                            <View style={styles.deliveryRoutePreview}>
+                                <View style={styles.deliveryPoint}>
+                                    <View style={styles.deliveryPointIcon}>
+                                        <Ionicons name="storefront-outline" size={16} color={Colors.primary} />
+                                    </View>
+                                    <View style={styles.deliveryPointCopy}>
+                                        <Text style={styles.deliveryPointLabel}>Retrait vendeur</Text>
+                                        <Text style={styles.deliveryPointValue} numberOfLines={2}>
+                                            {pickupLocationLabel}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.deliveryPointMapButton}
+                                        onPress={() => setMapPickerField('pickup')}
+                                    >
+                                        <Ionicons name="map-outline" size={16} color={Colors.primary} />
+                                        <Text style={styles.deliveryPointMapText}>Carte</Text>
+                                    </TouchableOpacity>
+                                </View>
+
+                                <View style={styles.deliveryRouteDivider} />
+
+                                <View style={styles.deliveryPoint}>
+                                    <View style={styles.deliveryPointIcon}>
+                                        <Ionicons name="location-outline" size={16} color={Colors.primary} />
+                                    </View>
+                                    <View style={styles.deliveryPointCopy}>
+                                        <Text style={styles.deliveryPointLabel}>Destination client</Text>
+                                        <Text style={styles.deliveryPointValue} numberOfLines={2}>
+                                            {deliveryLocationLabel}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        style={styles.deliveryPointMapButton}
+                                        onPress={() => setMapPickerField('delivery')}
+                                    >
+                                        <Ionicons name="map-outline" size={16} color={Colors.primary} />
+                                        <Text style={styles.deliveryPointMapText}>Carte</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+
+                            <View style={styles.deliveryFieldsGrid}>
+                                <View style={styles.deliveryFieldGroup}>
+                                    <Text style={styles.fieldLabel}>Retrait</Text>
+                                    <TextInput
+                                        value={pickupLocationInput}
+                                        onChangeText={setPickupLocationInput}
+                                        placeholder="Adresse ou point GPS"
+                                        style={styles.fieldInput}
+                                    />
+                                </View>
+                                <View style={styles.deliveryFieldGroup}>
+                                    <Text style={styles.fieldLabel}>Livraison</Text>
+                                    <TextInput
+                                        value={deliveryLocationInput}
+                                        onChangeText={setDeliveryLocationInput}
+                                        placeholder="Adresse de livraison"
+                                        style={styles.fieldInput}
+                                    />
+                                </View>
+                            </View>
+
                             <TouchableOpacity
-                                style={styles.deliveryTrackButton}
-                                onPress={() => router.push(resolveDeliveryRoute(deliveryId) as any)}
+                                style={[styles.deliveryRequestButton, isRequestingDelivery && styles.disabledButton]}
+                                onPress={onRequestDelivery}
+                                disabled={isRequestingDelivery}
                             >
-                                <Ionicons name="navigate-outline" size={16} color={Colors.white} />
-                                <Text style={styles.deliveryTrackButtonText}>Suivre la livraison</Text>
+                                <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
+                                <Text style={styles.deliveryRequestButtonText}>
+                                    {isRequestingDelivery ? 'Demande en cours...' : 'Demander une livraison'}
+                                </Text>
                             </TouchableOpacity>
                         </>
                     ) : (
-                        <>
-                            {isSeller ? (
-                                order.status === 'confirmed' ? (
-                                    <>
-                                        <Text style={styles.mutedText}>
-                                            Cette commande est confirmee. Vous pouvez maintenant demander un livreur.
-                                        </Text>
-                                        <Text style={styles.fieldLabel}>Lieu de recuperation (optionnel)</Text>
-                                        <TextInput
-                                            value={pickupLocationInput}
-                                            onChangeText={setPickupLocationInput}
-                                            placeholder="Adresse ou point de pickup"
-                                            style={styles.fieldInput}
-                                        />
-                                        <TouchableOpacity
-                                            style={styles.mapSelectButton}
-                                            onPress={() => setMapPickerField('pickup')}
-                                        >
-                                            <Ionicons name="map-outline" size={16} color={Colors.primary} />
-                                            <Text style={styles.mapSelectButtonText}>Choisir sur la carte</Text>
-                                        </TouchableOpacity>
-                                        <Text style={styles.fieldLabel}>Lieu de livraison (optionnel)</Text>
-                                        <TextInput
-                                            value={deliveryLocationInput}
-                                            onChangeText={setDeliveryLocationInput}
-                                            placeholder="Adresse de livraison"
-                                            style={styles.fieldInput}
-                                        />
-                                        <TouchableOpacity
-                                            style={styles.mapSelectButton}
-                                            onPress={() => setMapPickerField('delivery')}
-                                        >
-                                            <Ionicons name="map-outline" size={16} color={Colors.primary} />
-                                            <Text style={styles.mapSelectButtonText}>Choisir sur la carte</Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            style={[styles.deliveryRequestButton, isRequestingDelivery && styles.disabledButton]}
-                                            onPress={onRequestDelivery}
-                                            disabled={isRequestingDelivery}
-                                        >
-                                            <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
-                                            <Text style={styles.deliveryRequestButtonText}>
-                                                {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </>
-                                ) : (
-                                    <Text style={styles.mutedText}>
-                                        Le vendeur peut demander la livraison uniquement apres confirmation de la commande.
-                                    </Text>
-                                )
-                            ) : (
-                                <Text style={styles.mutedText}>
-                                    Le suivi de livraison apparaitra ici une fois la demande lancee par le vendeur.
-                                </Text>
-                            )}
-                            <Text style={styles.fieldLabel}>ID de livraison (si recu par notification)</Text>
-                            <TextInput
-                                value={deliveryIdInput}
-                                onChangeText={setDeliveryIdInput}
-                                placeholder="Collez l ID de livraison"
-                                style={styles.fieldInput}
-                                autoCapitalize="none"
+                        <View style={styles.deliveryLockedState}>
+                            <Ionicons
+                                name={isSeller ? 'lock-closed-outline' : 'time-outline'}
+                                size={18}
+                                color={Colors.gray500}
                             />
-                            <TouchableOpacity
-                                style={[styles.deliveryTrackButton, !deliveryIdInput.trim() && styles.disabledButton]}
-                                onPress={onOpenDeliveryById}
-                                disabled={!deliveryIdInput.trim()}
-                            >
-                                <Ionicons name="navigate-outline" size={16} color={Colors.white} />
-                                <Text style={styles.deliveryTrackButtonText}>Ouvrir le suivi</Text>
-                            </TouchableOpacity>
-                        </>
+                            <Text style={styles.mutedText}>
+                                {isSeller
+                                    ? 'Confirmez la commande pour demander une livraison.'
+                                    : 'Le suivi de livraison apparaitra ici une fois la demande lancee par le vendeur.'}
+                            </Text>
+                        </View>
                     )}
+
+                    {!deliveryId ? (
+                        <View style={styles.deliveryManualLinkWrap}>
+                            <TouchableOpacity
+                                style={styles.deliveryManualLink}
+                                onPress={() => setShowDeliveryIdInput((prev) => !prev)}
+                            >
+                                <Text style={styles.deliveryManualLinkText}>
+                                    {showDeliveryIdInput ? 'Masquer l ID manuel' : 'J ai deja un ID de livraison'}
+                                </Text>
+                                <Ionicons
+                                    name={showDeliveryIdInput ? 'chevron-up-outline' : 'chevron-down-outline'}
+                                    size={16}
+                                    color={Colors.primary}
+                                />
+                            </TouchableOpacity>
+                            {showDeliveryIdInput ? (
+                                <View style={styles.deliveryManualBox}>
+                                    <Text style={styles.fieldLabel}>ID de livraison</Text>
+                                    <TextInput
+                                        value={deliveryIdInput}
+                                        onChangeText={setDeliveryIdInput}
+                                        placeholder="Collez l ID recu par notification"
+                                        style={styles.fieldInput}
+                                        autoCapitalize="none"
+                                    />
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.deliveryTrackButton,
+                                            !deliveryIdInput.trim() && styles.disabledButton,
+                                        ]}
+                                        onPress={onOpenDeliveryById}
+                                        disabled={!deliveryIdInput.trim()}
+                                    >
+                                        <Ionicons name="navigate-outline" size={16} color={Colors.white} />
+                                        <Text style={styles.deliveryTrackButtonText}>Ouvrir le suivi</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            ) : null}
+                        </View>
+                    ) : null}
                 </View>
 
                 {isBuyer ? (
@@ -591,7 +694,7 @@ export default function OrderDetailScreen() {
 
             {showSellerActionsDock ? (
                 <View style={[styles.sellerActionsDockWrap, { paddingBottom: sellerDockBottomInset }]}>
-                        <View style={styles.sellerActionsDock}>
+                    <View style={styles.sellerActionsDock}>
                         <View style={styles.sellerActionsDockHeader}>
                             <Text style={styles.sellerActionsDockTitle}>Actions vendeur</Text>
                             {isUpdatingStatus || isRequestingDelivery ? (
@@ -602,7 +705,7 @@ export default function OrderDetailScreen() {
                         </View>
                         <Text style={styles.sellerActionsDockHint}>
                             {canRequestDeliveryNow
-                                ? 'Commande acceptee. Etape suivante: commander une livraison.'
+                                ? 'Commande acceptee. Etape suivante: demander une livraison.'
                                 : canTrackDeliveryNow
                                     ? 'Livraison creee. Suivez son avancement.'
                                     : 'Choisissez la prochaine etape de la commande.'}
@@ -652,11 +755,11 @@ export default function OrderDetailScreen() {
                                 >
                                     <Ionicons name="bicycle-outline" size={16} color={Colors.white} />
                                     <Text style={styles.deliveryRequestButtonText}>
-                                        {isRequestingDelivery ? 'Demande en cours...' : 'Commander une livraison'}
+                                        {isRequestingDelivery ? 'Demande en cours...' : 'Demander une livraison'}
                                     </Text>
                                 </TouchableOpacity>
                                 <Text style={styles.sellerDockHelperText}>
-                                    Le livreur sera assigne apres validation de la demande.
+                                    Ajustez les points dans le bloc Livraison si necessaire.
                                 </Text>
                             </>
                         ) : canTrackDeliveryNow ? (
@@ -899,6 +1002,150 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.accentDark,
         fontWeight: Typography.fontWeight.bold,
+    },
+    deliveryPanel: {
+        borderColor: Colors.primary + '24',
+    },
+    deliveryPanelHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        marginBottom: Spacing.md,
+    },
+    deliveryPanelIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: 19,
+        backgroundColor: Colors.primary + '10',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    deliveryPanelTitleWrap: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deliveryPanelHint: {
+        marginTop: -Spacing.xs / 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 18,
+    },
+    deliveryStatusPill: {
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary + '10',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 5,
+        maxWidth: 128,
+    },
+    deliveryStatusPillText: {
+        fontSize: 10,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+        textAlign: 'center',
+    },
+    deliveryRoutePreview: {
+        borderRadius: BorderRadius.md,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
+    },
+    deliveryPoint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    deliveryPointIcon: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: Colors.white,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+    },
+    deliveryPointCopy: {
+        flex: 1,
+        minWidth: 0,
+    },
+    deliveryPointLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    deliveryPointValue: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+        lineHeight: 19,
+    },
+    deliveryPointMapButton: {
+        minWidth: 68,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '28',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: 4,
+        paddingHorizontal: Spacing.sm,
+    },
+    deliveryPointMapText: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    deliveryRouteDivider: {
+        width: 1,
+        height: 18,
+        backgroundColor: Colors.primary + '20',
+        marginLeft: 15,
+        marginVertical: 4,
+    },
+    deliveryFieldsGrid: {
+        marginTop: Spacing.md,
+        gap: Spacing.sm,
+    },
+    deliveryFieldGroup: {
+        minWidth: 0,
+    },
+    deliveryLockedState: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.gray50,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        padding: Spacing.md,
+    },
+    deliveryManualLinkWrap: {
+        marginTop: Spacing.md,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+        paddingTop: Spacing.sm,
+    },
+    deliveryManualLink: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: Spacing.sm,
+        paddingVertical: Spacing.xs,
+    },
+    deliveryManualLinkText: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    deliveryManualBox: {
+        marginTop: Spacing.sm,
+        borderRadius: BorderRadius.md,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.md,
     },
     deliveryRequestButton: {
         marginTop: Spacing.md,

@@ -21,12 +21,13 @@ import {
 import { useGetMyDeliveryPersonProfileQuery } from '@/store/api/deliveryPersonsApi';
 import { useGetDirectionsMutation, useLazyGeocodeQuery, useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
-    DELIVERY_STATUS_LABELS,
     DeliveryCalculatedRoute,
     DeliveryGeoPoint,
     DeliveryStatusValue,
     getDeliveryActorId,
+    getDeliveryBusinessLabel,
     getDeliveryPersonRefId,
+    getDeliveryWorkflowProgress,
 } from '@/types/delivery';
 import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
@@ -84,19 +85,6 @@ type BackendRouteCandidate = {
 const DEFAULT_MAP_CENTER: LatLng = { latitude: 5.3365, longitude: -4.0244 };
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const MAP_DOMINANT_HEIGHT = Math.max(460, Math.round(SCREEN_HEIGHT * 0.7));
-
-const DELIVERY_STAGE_ORDER: {
-    key: 'pending' | 'assigned' | 'at_pickup' | 'in_transit' | 'at_dropoff' | 'delivered';
-    label: string;
-    icon: keyof typeof Ionicons.glyphMap;
-}[] = [
-        { key: 'pending', label: 'Demande', icon: 'time-outline' },
-        { key: 'assigned', label: 'Assignee', icon: 'person-outline' },
-        { key: 'at_pickup', label: 'Retrait', icon: 'storefront-outline' },
-        { key: 'in_transit', label: 'Transit', icon: 'car-outline' },
-        { key: 'at_dropoff', label: 'Livraison', icon: 'location-outline' },
-        { key: 'delivered', label: 'Livree', icon: 'checkmark-circle-outline' },
-    ];
 
 const hasDeliveryRole = (roles?: string[]) =>
     Boolean(
@@ -569,16 +557,6 @@ const extractBackendRoute = (
     return null;
 };
 
-const getStageProgressIndex = (status: DeliveryStatusValue): number => {
-    if (status === 'pending') return 0;
-    if (status === 'assigned') return 1;
-    if (status === 'at_pickup') return 2;
-    if (status === 'picked_up' || status === 'in_transit') return 3;
-    if (status === 'at_dropoff') return 4;
-    if (status === 'delivered') return 5;
-    return 0;
-};
-
 const isDriverShareStatus = (status: DeliveryStatusValue): boolean =>
     ['assigned', 'at_pickup', 'picked_up', 'in_transit', 'at_dropoff'].includes(status);
 
@@ -683,7 +661,11 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
         canBeDeliveryPerson && deliveryProfile?._id && deliveryPersonRef && deliveryProfile._id === deliveryPersonRef,
     );
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
-    const stageProgressIndex = getStageProgressIndex(status);
+    const workflow = tracking?.workflow || delivery?.workflow;
+    const workflowProgress = getDeliveryWorkflowProgress(status, workflow);
+    const stageProgressIndex = workflowProgress.currentStepIndex;
+    const businessStatusLabel = getDeliveryBusinessLabel(status, workflow);
+    const workflowNextAction = workflow?.nextAction;
     const autoViewerRole: ViewerRole = isAssignedDriver
         ? 'driver'
         : isSeller
@@ -1556,7 +1538,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
 
         return actions;
     })();
-    const progressionSummary = `${Math.min(stageProgressIndex + 1, DELIVERY_STAGE_ORDER.length)}/${DELIVERY_STAGE_ORDER.length}`;
+    const progressionSummary = `${Math.min(stageProgressIndex + 1, workflowProgress.totalSteps)}/${workflowProgress.totalSteps}`;
     const latestMessage = messages.length > 0 ? messages[messages.length - 1] : null;
     const latestMessagePreview = latestMessage?.message?.trim()
         ? latestMessage.message.trim()
@@ -1610,7 +1592,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                 </TouchableOpacity>
                 <View style={styles.headerBody}>
                     <Text style={styles.headerTitle}>Livraison #{deliveryId.slice(-8).toUpperCase()}</Text>
-                    <Text style={styles.headerSubtitle}>{DELIVERY_STATUS_LABELS[status] || status}</Text>
+                    <Text style={styles.headerSubtitle}>{businessStatusLabel}</Text>
                 </View>
                 <TouchableOpacity style={styles.headerButton} onPress={refetchAll}>
                     <Ionicons name="refresh" size={18} color={Colors.primary} />
@@ -1818,10 +1800,25 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                         </View>
                         <View style={styles.workspaceStatusPill}>
                             <Text style={styles.workspaceStatusText}>
-                                {progressionSummary} - {DELIVERY_STATUS_LABELS[status] || status}
+                                {progressionSummary} - {businessStatusLabel}
                             </Text>
                         </View>
                     </View>
+
+                    {workflowNextAction ? (
+                        <View style={styles.workflowNextCard}>
+                            <View style={styles.workflowNextIcon}>
+                                <Ionicons name="flash-outline" size={17} color={Colors.primary} />
+                            </View>
+                            <View style={styles.workflowNextTextWrap}>
+                                <Text style={styles.workflowNextLabel}>Prochaine action</Text>
+                                <Text style={styles.workflowNextTitle}>{workflowNextAction.title}</Text>
+                                <Text style={styles.workflowNextDescription}>
+                                    {workflowNextAction.description}
+                                </Text>
+                            </View>
+                        </View>
+                    ) : null}
 
                     <ScrollView
                         horizontal
@@ -1983,7 +1980,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                 <View style={styles.mapHintRow}>
                                     <Text style={styles.mapHintLabel}>Statut</Text>
                                     <Text style={styles.mapHintValue}>
-                                        {DELIVERY_STATUS_LABELS[status] || status}
+                                        {businessStatusLabel}
                                     </Text>
                                 </View>
                                 <View style={styles.mapHintRow}>
@@ -2014,7 +2011,7 @@ export function DeliveryDetailScreen({ forcedViewerRole }: DeliveryDetailScreenP
                                 <View>
                                     <Text style={styles.priorityActionsTitle}>Actions prioritaires</Text>
                                     <Text style={styles.priorityActionsSubtitle}>
-                                        Etape actuelle: {DELIVERY_STATUS_LABELS[status] || status}
+                                        Etape actuelle: {businessStatusLabel}
                                     </Text>
                                 </View>
                                 <View style={styles.priorityActionsMeta}>
@@ -2267,6 +2264,48 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xs,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.bold,
+    },
+    workflowNextCard: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '18',
+        backgroundColor: Colors.primary + '08',
+    },
+    workflowNextIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white,
+        borderWidth: 1,
+        borderColor: Colors.primary + '22',
+    },
+    workflowNextTextWrap: {
+        flex: 1,
+    },
+    workflowNextLabel: {
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray500,
+        fontWeight: Typography.fontWeight.semibold,
+        marginBottom: 2,
+        textTransform: 'uppercase',
+    },
+    workflowNextTitle: {
+        fontSize: Typography.fontSize.sm,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    workflowNextDescription: {
+        marginTop: 3,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.gray600,
+        lineHeight: 17,
+        fontWeight: Typography.fontWeight.medium,
     },
     workspaceTabsRow: {
         paddingVertical: 2,

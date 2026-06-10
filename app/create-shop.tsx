@@ -1,11 +1,11 @@
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { KycFlowModal } from '@/components/kyc/KycFlowModal';
+import { KycInfoModal } from '@/components/kyc/KycInfoModal';
 import { KINSHASA_CONTACT_EXAMPLE, KINSHASA_KYC_ID_EXAMPLE, KINSHASA_SHOP_NAME_EXAMPLE, KINSHASA_TAX_ID_EXAMPLE } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetMyKycEligibilityQuery } from '@/store/api/usersApi';
 import { useCreateShopMutation, useLazyGetMyShopQuery } from '@/store/api/shopsApi';
-import { KycIdType } from '@/types/kyc';
 import { Shop } from '@/types/shop';
 import { getImageMimeType } from '@/utils/imageUtils';
 import { normalizeTextInputValue } from '@/utils/textInput';
@@ -38,24 +38,22 @@ type PickedImage = {
 type AlertType = 'success' | 'error' | 'info' | 'warning';
 
 const STEPS = [
-    { id: 1, title: 'KYC', icon: 'shield-checkmark-outline' as const },
-    { id: 2, title: 'Infos', icon: 'storefront-outline' as const },
+    { id: 1, title: 'Legales', icon: 'document-text-outline' as const },
+    { id: 2, title: 'Boutique', icon: 'storefront-outline' as const },
     { id: 3, title: 'Contact', icon: 'call-outline' as const },
 ];
 
-const KYC_REQUIREMENTS = [
-    'Prenez les photos dans un endroit bien eclaire.',
-    'Ne portez ni lunettes noires ni couvre-visage.',
-    'Le selfie et la piece doivent appartenir au meme titulaire.',
-    'Les donnees servent uniquement a la verification de compte.',
-];
+const resolveKycFullName = (account: any) => {
+    const firstName = typeof account?.firstName === 'string' ? account.firstName.trim() : '';
+    const lastName = typeof account?.lastName === 'string' ? account.lastName.trim() : '';
+    const username = typeof account?.username === 'string' ? account.username.trim() : '';
+    const emailName =
+        typeof account?.email === 'string'
+            ? account.email.split('@')[0]?.replace(/[._-]+/g, ' ').trim()
+            : '';
 
-const KYC_ID_OPTIONS: { label: string; value: KycIdType }[] = [
-    { label: 'Carte nationale', value: 'national_id' },
-    { label: 'Passeport', value: 'passport' },
-    { label: 'Permis de conduire', value: 'driver_license' },
-    { label: 'Carte electeur', value: 'voter_card' },
-];
+    return normalizeTextInputValue(`${firstName} ${lastName}`.trim() || username || emailName || 'Utilisateur UTY');
+};
 
 export default function CreateShopScreen() {
     const router = useRouter();
@@ -74,12 +72,9 @@ export default function CreateShopScreen() {
     const [subscription, setSubscription] = React.useState('');
     const [isCorporate, setIsCorporate] = React.useState(false);
     const [logo, setLogo] = React.useState<PickedImage | null>(null);
+    const [kycInfoModalVisible, setKycInfoModalVisible] = React.useState(false);
     const [kycModalVisible, setKycModalVisible] = React.useState(false);
-    const [kycFullName, setKycFullName] = React.useState(
-        `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim(),
-    );
-    const [kycIdType, setKycIdType] = React.useState<KycIdType>('national_id');
-    const [kycIdNumber, setKycIdNumber] = React.useState('');
+    const kycFullName = React.useMemo(() => resolveKycFullName(user), [user]);
 
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
@@ -97,11 +92,10 @@ export default function CreateShopScreen() {
         onConfirm: undefined,
     });
 
-    const { data: kycEligibility, isFetching: isCheckingKyc, refetch: refetchKycEligibility } =
+    const { data: kycEligibility, refetch: refetchKycEligibility } =
         useGetMyKycEligibilityQuery(undefined, { skip: !user?._id });
 
     const isKycApproved = kycEligibility?.isKycApproved === true;
-    const kycStatus = (kycEligibility?.kycStatus || 'not_submitted').toLowerCase();
 
     React.useEffect(() => {
         if (!requireAuth('Vous devez etre connecte pour creer une boutique.')) {
@@ -112,12 +106,6 @@ export default function CreateShopScreen() {
             // No existing shop yet or request failed.
         });
     }, [loadMyShop, requireAuth]);
-
-    React.useEffect(() => {
-        const nextFullName = `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim();
-        if (!nextFullName) return;
-        setKycFullName((prev) => prev || nextFullName);
-    }, [user]);
 
     const parseApiErrorMessage = (error: any, fallback: string) => {
         if (!error) return fallback;
@@ -132,25 +120,12 @@ export default function CreateShopScreen() {
     };
 
     const openKycModal = () => {
-        if (!kycFullName.trim()) {
-            showAlert({
-                title: 'Identite requise',
-                message: 'Renseignez le nom complet avant de lancer le KYC.',
-                type: 'warning',
-            });
-            return;
-        }
-
-        if (!kycIdNumber.trim()) {
-            showAlert({
-                title: 'Numero requis',
-                message: 'Renseignez le numero du document avant de lancer le KYC.',
-                type: 'warning',
-            });
-            return;
-        }
-
         setKycModalVisible(true);
+    };
+
+    const startKycFromInfo = () => {
+        setKycInfoModalVisible(false);
+        openKycModal();
     };
 
     const hideAlert = () => {
@@ -200,13 +175,7 @@ export default function CreateShopScreen() {
 
     const validateCurrentStep = () => {
         if (step === 1 && !isKycApproved) {
-            showAlert({
-                title: 'KYC requis',
-                message: 'La verification KYC doit etre approuvee avant la creation de boutique.',
-                type: 'warning',
-                confirmText: 'Ouvrir KYC',
-                onConfirm: async () => openKycModal(),
-            });
+            setKycInfoModalVisible(true);
             return false;
         }
 
@@ -255,13 +224,8 @@ export default function CreateShopScreen() {
         }
 
         if (!isKycApproved) {
-            showAlert({
-                title: 'KYC requis',
-                message: 'Votre KYC doit etre approuve avant de publier une boutique.',
-                type: 'warning',
-                confirmText: 'Faire KYC',
-                onConfirm: async () => openKycModal(),
-            });
+            setStep(1);
+            setKycInfoModalVisible(true);
             return;
         }
 
@@ -366,17 +330,6 @@ export default function CreateShopScreen() {
     );
 
     const renderStepContent = () => {
-        const kycStatusLabel =
-            kycStatus === 'approved'
-                ? 'Approuve'
-                : kycStatus === 'pending'
-                ? 'En attente'
-                : kycStatus === 'rejected'
-                ? 'Rejete'
-                : 'Non soumis';
-        const kycProgressPercent =
-            kycStatus === 'approved' ? 100 : kycStatus === 'pending' ? 70 : kycStatus === 'rejected' ? 40 : 10;
-
         if (step === 2) {
             return (
                 <View style={styles.section}>
@@ -437,131 +390,35 @@ export default function CreateShopScreen() {
         if (step === 1) {
             return (
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Etape 1: Verification KYC</Text>
-                    <Text style={styles.sectionHint}>
-                        Le KYC approuve est obligatoire pour publier une boutique et devenir livreur.
-                    </Text>
+                    <Text style={styles.sectionTitle}>Etape 1: Infos legales boutique</Text>
+                    <Text style={styles.sectionHint}>Ajoutez les references legales disponibles pour votre activite.</Text>
 
-                    <View style={styles.kycIdentityCard}>
-                        <Text style={styles.kycIdentityTitle}>Identite du titulaire</Text>
+                    <Text style={styles.label}>ID National</Text>
+                    <TextInput
+                        value={idnat}
+                        onChangeText={setIdnat}
+                        style={styles.input}
+                        placeholder={KINSHASA_KYC_ID_EXAMPLE}
+                        placeholderTextColor={Colors.gray400}
+                    />
 
-                        <Text style={styles.label}>Nom complet *</Text>
-                        <TextInput
-                            value={kycFullName}
-                            onChangeText={(text) => setKycFullName(normalizeTextInputValue(text))}
-                            style={styles.input}
-                            placeholder="Ex: Jean Koffi"
-                            placeholderTextColor={Colors.gray400}
-                        />
+                    <Text style={styles.label}>RCCM</Text>
+                    <TextInput
+                        value={rccm}
+                        onChangeText={setRccm}
+                        style={styles.input}
+                        placeholder={KINSHASA_TAX_ID_EXAMPLE}
+                        placeholderTextColor={Colors.gray400}
+                    />
 
-                        <Text style={styles.label}>Type de document *</Text>
-                        <View style={styles.kycIdentityChipsRow}>
-                            {KYC_ID_OPTIONS.map((option) => {
-                                const isSelected = option.value === kycIdType;
-                                return (
-                                    <TouchableOpacity
-                                        key={option.value}
-                                        style={[
-                                            styles.kycIdentityChip,
-                                            isSelected && styles.kycIdentityChipSelected,
-                                        ]}
-                                        onPress={() => setKycIdType(option.value)}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.kycIdentityChipText,
-                                                isSelected && styles.kycIdentityChipTextSelected,
-                                            ]}
-                                        >
-                                            {option.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-
-                        <Text style={styles.label}>Numero du document *</Text>
-                        <TextInput
-                            value={kycIdNumber}
-                            onChangeText={setKycIdNumber}
-                            style={styles.input}
-                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
-                            placeholderTextColor={Colors.gray400}
-                            autoCapitalize="characters"
-                        />
-                    </View>
-
-                    <View style={styles.kycIntroCard}>
-                        <Text style={styles.kycIntroTitle}>Etat de votre KYC</Text>
-                        <Text style={styles.kycIntroText}>Statut actuel: {kycStatusLabel}</Text>
-                        <View style={styles.kycProgressTrack}>
-                            <View style={[styles.kycProgressFill, { width: `${kycProgressPercent}%` }]} />
-                        </View>
-                        <Text style={styles.kycProgressLabel}>{kycProgressPercent}% complete</Text>
-
-                        {KYC_REQUIREMENTS.map((item) => (
-                            <View key={item} style={styles.kycRequirementRow}>
-                                <Ionicons name="checkmark-circle-outline" size={16} color={Colors.primary} />
-                                <Text style={styles.kycRequirementText}>{item}</Text>
-                            </View>
-                        ))}
-                    </View>
-
-                    <View style={styles.kycCaptureCard}>
-                        <View style={styles.kycCaptureHeader}>
-                            <Text style={styles.kycCaptureTitle}>Verification obligatoire</Text>
-                            <View style={[styles.kycStatusBadge, isKycApproved && styles.kycStatusBadgeDone]}>
-                                <Text style={[styles.kycStatusText, isKycApproved && styles.kycStatusTextDone]}>
-                                    {isKycApproved ? 'Approuve' : 'Requis'}
-                                </Text>
-                            </View>
-                        </View>
-                        <Text style={styles.sectionHint}>
-                            {isKycApproved
-                                ? 'Votre compte est verifie. Vous pouvez continuer.'
-                                : 'Ouvrez le modal KYC pour capturer selfie et document puis confirmer l envoi.'}
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.captureActionButton}
-                            onPress={openKycModal}
-                            activeOpacity={0.85}
-                        >
-                            <Ionicons name={isKycApproved ? 'refresh-outline' : 'shield-checkmark-outline'} size={16} color={Colors.primary} />
-                            <Text style={styles.captureActionText}>{isKycApproved ? 'Revoir mon KYC' : 'Demarrer le KYC'}</Text>
-                        </TouchableOpacity>
-                    </View>
-
-                    <View style={styles.summaryCard}>
-                        <Text style={styles.summaryTitle}>Infos legales boutique</Text>
-                        <Text style={styles.label}>ID National</Text>
-                        <TextInput
-                            value={idnat}
-                            onChangeText={setIdnat}
-                            style={styles.input}
-                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
-                            placeholderTextColor={Colors.gray400}
-                        />
-
-                        <Text style={styles.label}>RCCM</Text>
-                        <TextInput
-                            value={rccm}
-                            onChangeText={setRccm}
-                            style={styles.input}
-                            placeholder={KINSHASA_TAX_ID_EXAMPLE}
-                            placeholderTextColor={Colors.gray400}
-                        />
-
-                        <Text style={styles.label}>NIF</Text>
-                        <TextInput
-                            value={nif}
-                            onChangeText={setNif}
-                            style={styles.input}
-                            placeholder="Numero fiscal"
-                            placeholderTextColor={Colors.gray400}
-                        />
-                    </View>
-
-                    {isCheckingKyc ? <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.sm }} /> : null}
+                    <Text style={styles.label}>NIF</Text>
+                    <TextInput
+                        value={nif}
+                        onChangeText={setNif}
+                        style={styles.input}
+                        placeholder="Numero fiscal"
+                        placeholderTextColor={Colors.gray400}
+                    />
                 </View>
             );
         }
@@ -612,6 +469,7 @@ export default function CreateShopScreen() {
     };
 
     const progress = `${step}/${STEPS.length}`;
+    const needsKycBeforeNext = step === 1 && !isKycApproved;
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -662,9 +520,18 @@ export default function CreateShopScreen() {
 
                                 {step < STEPS.length ? (
                                     <TouchableOpacity style={styles.navButton} onPress={goNext}>
-                                        <LinearGradient colors={Gradients.primary} style={styles.navButtonGradient}>
-                                            <Text style={styles.navButtonText}>Suivant</Text>
-                                            <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+                                        <LinearGradient
+                                            colors={needsKycBeforeNext ? Gradients.accent : Gradients.primary}
+                                            style={styles.navButtonGradient}
+                                        >
+                                            <Text style={needsKycBeforeNext ? styles.navButtonTextAccent : styles.navButtonText}>
+                                                {needsKycBeforeNext ? 'Passer le KYC' : 'Suivant'}
+                                            </Text>
+                                            <Ionicons
+                                                name={needsKycBeforeNext ? 'shield-checkmark-outline' : 'arrow-forward'}
+                                                size={16}
+                                                color={needsKycBeforeNext ? Colors.primary : Colors.white}
+                                            />
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 ) : (
@@ -705,12 +572,19 @@ export default function CreateShopScreen() {
                     }}
                 />
 
+                <KycInfoModal
+                    visible={kycInfoModalVisible}
+                    title="KYC requis pour ouvrir la boutique"
+                    description="La verification protege les acheteurs et confirme l identite du vendeur avant publication."
+                    primaryLabel="Lancer le KYC"
+                    onClose={() => setKycInfoModalVisible(false)}
+                    onStart={startKycFromInfo}
+                />
+
                 <KycFlowModal
                     visible={kycModalVisible}
                     identity={{
                         fullName: kycFullName.trim(),
-                        idType: kycIdType,
-                        idNumber: kycIdNumber.trim(),
                     }}
                     onClose={() => setKycModalVisible(false)}
                     onSuccess={async () => {
@@ -969,133 +843,6 @@ const styles = StyleSheet.create({
         height: '100%',
         resizeMode: 'cover',
     },
-    kycIdentityCard: {
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        backgroundColor: Colors.gray50,
-        padding: Spacing.md,
-        marginBottom: Spacing.md,
-    },
-    kycIdentityTitle: {
-        color: Colors.textPrimary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.extrabold,
-        marginBottom: Spacing.xs,
-    },
-    kycIdentityChipsRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: Spacing.xs,
-    },
-    kycIdentityChip: {
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 6,
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.gray300,
-        backgroundColor: Colors.white,
-    },
-    kycIdentityChipSelected: {
-        backgroundColor: Colors.primary,
-        borderColor: Colors.primary,
-    },
-    kycIdentityChipText: {
-        color: Colors.gray600,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    kycIdentityChipTextSelected: {
-        color: Colors.white,
-    },
-    kycIntroCard: {
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.primary + '30',
-        backgroundColor: Colors.primary + '10',
-        padding: Spacing.md,
-        marginBottom: Spacing.md,
-    },
-    kycIntroTitle: {
-        fontSize: Typography.fontSize.base,
-        color: Colors.primary,
-        fontWeight: Typography.fontWeight.extrabold,
-    },
-    kycIntroText: {
-        marginTop: Spacing.xs / 2,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.sm,
-    },
-    kycProgressTrack: {
-        marginTop: Spacing.sm,
-        height: 8,
-        borderRadius: BorderRadius.full,
-        backgroundColor: Colors.white,
-        overflow: 'hidden',
-    },
-    kycProgressFill: {
-        height: '100%',
-        backgroundColor: Colors.primary,
-    },
-    kycProgressLabel: {
-        marginTop: Spacing.xs,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    kycRequirementRow: {
-        marginTop: Spacing.sm,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-    },
-    kycRequirementText: {
-        flex: 1,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.xs,
-        lineHeight: 18,
-    },
-    kycCaptureCard: {
-        marginTop: Spacing.sm,
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.borderLight,
-        backgroundColor: Colors.gray50,
-        padding: Spacing.md,
-    },
-    kycCaptureCardDisabled: {
-        opacity: 0.7,
-    },
-    kycCaptureHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: Spacing.sm,
-        gap: Spacing.sm,
-    },
-    kycCaptureTitle: {
-        flex: 1,
-        fontSize: Typography.fontSize.sm,
-        color: Colors.textPrimary,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    kycStatusBadge: {
-        borderRadius: BorderRadius.full,
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: Spacing.xs / 2,
-        backgroundColor: Colors.warning + '20',
-    },
-    kycStatusBadgeDone: {
-        backgroundColor: Colors.success + '20',
-    },
-    kycStatusText: {
-        fontSize: Typography.fontSize.xs,
-        color: Colors.warning,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    kycStatusTextDone: {
-        color: Colors.success,
-    },
     captureActionButton: {
         marginTop: Spacing.sm,
         borderRadius: BorderRadius.full,
@@ -1107,37 +854,10 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         gap: Spacing.xs,
     },
-    captureActionButtonDisabled: {
-        borderColor: Colors.gray300,
-    },
     captureActionText: {
         color: Colors.primary,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
-    },
-    filePickerDisabled: {
-        opacity: 0.75,
-    },
-    kycTickRow: {
-        marginTop: Spacing.md,
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        gap: Spacing.sm,
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        backgroundColor: Colors.gray50,
-        padding: Spacing.md,
-    },
-    kycTickText: {
-        flex: 1,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.sm,
-        lineHeight: 20,
-    },
-    kycTickTextDone: {
-        color: Colors.textPrimary,
-        fontWeight: Typography.fontWeight.semibold,
     },
     summaryCard: {
         marginTop: Spacing.lg,

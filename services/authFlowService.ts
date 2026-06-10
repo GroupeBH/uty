@@ -4,7 +4,6 @@ import { setCredentials } from '@/store/slices/authSlice';
 import type { AppDispatch } from '@/store/store';
 import { storage } from '@/utils/storage';
 
-import { signInWithGoogle } from './googleAuth';
 import { tokenService } from './tokenService';
 
 export type AuthTokens = {
@@ -12,15 +11,17 @@ export type AuthTokens = {
     refreshToken: string;
 };
 
-export type GoogleRegistrationProfile = {
-    provider: 'google';
+export type OAuthProvider = 'google' | 'apple';
+
+export type OAuthRegistrationProfile<P extends OAuthProvider = OAuthProvider> = {
+    provider: P;
     email?: string;
     image?: string;
     firstName: string;
     lastName: string;
 };
 
-export type GoogleAuthFlowResult =
+export type OAuthAuthFlowResult<P extends OAuthProvider = OAuthProvider> =
     | {
           kind: 'authenticated';
           tokens: AuthTokens;
@@ -29,11 +30,21 @@ export type GoogleAuthFlowResult =
           kind: 'registration_required';
           message: string;
           registrationToken: string;
-          profile: GoogleRegistrationProfile;
+          profile: OAuthRegistrationProfile<P>;
       };
 
-const FALLBACK_GOOGLE_ERROR_MESSAGE =
-    'Impossible de se connecter avec Google pour le moment. Veuillez reessayer.';
+export type GoogleRegistrationProfile = OAuthRegistrationProfile<'google'>;
+export type AppleRegistrationProfile = OAuthRegistrationProfile<'apple'>;
+export type GoogleAuthFlowResult = OAuthAuthFlowResult<'google'>;
+export type AppleAuthFlowResult = OAuthAuthFlowResult<'apple'>;
+
+const PROVIDER_LABEL: Record<OAuthProvider, string> = {
+    google: 'Google',
+    apple: 'Apple',
+};
+
+const fallbackOAuthErrorMessage = (provider: OAuthProvider) =>
+    `Impossible de se connecter avec ${PROVIDER_LABEL[provider]} pour le moment. Veuillez reessayer.`;
 
 const readUnknownErrorMessage = (error: unknown): string | null => {
     if (error instanceof Error && typeof error.message === 'string' && error.message.trim()) {
@@ -57,11 +68,12 @@ const readUnknownErrorMessage = (error: unknown): string | null => {
     return null;
 };
 
-const mapRuntimeGoogleError = (rawMessage: string | null): string => {
+const mapRuntimeOAuthError = (provider: OAuthProvider, rawMessage: string | null): string => {
     const normalized = (rawMessage || '').toLowerCase();
+    const label = PROVIDER_LABEL[provider];
 
     if (!normalized) {
-        return FALLBACK_GOOGLE_ERROR_MESSAGE;
+        return fallbackOAuthErrorMessage(provider);
     }
 
     if (
@@ -72,19 +84,30 @@ const mapRuntimeGoogleError = (rawMessage: string | null): string => {
         return 'Connexion internet indisponible. Verifiez votre reseau puis reessayez.';
     }
 
-    if (normalized.includes('developer_error') || normalized.includes('redirect_uri_mismatch')) {
-        return 'Configuration Google invalide. Verifiez SHA-1/SHA-256, package Android et Web Client ID.';
+    if (normalized.includes('annule') || normalized.includes('cancel')) {
+        return `Connexion ${label} annulee.`;
     }
 
-    if (normalized.includes('annule')) {
-        return 'Connexion Google annulee.';
+    if (provider === 'google') {
+        if (normalized.includes('developer_error') || normalized.includes('redirect_uri_mismatch')) {
+            return 'Configuration Google invalide. Verifiez SHA-1/SHA-256, package Android et Web Client ID.';
+        }
+
+        if (normalized.includes('play services')) {
+            return 'Google Play Services est indisponible ou non a jour.';
+        }
     }
 
-    if (normalized.includes('play services')) {
-        return 'Google Play Services est indisponible ou non a jour.';
+    if (
+        provider === 'apple' &&
+        (normalized.includes('not available') ||
+            normalized.includes('unavailable') ||
+            normalized.includes('indisponible'))
+    ) {
+        return 'Connexion Apple indisponible dans ce build. Generez une version iOS avec Sign in with Apple active.';
     }
 
-    return rawMessage || FALLBACK_GOOGLE_ERROR_MESSAGE;
+    return rawMessage || fallbackOAuthErrorMessage(provider);
 };
 
 const readApiError = (payload: any): string | null => {
@@ -104,27 +127,33 @@ const readApiError = (payload: any): string | null => {
     return null;
 };
 
-const mapServerGoogleError = (status: number, rawMessage: string | null): string => {
+const mapServerOAuthError = (
+    provider: OAuthProvider,
+    status: number,
+    rawMessage: string | null
+): string => {
     const message = (rawMessage || '').toLowerCase();
+    const label = PROVIDER_LABEL[provider];
 
-    if (message.includes('annule')) {
-        return 'Connexion Google annulee.';
+    if (message.includes('annule') || message.includes('cancel')) {
+        return `Connexion ${label} annulee.`;
     }
 
     if (
-        message.includes('token google') ||
+        message.includes(provider) ||
+        message.includes('token') ||
         message.includes('audience') ||
         message.includes('invalide')
     ) {
-        return 'Votre compte Google n a pas pu etre verifie. Veuillez reessayer.';
+        return `Votre compte ${label} n a pas pu etre verifie. Veuillez reessayer.`;
     }
 
     if (message.includes('compte') && message.includes('autre')) {
-        return 'Ce compte Google est deja associe a un autre compte.';
+        return `Ce compte ${label} est deja associe a un autre compte.`;
     }
 
     if (status === 401 || status === 403) {
-        return 'Connexion Google refusee. Veuillez verifier votre compte Google puis reessayer.';
+        return `Connexion ${label} refusee. Veuillez verifier votre compte ${label} puis reessayer.`;
     }
 
     if (status >= 500) {
@@ -135,29 +164,42 @@ const mapServerGoogleError = (status: number, rawMessage: string | null): string
         return rawMessage;
     }
 
-    return FALLBACK_GOOGLE_ERROR_MESSAGE;
+    return fallbackOAuthErrorMessage(provider);
 };
 
-const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowResult> => {
-    const response = await fetch(`${API_BASE_URL}/auth/google/mobile`, {
+const readProfileProvider = (value: unknown, fallback: OAuthProvider): OAuthProvider => {
+    if (value === 'apple' || value === 'google') {
+        return value;
+    }
+    return fallback;
+};
+
+const exchangeOAuthToken = async <P extends OAuthProvider>(
+    provider: P,
+    path: string,
+    body: Record<string, unknown>
+): Promise<OAuthAuthFlowResult<P>> => {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ idToken }),
+        body: JSON.stringify(body),
     });
 
     const payload = await response.json().catch(() => null);
 
     if (!response.ok) {
-        throw new Error(mapServerGoogleError(response.status, readApiError(payload)));
+        throw new Error(mapServerOAuthError(provider, response.status, readApiError(payload)));
     }
+
+    const label = PROVIDER_LABEL[provider];
 
     if (payload?.requiresRegistration === true) {
         const registrationToken =
             typeof payload.registrationToken === 'string' ? payload.registrationToken.trim() : '';
         if (!registrationToken) {
-            throw new Error('Session Google incomplete. Recommencez la connexion Google.');
+            throw new Error(`Session ${label} incomplete. Recommencez la connexion ${label}.`);
         }
 
         const profilePayload = payload?.profile ?? {};
@@ -168,7 +210,7 @@ const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowRes
         const lastName =
             typeof profilePayload.lastName === 'string' && profilePayload.lastName.trim()
                 ? profilePayload.lastName.trim()
-                : 'Google';
+                : label;
         const email =
             typeof profilePayload.email === 'string' && profilePayload.email.trim()
                 ? profilePayload.email.trim()
@@ -177,16 +219,17 @@ const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowRes
             typeof profilePayload.image === 'string' && profilePayload.image.trim()
                 ? profilePayload.image.trim()
                 : undefined;
+        const profileProvider = readProfileProvider(profilePayload.provider, provider) as P;
 
         return {
             kind: 'registration_required',
             message:
                 typeof payload?.message === 'string' && payload.message.trim()
                     ? payload.message
-                    : 'Aucun compte lie a Google. Completez votre inscription.',
+                    : `Aucun compte lie a ${label}. Completez votre inscription.`,
             registrationToken,
             profile: {
-                provider: 'google',
+                provider: profileProvider,
                 firstName,
                 lastName,
                 email,
@@ -199,7 +242,7 @@ const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowRes
     const refreshToken = payload?.refresh_token;
 
     if (!accessToken || !refreshToken) {
-        throw new Error('Connexion Google inachevee. Veuillez reessayer.');
+        throw new Error(`Connexion ${label} inachevee. Veuillez reessayer.`);
     }
 
     return {
@@ -210,6 +253,23 @@ const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowRes
         },
     };
 };
+
+const exchangeGoogleIdToken = async (idToken: string): Promise<GoogleAuthFlowResult> =>
+    exchangeOAuthToken('google', '/auth/google/mobile', { idToken });
+
+const exchangeAppleIdentityToken = async (
+    identityToken: string,
+    authorizationCode?: string,
+    fullName?: {
+        givenName?: string | null;
+        familyName?: string | null;
+    }
+): Promise<AppleAuthFlowResult> =>
+    exchangeOAuthToken('apple', '/auth/apple/mobile', {
+        identityToken,
+        authorizationCode,
+        fullName,
+    });
 
 const fetchProfile = async (accessToken: string): Promise<User> => {
     const response = await fetch(`${API_BASE_URL}/users/profile`, {
@@ -231,14 +291,42 @@ const fetchProfile = async (accessToken: string): Promise<User> => {
     return payload as User;
 };
 
+const loadGoogleAuth = async () => import('./googleAuth');
+const loadAppleAuth = async () => import('./appleAuth');
+
 export const authFlowService = {
     async loginWithGoogle(): Promise<GoogleAuthFlowResult> {
         try {
+            const { signInWithGoogle } = await loadGoogleAuth();
             const googleResult = await signInWithGoogle();
             return await exchangeGoogleIdToken(googleResult.idToken);
         } catch (error) {
-            const message = mapRuntimeGoogleError(readUnknownErrorMessage(error));
+            const message = mapRuntimeOAuthError('google', readUnknownErrorMessage(error));
             throw new Error(message);
+        }
+    },
+
+    async loginWithApple(): Promise<AppleAuthFlowResult> {
+        try {
+            const { signInWithApple } = await loadAppleAuth();
+            const appleResult = await signInWithApple();
+            return await exchangeAppleIdentityToken(
+                appleResult.identityToken,
+                appleResult.authorizationCode,
+                appleResult.fullName
+            );
+        } catch (error) {
+            const message = mapRuntimeOAuthError('apple', readUnknownErrorMessage(error));
+            throw new Error(message);
+        }
+    },
+
+    async isAppleSignInAvailable(): Promise<boolean> {
+        try {
+            const { isAppleAuthAvailable } = await loadAppleAuth();
+            return await isAppleAuthAvailable();
+        } catch {
+            return false;
         }
     },
 

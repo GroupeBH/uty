@@ -13,7 +13,13 @@ import {
     useSendDeliveryMessageMutation,
 } from '@/store/api/deliveriesApi';
 import { useGetOrderQuery } from '@/store/api/ordersApi';
-import { DeliveryGeoPoint, DeliveryStatusValue, getDeliveryActorId } from '@/types/delivery';
+import {
+    DeliveryGeoPoint,
+    DeliveryStatusValue,
+    getDeliveryActorId,
+    getDeliveryBusinessLabel,
+    getDeliveryWorkflowProgress,
+} from '@/types/delivery';
 import { getOrderItemName, getOrderItemProduct } from '@/types/order';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { normalizeTextInputValue } from '@/utils/textInput';
@@ -104,15 +110,6 @@ const getStepIndex = (status: DeliveryStatusValue): number => {
     if (status === 'picked_up' || status === 'in_transit') return 3;
     if (status === 'at_dropoff' || status === 'delivered') return 4;
     return 0;
-};
-
-const statusLabel = (status: DeliveryStatusValue): string => {
-    if (status === 'at_pickup') return 'Preparation';
-    if (status === 'assigned') return 'Livreur assigne';
-    if (status === 'picked_up' || status === 'in_transit') return 'En route';
-    if (status === 'at_dropoff') return 'Arrive a destination';
-    if (status === 'delivered') return 'Livree';
-    return 'En attente';
 };
 
 const parseError = (error: any, fallback: string): string =>
@@ -208,7 +205,10 @@ export default function SellerDeliveryDetailScreen() {
     const [packedMap, setPackedMap] = React.useState<Record<string, boolean>>({});
 
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
+    const workflow = tracking?.workflow || delivery?.workflow;
+    const workflowProgress = getDeliveryWorkflowProgress(status, workflow);
     const currentStepIndex = getStepIndex(status);
+    const businessStatusLabel = getDeliveryBusinessLabel(status, workflow);
     const sellerId = getDeliveryActorId(delivery?.sellerId);
     const isSellerOwner = Boolean(user?._id && sellerId && String(user._id) === sellerId);
 
@@ -362,8 +362,10 @@ export default function SellerDeliveryDetailScreen() {
                 {/* Stepper */}
                 <View style={styles.stepperCard}>
                     <View style={styles.stepperHeader}>
-                        <Text style={styles.stepperTitle}>{statusLabel(status)}</Text>
-                        <Text style={styles.stepperSub}>{formatSince(delivery.createdAt)}</Text>
+                        <Text style={styles.stepperTitle}>{businessStatusLabel}</Text>
+                        <Text style={styles.stepperSub}>
+                            Etape {Math.min(workflowProgress.currentStepIndex + 1, workflowProgress.totalSteps)}/{workflowProgress.totalSteps} - {formatSince(delivery.createdAt)}
+                        </Text>
                     </View>
                     <View style={styles.stepperRow}>
                         {STEPS.map((step, index) => {

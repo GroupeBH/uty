@@ -34,6 +34,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 type AuthMode = 'register' | 'login';
 type LoginStep = 'phone' | 'pin';
 type RegisterStep = 'phone' | 'identity' | 'security' | 'preferences';
+type OAuthProvider = 'google' | 'apple';
 
 const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
@@ -42,7 +43,7 @@ const REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'preferences', label: 'Preferences' },
 ];
 
-const GOOGLE_REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
+const OAUTH_REGISTER_PROGRESS: { step: RegisterStep; label: string }[] = [
     { step: 'phone', label: 'Telephone' },
     { step: 'preferences', label: 'Preferences' },
 ];
@@ -54,10 +55,15 @@ const LOGIN_PROGRESS: { step: LoginStep; label: string }[] = [
 
 const isPinValid = (value: string) => /^\d{4}$/.test(value);
 const generateFourDigitPin = () => String(Math.floor(1000 + Math.random() * 9000));
-const GOOGLE_REGISTRATION_INFO_MESSAGE =
+const OAUTH_REGISTRATION_INFO_MESSAGE =
     'Pour une utilisation optimale et fluide de l application, completez ces 2 etapes:\n' +
     '1. Ajoutez votre numero de telephone.\n' +
     '2. Choisissez vos preferences.';
+
+const OAUTH_PROVIDER_LABEL: Record<OAuthProvider, string> = {
+    google: 'Google',
+    apple: 'Apple',
+};
 
 const toNormalizedMessage = (message: string) =>
     message
@@ -81,12 +87,16 @@ const readApiErrorMessage = (error: any): string => {
     return '';
 };
 
-const isGoogleRegistrationSessionExpired = (message: string): boolean => {
+const isOAuthRegistrationSessionExpired = (
+    provider: OAuthProvider,
+    message: string
+): boolean => {
     const normalized = toNormalizedMessage(message);
+    const providerKey = provider.toLowerCase();
     return (
-        (normalized.includes('session google') && normalized.includes('expire')) ||
-        normalized.includes('google_registration') ||
-        normalized.includes('google registration')
+        (normalized.includes(`session ${providerKey}`) && normalized.includes('expire')) ||
+        normalized.includes(`${providerKey}_registration`) ||
+        normalized.includes(`${providerKey} registration`)
     );
 };
 
@@ -135,14 +145,20 @@ export default function AuthModal() {
     const [googleRegistrationToken, setGoogleRegistrationToken] = useState<string | undefined>(
         undefined
     );
+    const [appleRegistrationToken, setAppleRegistrationToken] = useState<string | undefined>(
+        undefined
+    );
     const [googleProfileImage, setGoogleProfileImage] = useState<string | undefined>(undefined);
     const [googleAutoPin, setGoogleAutoPin] = useState<string | undefined>(undefined);
+    const [appleAutoPin, setAppleAutoPin] = useState<string | undefined>(undefined);
     const [isPhoneFocused, setIsPhoneFocused] = useState(false);
     const [isPinFocused, setIsPinFocused] = useState(false);
     const [isFirstNameFocused, setIsFirstNameFocused] = useState(false);
     const [isLastNameFocused, setIsLastNameFocused] = useState(false);
     const [isConfirmPinFocused, setIsConfirmPinFocused] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+    const [isAppleLoading, setIsAppleLoading] = useState(false);
+    const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
 
     // Alert state
     const [alert, setAlert] = useState<{
@@ -179,7 +195,15 @@ export default function AuthModal() {
     const isRegisterIdentityStep = !isLoginMode && registerStep === 'identity';
     const isRegisterSecurityStep = !isLoginMode && registerStep === 'security';
     const isRegisterPreferencesStep = !isLoginMode && registerStep === 'preferences';
-    const isGoogleRegistrationFlow = !isLoginMode && Boolean(googleRegistrationToken);
+    const oauthRegistrationProvider: OAuthProvider | null = googleRegistrationToken
+        ? 'google'
+        : appleRegistrationToken
+          ? 'apple'
+          : null;
+    const isOAuthRegistrationFlow = !isLoginMode && Boolean(oauthRegistrationProvider);
+    const oauthProviderLabel = oauthRegistrationProvider
+        ? OAUTH_PROVIDER_LABEL[oauthRegistrationProvider]
+        : 'Google';
 
     const authRequiredTitle = readParam(params.title).trim();
     const authRequiredMessage = readParam(params.reason).trim();
@@ -194,14 +218,28 @@ export default function AuthModal() {
     }, [params.mode]);
 
     useEffect(() => {
-        if (!isGoogleRegistrationFlow) {
+        let isMounted = true;
+
+        void authFlowService.isAppleSignInAvailable().then((isAvailable) => {
+            if (isMounted) {
+                setIsAppleSignInAvailable(isAvailable);
+            }
+        });
+
+        return () => {
+            isMounted = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!isOAuthRegistrationFlow) {
             return;
         }
 
         if (registerStep === 'identity' || registerStep === 'security') {
             setRegisterStep('preferences');
         }
-    }, [isGoogleRegistrationFlow, registerStep]);
+    }, [isOAuthRegistrationFlow, registerStep]);
 
     useEffect(() => {
         Animated.parallel([
@@ -284,8 +322,10 @@ export default function AuthModal() {
         setShowConfirmPin(false);
         setSelectedCategories([]);
         setGoogleRegistrationToken(undefined);
+        setAppleRegistrationToken(undefined);
         setGoogleProfileImage(undefined);
         setGoogleAutoPin(undefined);
+        setAppleAutoPin(undefined);
         setIsFirstNameFocused(false);
         setIsLastNameFocused(false);
         setIsPinFocused(false);
@@ -340,7 +380,7 @@ export default function AuthModal() {
         if (!normalizedPhone) return;
 
         setPhone(normalizedPhone);
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             setRegisterStep('preferences');
             return;
         }
@@ -356,13 +396,18 @@ export default function AuthModal() {
         );
     };
 
-    const resolveGoogleRegistrationPin = () => {
-        if (googleAutoPin && isPinValid(googleAutoPin)) {
-            return googleAutoPin;
+    const resolveOAuthRegistrationPin = (provider: OAuthProvider) => {
+        const cachedPin = provider === 'apple' ? appleAutoPin : googleAutoPin;
+        if (cachedPin && isPinValid(cachedPin)) {
+            return cachedPin;
         }
 
         const generatedPin = generateFourDigitPin();
-        setGoogleAutoPin(generatedPin);
+        if (provider === 'apple') {
+            setAppleAutoPin(generatedPin);
+        } else {
+            setGoogleAutoPin(generatedPin);
+        }
         return generatedPin;
     };
 
@@ -372,9 +417,9 @@ export default function AuthModal() {
             return;
         }
 
-        const usingGoogleDraft = Boolean(googleRegistrationToken);
+        const usingOAuthDraft = Boolean(oauthRegistrationProvider);
 
-        if (usingGoogleDraft) {
+        if (usingOAuthDraft) {
             if (!validatePreferencesStep()) {
                 return;
             }
@@ -382,11 +427,15 @@ export default function AuthModal() {
             return;
         }
 
-        const resolvedFirstName = usingGoogleDraft
+        const resolvedFirstName = usingOAuthDraft
             ? firstName.trim() || 'Utilisateur'
             : firstName.trim();
-        const resolvedLastName = usingGoogleDraft ? lastName.trim() || 'Google' : lastName.trim();
-        const resolvedPin = usingGoogleDraft ? resolveGoogleRegistrationPin() : pin;
+        const resolvedLastName = usingOAuthDraft
+            ? lastName.trim() || oauthProviderLabel
+            : lastName.trim();
+        const resolvedPin = oauthRegistrationProvider
+            ? resolveOAuthRegistrationPin(oauthRegistrationProvider)
+            : pin;
 
         try {
             const response = await register({
@@ -397,6 +446,7 @@ export default function AuthModal() {
                 preferredCategoryIds: selectedCategories,
                 image: googleProfileImage,
                 googleRegistrationToken,
+                appleRegistrationToken,
             }).unwrap();
 
             await completeAuthSession(response.access_token, response.refresh_token);
@@ -407,13 +457,16 @@ export default function AuthModal() {
             console.error('Register error:', error);
             const errorMessage = readApiErrorMessage(error);
 
-            if (usingGoogleDraft && isGoogleRegistrationSessionExpired(errorMessage)) {
+            if (
+                oauthRegistrationProvider &&
+                isOAuthRegistrationSessionExpired(oauthRegistrationProvider, errorMessage)
+            ) {
                 showAlert(
-                    'Session Google expiree',
-                    'Votre session Google a expire. Appuyez sur OK pour vous reconnecter et continuer sans perdre vos informations.',
+                    `Session ${oauthProviderLabel} expiree`,
+                    `Votre session ${oauthProviderLabel} a expire. Appuyez sur OK pour vous reconnecter et continuer sans perdre vos informations.`,
                     'warning',
                     () => {
-                        void refreshGoogleRegistrationSession();
+                        void refreshOAuthRegistrationSession(oauthRegistrationProvider);
                     }
                 );
                 return;
@@ -465,10 +518,68 @@ export default function AuthModal() {
         }
     };
 
-    const handleGoogleAuth = async () => {
-        setIsGoogleLoading(true);
+    const setOAuthLoading = (provider: OAuthProvider, isLoading: boolean) => {
+        if (provider === 'apple') {
+            setIsAppleLoading(isLoading);
+            return;
+        }
+        setIsGoogleLoading(isLoading);
+    };
+
+    const runOAuthLogin = (provider: OAuthProvider) =>
+        provider === 'apple'
+            ? authFlowService.loginWithApple()
+            : authFlowService.loginWithGoogle();
+
+    const applyOAuthRegistrationDraft = (
+        provider: OAuthProvider,
+        result: {
+            registrationToken: string;
+            profile: {
+                firstName: string;
+                lastName: string;
+                image?: string;
+            };
+        },
+        options?: {
+            preserveNames?: boolean;
+        }
+    ) => {
+        const generatedPin = generateFourDigitPin();
+
+        if (provider === 'apple') {
+            setAppleRegistrationToken(result.registrationToken);
+            setAppleAutoPin(generatedPin);
+            setGoogleRegistrationToken(undefined);
+            setGoogleProfileImage(undefined);
+            setGoogleAutoPin(undefined);
+        } else {
+            setGoogleRegistrationToken(result.registrationToken);
+            setGoogleProfileImage(result.profile.image);
+            setGoogleAutoPin(generatedPin);
+            setAppleRegistrationToken(undefined);
+            setAppleAutoPin(undefined);
+        }
+
+        if (options?.preserveNames) {
+            if (!firstName.trim()) {
+                setFirstName(result.profile.firstName || '');
+            }
+            if (!lastName.trim()) {
+                setLastName(result.profile.lastName || '');
+            }
+            return;
+        }
+
+        setFirstName(result.profile.firstName || '');
+        setLastName(result.profile.lastName || '');
+    };
+
+    const handleOAuthAuth = async (provider: OAuthProvider) => {
+        const label = OAUTH_PROVIDER_LABEL[provider];
+        setOAuthLoading(provider, true);
         try {
-            const result = await authFlowService.loginWithGoogle();
+            const result = await runOAuthLogin(provider);
 
             if (result.kind === 'registration_required') {
                 setMode('register');
@@ -481,72 +592,69 @@ export default function AuthModal() {
                 setShowConfirmPin(false);
                 setIsPinFocused(false);
                 setIsConfirmPinFocused(false);
-                setGoogleRegistrationToken(result.registrationToken);
-                setGoogleProfileImage(result.profile.image);
-                setGoogleAutoPin(generateFourDigitPin());
-                setFirstName(result.profile.firstName || '');
-                setLastName(result.profile.lastName || '');
+                applyOAuthRegistrationDraft(provider, result);
                 showAlert(
                     'Inscription requise',
-                    GOOGLE_REGISTRATION_INFO_MESSAGE,
+                    OAUTH_REGISTRATION_INFO_MESSAGE,
                     'info'
                 );
                 return;
             }
 
             await completeAuthSession(result.tokens.accessToken, result.tokens.refreshToken);
-            showAlert('Succes', 'Connexion Google reussie', 'success', () => {
+            showAlert('Succes', `Connexion ${label} reussie`, 'success', () => {
                 redirectAfterSuccess();
             });
         } catch (error: any) {
-            console.error('Google auth error:', error);
+            console.error(`${label} auth error:`, error);
             showAlert(
                 'Erreur',
-                error?.message || 'Impossible de se connecter avec Google.',
+                error?.message || `Impossible de se connecter avec ${label}.`,
                 'error'
             );
         } finally {
-            setIsGoogleLoading(false);
+            setOAuthLoading(provider, false);
         }
     };
 
-    const refreshGoogleRegistrationSession = async () => {
-        setIsGoogleLoading(true);
+    const handleGoogleAuth = async () => {
+        await handleOAuthAuth('google');
+    };
+
+    const handleAppleAuth = async () => {
+        await handleOAuthAuth('apple');
+    };
+
+    const refreshOAuthRegistrationSession = async (provider: OAuthProvider) => {
+        const label = OAUTH_PROVIDER_LABEL[provider];
+        setOAuthLoading(provider, true);
         try {
-            const result = await authFlowService.loginWithGoogle();
+            const result = await runOAuthLogin(provider);
 
             if (result.kind === 'authenticated') {
                 await completeAuthSession(result.tokens.accessToken, result.tokens.refreshToken);
-                showAlert('Succes', 'Connexion Google reussie', 'success', () => {
+                showAlert('Succes', `Connexion ${label} reussie`, 'success', () => {
                     redirectAfterSuccess();
                 });
                 return;
             }
 
-            setGoogleRegistrationToken(result.registrationToken);
-            setGoogleProfileImage(result.profile.image);
-            setGoogleAutoPin(generateFourDigitPin());
-            if (!firstName.trim()) {
-                setFirstName(result.profile.firstName || '');
-            }
-            if (!lastName.trim()) {
-                setLastName(result.profile.lastName || '');
-            }
+            applyOAuthRegistrationDraft(provider, result, { preserveNames: true });
 
             showAlert(
                 'Session actualisee',
-                'Connexion Google actualisee. Vous pouvez continuer l inscription.',
+                `Connexion ${label} actualisee. Vous pouvez continuer l inscription.`,
                 'success'
             );
         } catch (error: any) {
-            console.error('Google refresh error:', error);
+            console.error(`${label} refresh error:`, error);
             showAlert(
                 'Erreur',
-                error?.message || 'Impossible de reinitialiser la session Google.',
+                error?.message || `Impossible de reinitialiser la session ${label}.`,
                 'error'
             );
         } finally {
-            setIsGoogleLoading(false);
+            setOAuthLoading(provider, false);
         }
     };
 
@@ -579,7 +687,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             if (registerStep === 'preferences') {
                 setRegisterStep('phone');
                 return;
@@ -613,7 +721,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isGoogleRegistrationFlow) {
+        if (isOAuthRegistrationFlow) {
             if (isRegisterPhoneStep) {
                 handleContinueToRegisterStep();
                 return;
@@ -644,7 +752,7 @@ export default function AuthModal() {
     };
 
     const isSubmitting = isRegistering || isLoggingIn;
-    const isBusy = isSubmitting || isGoogleLoading;
+    const isBusy = isSubmitting || isGoogleLoading || isAppleLoading;
 
     const keyboardVerticalOffset = Platform.select({
         ios: 0,
@@ -662,7 +770,7 @@ export default function AuthModal() {
         ? isLoginPhoneStep
             ? 'Connexion rapide'
             : 'Verification PIN'
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
             ? 'Ajoutez votre numero'
             : 'Choisissez vos preferences'
@@ -678,9 +786,9 @@ export default function AuthModal() {
         ? isLoginPhoneStep
             ? 'Etape 1/2: saisissez votre numero de telephone.'
             : `Etape 2/2: saisissez votre PIN${phone.trim() ? ` pour ${phone.trim()}` : ''}.`
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Entrez votre numero pour finaliser votre compte Google.'
+            ? `Entrez votre numero pour finaliser votre compte ${oauthProviderLabel}.`
             : 'Selectionnez les categories qui vous interessent.'
         : isRegisterPhoneStep
           ? 'Entrez votre numero pour commencer votre inscription.'
@@ -692,15 +800,17 @@ export default function AuthModal() {
 
     const helperMessage = isLoginMode
         ? isLoginPhoneStep
-            ? 'Continuez avec PIN ou utilisez Google.'
+            ? isAppleSignInAvailable
+                ? 'Continuez avec PIN, Google ou Apple.'
+                : 'Continuez avec PIN ou utilisez Google.'
             : 'Le PIN contient exactement 4 chiffres.'
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
-            ? 'Numero requis pour lier votre compte Google.'
+            ? `Numero requis pour lier votre compte ${oauthProviderLabel}.`
             : 'Selectionnez au moins une categorie pour terminer.'
         : isRegisterPhoneStep
-          ? googleRegistrationToken
-            ? 'Compte Google detecte. Finalisez l inscription avec votre numero de telephone.'
+          ? isAppleSignInAvailable
+            ? 'Continuez avec vos informations, Google ou Apple.'
             : 'Continuez avec vos informations, ou utilisez Google.'
         : isRegisterIdentityStep
               ? 'Utilisez vos vraies informations pour faciliter le support.'
@@ -710,8 +820,8 @@ export default function AuthModal() {
 
     const currentProgress = isLoginMode
         ? LOGIN_PROGRESS
-        : isGoogleRegistrationFlow
-          ? GOOGLE_REGISTER_PROGRESS
+        : isOAuthRegistrationFlow
+          ? OAUTH_REGISTER_PROGRESS
           : REGISTER_PROGRESS;
     const currentProgressStep = isLoginMode ? loginStep : registerStep;
     const currentProgressIndexRaw = currentProgress.findIndex(
@@ -743,7 +853,7 @@ export default function AuthModal() {
             : isSubmitting
               ? 'Connexion...'
               : 'Se connecter'
-        : isGoogleRegistrationFlow
+        : isOAuthRegistrationFlow
           ? isRegisterPhoneStep
             ? isSubmitting
               ? 'Traitement...'
@@ -760,7 +870,9 @@ export default function AuthModal() {
               : isSubmitting
                 ? 'Inscription...'
                 : 'Creer mon compte';
-    const showGoogleButton = isLoginPhoneStep || (isRegisterPhoneStep && !isGoogleRegistrationFlow);
+    const showOAuthButtons = isLoginPhoneStep || (isRegisterPhoneStep && !isOAuthRegistrationFlow);
+    const showGoogleButton = showOAuthButtons;
+    const showAppleButton = showOAuthButtons && isAppleSignInAvailable;
 
     return (
         <View style={styles.modalOverlay}>
@@ -1024,7 +1136,7 @@ export default function AuthModal() {
                                     </View>
                                 )}
 
-                                {isRegisterIdentityStep && !isGoogleRegistrationFlow && (
+                                {isRegisterIdentityStep && !isOAuthRegistrationFlow && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Prenom</Text>
@@ -1076,7 +1188,7 @@ export default function AuthModal() {
                                     </>
                                 )}
 
-                                {isRegisterSecurityStep && !isGoogleRegistrationFlow && (
+                                {isRegisterSecurityStep && !isOAuthRegistrationFlow && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Code PIN (4 chiffres)</Text>
@@ -1264,7 +1376,7 @@ export default function AuthModal() {
                                     </TouchableOpacity>
                                 </View>
 
-                                {showGoogleButton ? (
+                                {showOAuthButtons ? (
                                     <>
                                         <View style={styles.dividerRow}>
                                             <View style={styles.dividerLine} />
@@ -1272,18 +1384,37 @@ export default function AuthModal() {
                                             <View style={styles.dividerLine} />
                                         </View>
 
-                                        <TouchableOpacity
-                                            style={[styles.googleButton, isGoogleLoading && styles.disabledButton]}
-                                            onPress={() => void handleGoogleAuth()}
-                                            disabled={isBusy}
-                                        >
-                                            <Ionicons name="logo-google" size={18} color={Colors.primary} />
-                                            <Text style={styles.googleButtonText}>
-                                                {isGoogleLoading
-                                                    ? 'Connexion Google...'
-                                                    : 'Continuer avec Google'}
-                                            </Text>
-                                        </TouchableOpacity>
+                                        <View style={styles.oauthButtonsColumn}>
+                                            {showGoogleButton ? (
+                                                <TouchableOpacity
+                                                    style={[styles.googleButton, isGoogleLoading && styles.disabledButton]}
+                                                    onPress={() => void handleGoogleAuth()}
+                                                    disabled={isBusy}
+                                                >
+                                                    <Ionicons name="logo-google" size={18} color={Colors.primary} />
+                                                    <Text style={styles.googleButtonText}>
+                                                        {isGoogleLoading
+                                                            ? 'Connexion Google...'
+                                                            : 'Continuer avec Google'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ) : null}
+
+                                            {showAppleButton ? (
+                                                <TouchableOpacity
+                                                    style={[styles.appleButton, isAppleLoading && styles.disabledButton]}
+                                                    onPress={() => void handleAppleAuth()}
+                                                    disabled={isBusy}
+                                                >
+                                                    <Ionicons name="logo-apple" size={20} color={Colors.white} />
+                                                    <Text style={styles.appleButtonText}>
+                                                        {isAppleLoading
+                                                            ? 'Connexion Apple...'
+                                                            : 'Continuer avec Apple'}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            ) : null}
+                                        </View>
                                     </>
                                 ) : null}
 
@@ -1839,8 +1970,28 @@ const styles = StyleSheet.create({
         gap: Spacing.sm,
         ...Shadows.sm,
     },
+    oauthButtonsColumn: {
+        gap: Spacing.sm,
+    },
     googleButtonText: {
         color: Colors.primary,
+        fontSize: Typography.fontSize.base,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    appleButton: {
+        minHeight: 52,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.textPrimary,
+        borderWidth: 1,
+        borderColor: Colors.textPrimary,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        ...Shadows.sm,
+    },
+    appleButtonText: {
+        color: Colors.white,
         fontSize: Typography.fontSize.base,
         fontWeight: Typography.fontWeight.bold,
     },

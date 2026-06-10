@@ -1,14 +1,15 @@
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { KycFlowModal } from '@/components/kyc/KycFlowModal';
-import { KINSHASA_KYC_ID_EXAMPLE, KINSHASA_PLATE_EXAMPLE, KINSHASA_VEHICLE_MODEL_EXAMPLE } from '@/constants/kinshasa';
+import { KycInfoModal } from '@/components/kyc/KycInfoModal';
+import { KINSHASA_PLATE_EXAMPLE, KINSHASA_VEHICLE_MODEL_EXAMPLE } from '@/constants/kinshasa';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useBecomeDeliveryPersonMutation } from '@/store/api/deliveryPersonsApi';
 import { useGetMyKycEligibilityQuery, useGetMyKycQuery } from '@/store/api/usersApi';
 import { useAppDispatch } from '@/store/hooks';
 import { setUser } from '@/store/slices/authSlice';
-import { KycIdType } from '@/types/kyc';
 import { getImageMimeType } from '@/utils/imageUtils';
+import { normalizeTextInputValue } from '@/utils/textInput';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
@@ -48,12 +49,17 @@ const DELIVERY_STEPS = [
     { id: 3, title: 'Vehicule', icon: 'bicycle-outline' as const },
 ];
 
-const KYC_ID_OPTIONS: { label: string; value: KycIdType }[] = [
-    { label: 'Carte nationale', value: 'national_id' },
-    { label: 'Passeport', value: 'passport' },
-    { label: 'Permis de conduire', value: 'driver_license' },
-    { label: 'Carte electeur', value: 'voter_card' },
-];
+const resolveKycFullName = (account: any) => {
+    const firstName = typeof account?.firstName === 'string' ? account.firstName.trim() : '';
+    const lastName = typeof account?.lastName === 'string' ? account.lastName.trim() : '';
+    const username = typeof account?.username === 'string' ? account.username.trim() : '';
+    const emailName =
+        typeof account?.email === 'string'
+            ? account.email.split('@')[0]?.replace(/[._-]+/g, ' ').trim()
+            : '';
+
+    return normalizeTextInputValue(`${firstName} ${lastName}`.trim() || username || emailName || 'Utilisateur UTY');
+};
 
 export default function BecomeDeliveryScreen() {
     const router = useRouter();
@@ -72,12 +78,9 @@ export default function BecomeDeliveryScreen() {
     const [isCapturingProfileImage, setIsCapturingProfileImage] = React.useState(false);
     const [cameraModalVisible, setCameraModalVisible] = React.useState(false);
     const [cameraReady, setCameraReady] = React.useState(false);
+    const [kycInfoModalVisible, setKycInfoModalVisible] = React.useState(false);
     const [kycModalVisible, setKycModalVisible] = React.useState(false);
-    const [kycFullName, setKycFullName] = React.useState(
-        `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim(),
-    );
-    const [kycIdType, setKycIdType] = React.useState<KycIdType>('national_id');
-    const [kycIdNumber, setKycIdNumber] = React.useState('');
+    const kycFullName = React.useMemo(() => resolveKycFullName(user), [user]);
     const [deliveryLookupId, setDeliveryLookupId] = React.useState('');
     const [alertState, setAlertState] = React.useState<{
         visible: boolean;
@@ -101,7 +104,6 @@ export default function BecomeDeliveryScreen() {
         useGetMyKycEligibilityQuery(undefined, { skip: !user?._id });
     const { data: myKyc, refetch: refetchMyKyc } = useGetMyKycQuery(undefined, { skip: !user?._id });
     const isKycApproved = kycEligibility?.isKycApproved === true;
-    const kycStatus = (kycEligibility?.kycStatus || 'not_submitted').toLowerCase();
 
     React.useEffect(() => {
         requireAuth('Vous devez etre connecte pour devenir livreur.');
@@ -115,12 +117,6 @@ export default function BecomeDeliveryScreen() {
         setProfileImageUrl((prev) => prev || incomingImage);
         setProfileImagePreview((prev) => prev || incomingImage);
     }, [user?.image]);
-
-    React.useEffect(() => {
-        const nextFullName = `${(user as any)?.firstName || ''} ${(user as any)?.lastName || ''}`.trim();
-        if (!nextFullName) return;
-        setKycFullName((prev) => prev || nextFullName);
-    }, [user]);
 
     const hasDeliveryRole = React.useMemo(
         () =>
@@ -142,17 +138,12 @@ export default function BecomeDeliveryScreen() {
     };
 
     const openKycModal = () => {
-        if (!kycFullName.trim()) {
-            showAlert('Identite requise', 'Renseignez le nom complet avant de lancer le KYC.', 'warning');
-            return;
-        }
-
-        if (!kycIdNumber.trim()) {
-            showAlert('Numero requis', 'Renseignez le numero du document avant de lancer le KYC.', 'warning');
-            return;
-        }
-
         setKycModalVisible(true);
+    };
+
+    const startKycFromInfo = () => {
+        setKycInfoModalVisible(false);
+        openKycModal();
     };
 
     const parseApiErrorMessage = (error: any, fallback: string) => {
@@ -176,12 +167,7 @@ export default function BecomeDeliveryScreen() {
 
     const validateCurrentStep = () => {
         if (step === 1 && !isKycApproved) {
-            showAlert(
-                'KYC requis',
-                'Vous devez d abord valider votre KYC pour continuer.',
-                'warning',
-            );
-            openKycModal();
+            setKycInfoModalVisible(true);
             return false;
         }
 
@@ -335,13 +321,8 @@ export default function BecomeDeliveryScreen() {
         }
 
         if (!isKycApproved) {
-            showAlert(
-                'KYC requis',
-                'Votre KYC doit etre approuve avant l activation du profil livreur.',
-                'warning',
-            );
             setStep(1);
-            openKycModal();
+            setKycInfoModalVisible(true);
             return;
         }
 
@@ -476,87 +457,11 @@ export default function BecomeDeliveryScreen() {
                 <>
                     <Text style={styles.sectionTitle}>Etape 1: Verification KYC</Text>
                     <Text style={styles.sectionHint}>
-                        Le KYC approuve est obligatoire avant l activation du profil livreur.
+                        {isKycApproved
+                            ? 'Votre KYC est approuve. Vous pouvez continuer.'
+                            : 'Passez le KYC depuis le bouton en bas pour continuer.'}
                     </Text>
-
-                    <View style={styles.kycIdentityCard}>
-                        <Text style={styles.kycIdentityTitle}>Identite du titulaire</Text>
-
-                        <Text style={styles.label}>Nom complet *</Text>
-                        <TextInput
-                            value={kycFullName}
-                            onChangeText={setKycFullName}
-                            style={styles.input}
-                            placeholder="Ex: Jean Koffi"
-                            placeholderTextColor={Colors.gray400}
-                        />
-
-                        <Text style={styles.label}>Type de document *</Text>
-                        <View style={styles.kycIdentityChipsRow}>
-                            {KYC_ID_OPTIONS.map((option) => {
-                                const isSelected = option.value === kycIdType;
-                                return (
-                                    <TouchableOpacity
-                                        key={option.value}
-                                        style={[
-                                            styles.kycIdentityChip,
-                                            isSelected && styles.kycIdentityChipSelected,
-                                        ]}
-                                        onPress={() => setKycIdType(option.value)}
-                                    >
-                                        <Text
-                                            style={[
-                                                styles.kycIdentityChipText,
-                                                isSelected && styles.kycIdentityChipTextSelected,
-                                            ]}
-                                        >
-                                            {option.label}
-                                        </Text>
-                                    </TouchableOpacity>
-                                );
-                            })}
-                        </View>
-
-                        <Text style={styles.label}>Numero du document *</Text>
-                        <TextInput
-                            value={kycIdNumber}
-                            onChangeText={setKycIdNumber}
-                            style={styles.input}
-                            placeholder={KINSHASA_KYC_ID_EXAMPLE}
-                            placeholderTextColor={Colors.gray400}
-                            autoCapitalize="characters"
-                        />
-                    </View>
-
-                    <View style={styles.kycCard}>
-                        <View style={styles.kycHeader}>
-                            <Text style={styles.kycTitle}>Statut KYC</Text>
-                            <View style={[styles.kycBadge, isKycApproved && styles.kycBadgeApproved]}>
-                                <Text style={[styles.kycBadgeText, isKycApproved && styles.kycBadgeTextApproved]}>
-                                    {isKycApproved
-                                        ? 'Approuve'
-                                        : kycStatus === 'pending'
-                                        ? 'En attente'
-                                        : kycStatus === 'rejected'
-                                        ? 'Rejete'
-                                        : 'Non soumis'}
-                                </Text>
-                            </View>
-                        </View>
-                        <Text style={styles.kycDescription}>
-                            Si le statut n est pas approuve, ouvrez le modal KYC pour capturer vos documents.
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.kycActionButton}
-                            onPress={openKycModal}
-                        >
-                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
-                            <Text style={styles.kycActionText}>
-                                {isKycApproved ? 'Mettre a jour mon KYC' : 'Faire mon KYC maintenant'}
-                            </Text>
-                        </TouchableOpacity>
-                        {isCheckingKyc ? <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.xs }} /> : null}
-                    </View>
+                    {isCheckingKyc ? <ActivityIndicator color={Colors.primary} style={{ marginTop: Spacing.sm }} /> : null}
                 </>
             );
         }
@@ -682,6 +587,7 @@ export default function BecomeDeliveryScreen() {
     };
 
     const progress = `${step}/${DELIVERY_STEPS.length}`;
+    const needsKycBeforeNext = step === 1 && !isKycApproved;
 
     return (
         <SafeAreaView style={styles.container}>
@@ -789,9 +695,18 @@ export default function BecomeDeliveryScreen() {
 
                                 {step < DELIVERY_STEPS.length ? (
                                     <TouchableOpacity style={styles.navButton} onPress={goNext}>
-                                        <LinearGradient colors={Gradients.primary} style={styles.navButtonGradient}>
-                                            <Text style={styles.navButtonText}>Suivant</Text>
-                                            <Ionicons name="arrow-forward" size={16} color={Colors.white} />
+                                        <LinearGradient
+                                            colors={needsKycBeforeNext ? Gradients.accent : Gradients.primary}
+                                            style={styles.navButtonGradient}
+                                        >
+                                            <Text style={needsKycBeforeNext ? styles.navButtonTextAccent : styles.navButtonText}>
+                                                {needsKycBeforeNext ? 'Passer le KYC' : 'Suivant'}
+                                            </Text>
+                                            <Ionicons
+                                                name={needsKycBeforeNext ? 'shield-checkmark-outline' : 'arrow-forward'}
+                                                size={16}
+                                                color={needsKycBeforeNext ? Colors.primary : Colors.white}
+                                            />
                                         </LinearGradient>
                                     </TouchableOpacity>
                                 ) : (
@@ -909,12 +824,19 @@ export default function BecomeDeliveryScreen() {
                 }}
             />
 
+            <KycInfoModal
+                visible={kycInfoModalVisible}
+                title="KYC requis pour devenir livreur"
+                description="La verification confirme votre identite avant de recevoir des missions de livraison."
+                primaryLabel="Lancer le KYC"
+                onClose={() => setKycInfoModalVisible(false)}
+                onStart={startKycFromInfo}
+            />
+
             <KycFlowModal
                 visible={kycModalVisible}
                 identity={{
                     fullName: kycFullName.trim(),
-                    idType: kycIdType,
-                    idNumber: kycIdNumber.trim(),
                 }}
                 onClose={() => setKycModalVisible(false)}
                 onSuccess={async (result) => {
@@ -1132,106 +1054,6 @@ const styles = StyleSheet.create({
         paddingVertical: Spacing.md,
         color: Colors.textPrimary,
         fontSize: Typography.fontSize.base,
-    },
-    kycIdentityCard: {
-        marginBottom: Spacing.sm,
-        borderWidth: 1,
-        borderColor: Colors.gray200,
-        borderRadius: BorderRadius.md,
-        backgroundColor: Colors.gray50,
-        padding: Spacing.md,
-    },
-    kycIdentityTitle: {
-        color: Colors.textPrimary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.extrabold,
-        marginBottom: Spacing.xs,
-    },
-    kycIdentityChipsRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: Spacing.xs,
-    },
-    kycIdentityChip: {
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 6,
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.gray300,
-        backgroundColor: Colors.white,
-    },
-    kycIdentityChipSelected: {
-        backgroundColor: Colors.primary,
-        borderColor: Colors.primary,
-    },
-    kycIdentityChipText: {
-        color: Colors.gray600,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
-    },
-    kycIdentityChipTextSelected: {
-        color: Colors.white,
-    },
-    kycCard: {
-        marginBottom: Spacing.sm,
-        borderWidth: 1,
-        borderColor: Colors.primary + '33',
-        borderRadius: BorderRadius.md,
-        backgroundColor: Colors.primary + '08',
-        padding: Spacing.md,
-    },
-    kycHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-    },
-    kycTitle: {
-        color: Colors.textPrimary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    kycBadge: {
-        borderRadius: BorderRadius.full,
-        borderWidth: 1,
-        borderColor: Colors.warning + '88',
-        backgroundColor: Colors.warning + '1A',
-        paddingHorizontal: Spacing.sm,
-        paddingVertical: 4,
-    },
-    kycBadgeApproved: {
-        borderColor: Colors.success + '88',
-        backgroundColor: Colors.success + '1A',
-    },
-    kycBadgeText: {
-        color: Colors.warning,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.bold,
-    },
-    kycBadgeTextApproved: {
-        color: Colors.success,
-    },
-    kycDescription: {
-        marginTop: Spacing.xs,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.xs,
-        lineHeight: 18,
-    },
-    kycActionButton: {
-        marginTop: Spacing.sm,
-        borderRadius: BorderRadius.md,
-        borderWidth: 1,
-        borderColor: Colors.primary + '44',
-        backgroundColor: Colors.white,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: Spacing.xs,
-        paddingVertical: Spacing.sm,
-    },
-    kycActionText: {
-        color: Colors.primary,
-        fontSize: Typography.fontSize.sm,
-        fontWeight: Typography.fontWeight.bold,
     },
     profilePhotoCard: {
         height: 170,

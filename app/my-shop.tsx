@@ -367,7 +367,7 @@ export default function MyShopScreen() {
                 {missingShop ? (
                     <View style={styles.centerWrap}>
                         <LinearGradient
-                            colors={['#0E172A', '#1E3A8A', '#0B1220']}
+                            colors={[Colors.white, '#EDF5FF']}
                             start={{ x: 0, y: 0 }}
                             end={{ x: 1, y: 1 }}
                             style={styles.emptyHeroCard}
@@ -377,17 +377,32 @@ export default function MyShopScreen() {
 
                             <View style={styles.emptyHeroHeader}>
                                 <View style={styles.emptyHeroIconWrap}>
-                                    <Ionicons name="storefront-outline" size={30} color={Colors.white} />
+                                    <Ionicons name="storefront-outline" size={30} color={Colors.primary} />
                                 </View>
                                 <View style={styles.emptyHeroTextWrap}>
-                                    <Text style={styles.emptyHeroEyebrow}>Espace vendeur</Text>
-                                    <Text style={styles.emptyHeroTitle}>Lancez votre boutique UTY</Text>
+                                    <View style={styles.emptyKycPill}>
+                                        <Ionicons name="shield-checkmark-outline" size={12} color={Colors.primary} />
+                                        <Text style={styles.emptyKycPillText}>KYC vendeur requis</Text>
+                                    </View>
+                                    <Text style={styles.emptyHeroTitle}>Ouvrez votre boutique UTY</Text>
                                 </View>
                             </View>
 
                             <Text style={styles.emptyHeroDescription}>
-                                Une boutique active debloque la publication d annonces et le suivi complet de vos ventes.
+                                Creez votre espace vendeur pour publier vos annonces et suivre vos commandes.
                             </Text>
+
+                            <View style={styles.emptyHeroActions}>
+                                <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/create-shop')}>
+                                    <LinearGradient colors={Gradients.primary} style={styles.primaryBtnGradient}>
+                                        <Text style={styles.primaryBtnText}>Creer ma boutique</Text>
+                                    </LinearGradient>
+                                </TouchableOpacity>
+                                <TouchableOpacity style={styles.emptySecondaryBtn} onPress={() => refetch()}>
+                                    <Ionicons name="refresh-outline" size={15} color={Colors.primary} />
+                                    <Text style={styles.emptySecondaryBtnText}>Actualiser</Text>
+                                </TouchableOpacity>
+                            </View>
 
                             <View style={styles.emptyBenefitsList}>
                                 {SELLER_BENEFITS.map((benefit) => (
@@ -397,25 +412,7 @@ export default function MyShopScreen() {
                                     </View>
                                 ))}
                             </View>
-
-                            <View style={styles.emptyHeroActions}>
-                                <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/create-shop')}>
-                                    <LinearGradient colors={Gradients.accent} style={styles.primaryBtnGradient}>
-                                        <Text style={styles.primaryBtnTextAccent}>Creer ma boutique</Text>
-                                    </LinearGradient>
-                                </TouchableOpacity>
-                                <TouchableOpacity style={styles.emptySecondaryBtn} onPress={() => refetch()}>
-                                    <Ionicons name="refresh-outline" size={15} color={Colors.white} />
-                                    <Text style={styles.emptySecondaryBtnText}>Actualiser</Text>
-                                </TouchableOpacity>
-                            </View>
                         </LinearGradient>
-                        <View style={styles.emptyFootnoteCard}>
-                            <Ionicons name="shield-checkmark-outline" size={16} color={Colors.primary} />
-                            <Text style={styles.emptyFootnoteText}>
-                                Le KYC vendeur est requis avant publication.
-                            </Text>
-                        </View>
                     </View>
                 ) : !shop ? (
                     <View style={styles.centerWrap}>
@@ -880,14 +877,14 @@ const styles = StyleSheet.create({
     headerButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
     headerTitle: { fontSize: Typography.fontSize.lg, color: Colors.textPrimary, fontWeight: Typography.fontWeight.extrabold },
     headerMeta: { minWidth: 40, textAlign: 'right', color: Colors.gray500 },
-    centerWrap: { flex: 1, justifyContent: 'center', padding: Spacing.xl },
+    centerWrap: { flex: 1, justifyContent: 'flex-start', padding: Spacing.xl, paddingTop: Spacing.huge },
     emptyHeroCard: {
         borderRadius: BorderRadius.xl,
         padding: Spacing.xl,
         overflow: 'hidden',
         borderWidth: 1,
-        borderColor: Colors.white + '22',
-        ...Shadows.lg,
+        borderColor: Colors.primary + '18',
+        ...Shadows.md,
     },
     emptyGlowOne: {
         position: 'absolute',
@@ -896,7 +893,7 @@ const styles = StyleSheet.create({
         borderRadius: 90,
         top: -70,
         right: -50,
-        backgroundColor: Colors.white + '14',
+        backgroundColor: Colors.primary + '10',
     },
     emptyGlowTwo: {
         position: 'absolute',
@@ -905,7 +902,7 @@ const styles = StyleSheet.create({
         borderRadius: 60,
         bottom: -40,
         left: -30,
-        backgroundColor: Colors.accent + '3A',
+        backgroundColor: Colors.accent + '28',
     },
     emptyHeroHeader: {
         flexDirection: 'row',
@@ -916,32 +913,45 @@ const styles = StyleSheet.create({
         width: 54,
         height: 54,
         borderRadius: 27,
-        backgroundColor: Colors.white + '22',
+        backgroundColor: Colors.white,
         borderWidth: 1,
-        borderColor: Colors.white + '55',
+        borderColor: Colors.primary + '20',
         alignItems: 'center',
         justifyContent: 'center',
+        ...Shadows.sm,
     },
     emptyHeroTextWrap: {
         flex: 1,
     },
-    emptyHeroEyebrow: {
-        color: Colors.accent,
+    emptyKycPill: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs / 2,
+        borderRadius: BorderRadius.full,
+        backgroundColor: Colors.primary + '12',
+        borderWidth: 1,
+        borderColor: Colors.primary + '20',
+        paddingHorizontal: Spacing.sm,
+        paddingVertical: 3,
+    },
+    emptyKycPillText: {
+        color: Colors.primary,
         fontSize: Typography.fontSize.xs,
         fontWeight: Typography.fontWeight.bold,
-        letterSpacing: 0.5,
     },
     emptyHeroTitle: {
-        marginTop: 2,
-        color: Colors.white,
-        fontSize: Typography.fontSize.xl,
+        marginTop: Spacing.xs,
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
+        lineHeight: 29,
     },
     emptyHeroDescription: {
         marginTop: Spacing.md,
-        color: Colors.white + 'D5',
-        fontSize: Typography.fontSize.sm,
-        lineHeight: 20,
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.base,
+        lineHeight: 21,
     },
     emptyBenefitsList: {
         marginTop: Spacing.lg,
@@ -954,7 +964,7 @@ const styles = StyleSheet.create({
     },
     emptyBenefitText: {
         flex: 1,
-        color: Colors.white,
+        color: Colors.textPrimary,
         fontSize: Typography.fontSize.sm,
         lineHeight: 19,
         fontWeight: Typography.fontWeight.medium,
@@ -967,35 +977,17 @@ const styles = StyleSheet.create({
         height: 44,
         borderRadius: BorderRadius.lg,
         borderWidth: 1,
-        borderColor: Colors.white + '44',
-        backgroundColor: Colors.white + '16',
+        borderColor: Colors.primary + '22',
+        backgroundColor: Colors.white,
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: Spacing.xs,
     },
     emptySecondaryBtnText: {
-        color: Colors.white,
+        color: Colors.primary,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
-    },
-    emptyFootnoteCard: {
-        marginTop: Spacing.md,
-        borderRadius: BorderRadius.lg,
-        borderWidth: 1,
-        borderColor: Colors.primary + '25',
-        backgroundColor: Colors.primary + '10',
-        paddingHorizontal: Spacing.md,
-        paddingVertical: Spacing.sm,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: Spacing.xs,
-    },
-    emptyFootnoteText: {
-        flex: 1,
-        color: Colors.textSecondary,
-        fontSize: Typography.fontSize.xs,
-        fontWeight: Typography.fontWeight.semibold,
     },
     emptyCard: {
         backgroundColor: Colors.white,
@@ -1550,5 +1542,4 @@ const styles = StyleSheet.create({
     primaryBtn: { borderRadius: BorderRadius.lg, overflow: 'hidden', ...Shadows.sm },
     primaryBtnGradient: { height: 48, alignItems: 'center', justifyContent: 'center' },
     primaryBtnText: { color: Colors.white, fontWeight: Typography.fontWeight.bold },
-    primaryBtnTextAccent: { color: Colors.primary, fontWeight: Typography.fontWeight.extrabold },
 });

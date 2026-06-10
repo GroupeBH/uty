@@ -18,7 +18,9 @@ import { useGetDirectionsMutation, useLazyReverseGeocodeQuery } from '@/store/ap
 import {
     DeliveryGeoPoint,
     DeliveryStatusValue,
+    getDeliveryBusinessLabel,
     getDeliveryPersonRefId,
+    getDeliveryWorkflowProgress,
 } from '@/types/delivery';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { Ionicons } from '@expo/vector-icons';
@@ -342,18 +344,6 @@ const formatLocationLabel = (
     return coordinatesToLabel(fallbackCoordinates) || fallback;
 };
 
-const statusLabel = (status: DeliveryStatusValue): string => {
-    if (status === 'pending') return 'En attente de livreur';
-    if (status === 'assigned') return 'Assignee';
-    if (status === 'at_pickup') return 'Au point de retrait';
-    if (status === 'picked_up' || status === 'in_transit') return 'En route';
-    if (status === 'at_dropoff') return 'Arrive a destination';
-    if (status === 'delivered') return 'Livree';
-    if (status === 'failed') return 'Echouee';
-    if (status === 'cancelled') return 'Annulee';
-    return 'En attente';
-};
-
 const stepIndex = (status: DeliveryStatusValue): number => {
     if (status === 'assigned') return 1;
     if (status === 'at_pickup') return 2;
@@ -482,6 +472,9 @@ export default function DriverDeliveryDetailScreen() {
     );
 
     const status = (tracking?.status || delivery?.status || 'pending') as DeliveryStatusValue;
+    const workflow = tracking?.workflow || delivery?.workflow;
+    const workflowProgress = getDeliveryWorkflowProgress(status, workflow);
+    const businessStatusLabel = getDeliveryBusinessLabel(status, workflow);
     const journeyCurrentStepIndex = getJourneyGuideIndex(status);
     const openJourneyModal = React.useCallback(() => {
         setJourneyModalStepIndex(journeyCurrentStepIndex);
@@ -1024,7 +1017,7 @@ export default function DriverDeliveryDetailScreen() {
                     <View style={styles.mapCollapsedHint}>
                         <Ionicons name="navigate-outline" size={13} color={Colors.primary} />
                         <Text style={styles.mapCollapsedHintText} numberOfLines={1}>
-                            {statusLabel(status)}
+                            {businessStatusLabel}
                         </Text>
                     </View>
                 ) : null}
@@ -1052,10 +1045,10 @@ export default function DriverDeliveryDetailScreen() {
                 {/* Stepper */}
                 <View style={styles.stepperCard}>
                     <View style={styles.stepperHeaderRow}>
-                        <Text style={styles.stepperTitle}>{statusLabel(status)}</Text>
+                        <Text style={styles.stepperTitle}>{businessStatusLabel}</Text>
                         <View style={styles.stepperStatusBadge}>
                             <Text style={styles.stepperStatusText}>
-                                Etape {Math.min(step, STEPS.length)}/{STEPS.length}
+                                Etape {Math.min(workflowProgress.currentStepIndex + 1, workflowProgress.totalSteps)}/{workflowProgress.totalSteps}
                             </Text>
                         </View>
                     </View>
