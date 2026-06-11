@@ -156,7 +156,6 @@ export default function AuthModal() {
     const [isConfirmPinFocused, setIsConfirmPinFocused] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
     const [isAppleLoading, setIsAppleLoading] = useState(false);
-    const [isAppleSignInAvailable, setIsAppleSignInAvailable] = useState(false);
 
     // Alert state
     const [alert, setAlert] = useState<{
@@ -189,6 +188,7 @@ export default function AuthModal() {
     const isLoginMode = mode === 'login';
     const isLoginPhoneStep = isLoginMode && loginStep === 'phone';
     const isLoginPinStep = isLoginMode && loginStep === 'pin';
+    const canShowAppleSignIn = Platform.OS === 'ios';
     const isRegisterPhoneStep = !isLoginMode && registerStep === 'phone';
     const isRegisterIdentityStep = !isLoginMode && registerStep === 'identity';
     const isRegisterSecurityStep = !isLoginMode && registerStep === 'security';
@@ -199,6 +199,8 @@ export default function AuthModal() {
           ? 'apple'
           : null;
     const isOAuthRegistrationFlow = !isLoginMode && Boolean(oauthRegistrationProvider);
+    const isAppleRegistrationFlow = oauthRegistrationProvider === 'apple';
+    const shouldSkipManualIdentityStep = isOAuthRegistrationFlow || isAppleRegistrationFlow;
     const oauthProviderLabel = oauthRegistrationProvider
         ? OAUTH_PROVIDER_LABEL[oauthRegistrationProvider]
         : 'Google';
@@ -212,28 +214,14 @@ export default function AuthModal() {
     }, [params.mode]);
 
     useEffect(() => {
-        let isMounted = true;
-
-        void authFlowService.isAppleSignInAvailable().then((isAvailable) => {
-            if (isMounted) {
-                setIsAppleSignInAvailable(isAvailable);
-            }
-        });
-
-        return () => {
-            isMounted = false;
-        };
-    }, []);
-
-    useEffect(() => {
-        if (!isOAuthRegistrationFlow) {
+        if (!shouldSkipManualIdentityStep) {
             return;
         }
 
         if (registerStep === 'identity' || registerStep === 'security') {
             setRegisterStep('preferences');
         }
-    }, [isOAuthRegistrationFlow, registerStep]);
+    }, [registerStep, shouldSkipManualIdentityStep]);
 
     useEffect(() => {
         Animated.parallel([
@@ -374,7 +362,7 @@ export default function AuthModal() {
         if (!normalizedPhone) return;
 
         setPhone(normalizedPhone);
-        if (isOAuthRegistrationFlow) {
+        if (shouldSkipManualIdentityStep) {
             setRegisterStep('preferences');
             return;
         }
@@ -413,7 +401,7 @@ export default function AuthModal() {
 
         const usingOAuthDraft = Boolean(oauthRegistrationProvider);
 
-        if (usingOAuthDraft) {
+        if (shouldSkipManualIdentityStep) {
             if (!validatePreferencesStep()) {
                 return;
             }
@@ -681,7 +669,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isOAuthRegistrationFlow) {
+        if (shouldSkipManualIdentityStep) {
             if (registerStep === 'preferences') {
                 setRegisterStep('phone');
                 return;
@@ -715,7 +703,7 @@ export default function AuthModal() {
             return;
         }
 
-        if (isOAuthRegistrationFlow) {
+        if (shouldSkipManualIdentityStep) {
             if (isRegisterPhoneStep) {
                 handleContinueToRegisterStep();
                 return;
@@ -764,7 +752,7 @@ export default function AuthModal() {
         ? isLoginPhoneStep
             ? 'Connexion'
             : 'Code PIN'
-        : isOAuthRegistrationFlow
+        : shouldSkipManualIdentityStep
           ? isRegisterPhoneStep
             ? 'Numero de telephone'
             : 'Preferences'
@@ -780,7 +768,7 @@ export default function AuthModal() {
         ? isLoginPhoneStep
             ? 'Entrez votre numero pour continuer.'
             : `Saisissez votre PIN${phone.trim() ? ` pour ${phone.trim()}` : ''}.`
-        : isOAuthRegistrationFlow
+        : shouldSkipManualIdentityStep
           ? isRegisterPhoneStep
             ? `Ajoutez le numero lie a votre compte ${oauthProviderLabel}.`
             : 'Selectionnez vos categories preferees.'
@@ -794,16 +782,16 @@ export default function AuthModal() {
 
     const helperMessage = isLoginMode
         ? isLoginPhoneStep
-            ? isAppleSignInAvailable
+            ? canShowAppleSignIn
                 ? 'Vous pouvez aussi utiliser Google ou Apple.'
                 : 'Vous pouvez aussi utiliser Google.'
             : 'Le PIN contient exactement 4 chiffres.'
-        : isOAuthRegistrationFlow
+        : shouldSkipManualIdentityStep
           ? isRegisterPhoneStep
             ? `Numero requis pour lier votre compte ${oauthProviderLabel}.`
             : 'Au moins une categorie est requise.'
         : isRegisterPhoneStep
-          ? isAppleSignInAvailable
+          ? canShowAppleSignIn
             ? 'Google et Apple remplissent deja une partie du compte.'
             : 'Google peut remplir une partie du compte.'
         : isRegisterIdentityStep
@@ -814,7 +802,7 @@ export default function AuthModal() {
 
     const currentProgress = isLoginMode
         ? LOGIN_PROGRESS
-        : isOAuthRegistrationFlow
+        : shouldSkipManualIdentityStep
           ? OAUTH_REGISTER_PROGRESS
           : REGISTER_PROGRESS;
     const currentProgressStep = isLoginMode ? loginStep : registerStep;
@@ -842,7 +830,7 @@ export default function AuthModal() {
             : isSubmitting
               ? 'Connexion...'
               : 'Se connecter'
-        : isOAuthRegistrationFlow
+        : shouldSkipManualIdentityStep
           ? isRegisterPhoneStep
             ? isSubmitting
               ? 'Traitement...'
@@ -859,9 +847,9 @@ export default function AuthModal() {
               : isSubmitting
                 ? 'Inscription...'
                 : 'Creer mon compte';
-    const showOAuthButtons = isLoginPhoneStep || (isRegisterPhoneStep && !isOAuthRegistrationFlow);
+    const showOAuthButtons = isLoginPhoneStep || (isRegisterPhoneStep && !shouldSkipManualIdentityStep);
     const showGoogleButton = showOAuthButtons;
-    const showAppleButton = showOAuthButtons && isAppleSignInAvailable;
+    const showAppleButton = showOAuthButtons && canShowAppleSignIn;
     const activeAccentColor = isLoginMode ? Colors.primary : Colors.accentDark;
     const activeAccentSoftColor = isLoginMode ? Colors.primary + '12' : Colors.accent + '18';
     const activeProgressLabel = currentProgress[currentProgressIndex]?.label ?? '';
@@ -1103,7 +1091,7 @@ export default function AuthModal() {
                                     </View>
                                 )}
 
-                                {isRegisterIdentityStep && !isOAuthRegistrationFlow && (
+                                {isRegisterIdentityStep && !shouldSkipManualIdentityStep && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Prenom</Text>
@@ -1155,7 +1143,7 @@ export default function AuthModal() {
                                     </>
                                 )}
 
-                                {isRegisterSecurityStep && !isOAuthRegistrationFlow && (
+                                {isRegisterSecurityStep && !shouldSkipManualIdentityStep && (
                                     <>
                                         <View style={styles.inputGroup}>
                                             <Text style={styles.label}>Code PIN (4 chiffres)</Text>
@@ -1910,4 +1898,3 @@ const styles = StyleSheet.create({
         fontWeight: Typography.fontWeight.medium,
     },
 });
-
