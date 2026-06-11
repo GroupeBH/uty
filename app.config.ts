@@ -257,6 +257,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ios: {
             bundleIdentifier: 'com.gbh.uty',
             supportsTablet: true,
+            infoPlist: {
+                ITSAppUsesNonExemptEncryption: false
+            },
             ...(hasAppleAuthentication ? { usesAppleSignIn: true } : {}),
             ...(hasFirebaseApp ? { googleServicesFile: iosGoogleServicesFile } : {}),
             config: {

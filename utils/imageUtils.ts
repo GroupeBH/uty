@@ -1,8 +1,14 @@
 import * as FileSystem from 'expo-file-system/legacy';
-import * as ImageManipulator from 'expo-image-manipulator';
 
 const ANNOUNCEMENT_IMAGE_MAX_DIMENSION = 1600;
 const ANNOUNCEMENT_IMAGE_COMPRESS_QUALITY = 0.72;
+
+type ImageManipulatorAction = {
+    resize: {
+        width?: number;
+        height?: number;
+    };
+};
 
 export interface AnnouncementImageInput {
     uri: string;
@@ -90,7 +96,7 @@ const buildCompressedImageName = (name?: string | null): string => {
 const getResizeAction = (
     width?: number | null,
     height?: number | null,
-): ImageManipulator.Action[] => {
+): ImageManipulatorAction[] => {
     const numericWidth = Number(width);
     const numericHeight = Number(height);
 
@@ -122,6 +128,7 @@ const getResizeAction = (
 export const prepareAnnouncementImage = async (
     image: AnnouncementImageInput,
 ): Promise<PreparedAnnouncementImage> => {
+    const ImageManipulator = await import('expo-image-manipulator');
     const manipulated = await ImageManipulator.manipulateAsync(
         image.uri,
         getResizeAction(image.width, image.height),
@@ -189,4 +196,3 @@ export const convertImagesToDataUrls = async (uris: string[]): Promise<string[]>
         throw error;
     }
 };
-
