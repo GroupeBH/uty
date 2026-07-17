@@ -19,6 +19,7 @@ import { DEFAULT_CURRENCY_CODE, DEFAULT_CURRENCY_SYMBOL, resolveCurrencySelectio
 import { prepareAnnouncementImage, prepareAnnouncementImages } from '@/utils/imageUtils';
 import { formatKinshasaAddress, KinshasaAddressFields, parseKinshasaAddress } from '@/utils/kinshasaAddress';
 import { normalizeTextInputValue } from '@/utils/textInput';
+import { checkUserGeneratedText, OBJECTIONABLE_CONTENT_MESSAGE } from '@/utils/contentModeration';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -579,10 +580,20 @@ export default function EditAnnouncementScreen() {
             if (!formData.currency) {
                 newErrors.currency = 'La devise est obligatoire';
             }
+            const contentCheck = checkUserGeneratedText(formData.name, formData.description);
+            if (!contentCheck.allowed) {
+                newErrors.description = OBJECTIONABLE_CONTENT_MESSAGE;
+            }
 
             if (Object.keys(newErrors).length > 0) {
                 setErrors(newErrors);
-                showAlert({ title: 'Erreur', message: 'Veuillez remplir tous les champs obligatoires', variant: 'error' });
+                showAlert({
+                    title: contentCheck.allowed ? 'Erreur' : 'Contenu refuse',
+                    message: contentCheck.allowed
+                        ? 'Veuillez remplir tous les champs obligatoires'
+                        : OBJECTIONABLE_CONTENT_MESSAGE,
+                    variant: 'error',
+                });
                 return false;
             }
         }

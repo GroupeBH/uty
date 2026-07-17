@@ -278,13 +278,15 @@ const styles = StyleSheet.create({
         paddingHorizontal: Spacing.xl,
     },
     redirectTitle: {
-        ...Typography.h3,
+        fontSize: Typography.fontSize.xl,
+        fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
         marginBottom: Spacing.sm,
         textAlign: 'center',
     },
     redirectText: {
-        ...Typography.body,
+        fontSize: Typography.fontSize.base,
+        lineHeight: Typography.lineHeight.normal,
         color: Colors.textSecondary,
         textAlign: 'center',
     },

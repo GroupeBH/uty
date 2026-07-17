@@ -11,6 +11,7 @@ import { useAuthInitialization } from '@/hooks/useAuthInitialization';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { storage } from '@/utils/storage';
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
+import { initializeBlockedUsers } from '@/utils/blockedUsers';
 
 export const unstable_settings = {
   anchor: '(tabs)',
@@ -27,6 +28,10 @@ function RootLayoutContent() {
   // Initialize authentication on app start
   useAuthInitialization();
   usePushNotifications();
+
+  React.useEffect(() => {
+    void initializeBlockedUsers();
+  }, []);
 
   React.useEffect(() => {
     let mounted = true;

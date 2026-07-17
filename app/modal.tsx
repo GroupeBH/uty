@@ -5,7 +5,9 @@
 import { CategoryIcon } from '@/components/CategoryIcon';
 import { CustomAlert } from '@/components/ui/CustomAlert';
 import { BorderRadius, Colors, Spacing, Typography } from '@/constants/theme';
+import { COMMUNITY_RULES, EULA_INTRO, SUPPORT_EMAIL } from '@/constants/legal';
 import { authFlowService } from '@/services/authFlowService';
+import { hasAcceptedCurrentLegalTerms, recordCurrentLegalAcceptance } from '@/utils/legalAcceptance';
 import {
     useLoginMutation,
     useRegisterMutation,
@@ -21,6 +23,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -156,6 +159,18 @@ export default function AuthModal() {
     const [isConfirmPinFocused, setIsConfirmPinFocused] = useState(false);
     const [isGoogleLoading, setIsGoogleLoading] = useState(false);
     const [isAppleLoading, setIsAppleLoading] = useState(false);
+    const [hasAcceptedTerms, setHasAcceptedTerms] = useState(false);
+    const [showCommunityRules, setShowCommunityRules] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+        void hasAcceptedCurrentLegalTerms().then((accepted) => {
+            if (mounted && accepted) setHasAcceptedTerms(true);
+        });
+        return () => {
+            mounted = false;
+        };
+    }, []);
 
     // Alert state
     const [alert, setAlert] = useState<{
@@ -558,6 +573,14 @@ export default function AuthModal() {
     };
 
     const handleOAuthAuth = async (provider: OAuthProvider) => {
+        if (!isLoginMode && !hasAcceptedTerms) {
+            showAlert(
+                'Acceptation requise',
+                'Lisez et acceptez les Conditions d utilisation et les regles de la communaute avant de continuer.',
+                'warning',
+            );
+            return;
+        }
         const label = OAUTH_PROVIDER_LABEL[provider];
         setOAuthLoading(provider, true);
         try {
@@ -694,6 +717,15 @@ export default function AuthModal() {
     };
 
     const handlePrimaryAction = () => {
+        if (isRegisterPhoneStep && !hasAcceptedTerms) {
+            showAlert(
+                'Acceptation requise',
+                'Lisez et acceptez les Conditions d utilisation et les regles de la communaute avant de continuer.',
+                'warning',
+            );
+            return;
+        }
+
         if (isLoginMode) {
             if (isLoginPhoneStep) {
                 handleContinueToPin();
@@ -1290,6 +1322,40 @@ export default function AuthModal() {
                                     </View>
                                 )}
 
+                                {isRegisterPhoneStep && (
+                                    <View style={styles.termsCard}>
+                                        <TouchableOpacity
+                                            style={styles.termsCheckboxRow}
+                                            onPress={() => setHasAcceptedTerms((accepted) => !accepted)}
+                                            disabled={isBusy}
+                                            activeOpacity={0.8}
+                                        >
+                                            <View
+                                                style={[
+                                                    styles.termsCheckbox,
+                                                    hasAcceptedTerms && styles.termsCheckboxChecked,
+                                                ]}
+                                            >
+                                                {hasAcceptedTerms ? (
+                                                    <Ionicons name="checkmark" size={16} color={Colors.white} />
+                                                ) : null}
+                                            </View>
+                                            <Text style={styles.termsAcceptanceText}>
+                                                J accepte les Conditions d utilisation et la politique de tolerance zero envers les contenus choquants et les utilisateurs abusifs.
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={styles.rulesLinkButton}
+                                            onPress={() => setShowCommunityRules(true)}
+                                        >
+                                            <Ionicons name="document-text-outline" size={16} color={Colors.primary} />
+                                            <Text style={styles.rulesLinkText}>
+                                                Lire les conditions et les regles de la communaute
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                )}
+
                                 <View style={styles.actionRow}>
                                     <TouchableOpacity
                                         style={styles.secondaryButton}
@@ -1405,6 +1471,54 @@ export default function AuthModal() {
                 }}
                 confirmText="OK"
             />
+
+            <Modal
+                animationType="slide"
+                transparent
+                visible={showCommunityRules}
+                onRequestClose={() => setShowCommunityRules(false)}
+            >
+                <View style={styles.legalModalOverlay}>
+                    <SafeAreaView style={styles.legalModalCard} edges={['bottom']}>
+                        <View style={styles.legalModalHeader}>
+                            <View style={styles.legalModalTitleWrap}>
+                                <Ionicons name="shield-checkmark" size={24} color={Colors.primary} />
+                                <Text style={styles.legalModalTitle}>Conditions et securite</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.closeButton}
+                                onPress={() => setShowCommunityRules(false)}
+                            >
+                                <Ionicons name="close" size={22} color={Colors.textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView contentContainerStyle={styles.legalModalContent}>
+                            <Text style={styles.legalIntro}>{EULA_INTRO}</Text>
+                            {COMMUNITY_RULES.map((rule, index) => (
+                                <View key={rule} style={styles.legalRuleRow}>
+                                    <View style={styles.legalRuleNumber}>
+                                        <Text style={styles.legalRuleNumberText}>{index + 1}</Text>
+                                    </View>
+                                    <Text style={styles.legalRuleText}>{rule}</Text>
+                                </View>
+                            ))}
+                            <Text style={styles.legalContact}>
+                                Contact moderation et assistance : {SUPPORT_EMAIL}
+                            </Text>
+                        </ScrollView>
+                        <TouchableOpacity
+                            style={styles.legalAcceptButton}
+                            onPress={() => {
+                                setHasAcceptedTerms(true);
+                                setShowCommunityRules(false);
+                                void recordCurrentLegalAcceptance();
+                            }}
+                        >
+                            <Text style={styles.legalAcceptButtonText}>J accepte ces conditions</Text>
+                        </TouchableOpacity>
+                    </SafeAreaView>
+                </View>
+            </Modal>
         </View>
   );
 }
@@ -1583,6 +1697,130 @@ const styles = StyleSheet.create({
     },
     form: {
         gap: Spacing.md,
+    },
+    termsCard: {
+        gap: Spacing.sm,
+        padding: Spacing.md,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '35',
+        backgroundColor: Colors.primary + '08',
+    },
+    termsCheckboxRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    termsCheckbox: {
+        width: 24,
+        height: 24,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: Colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.white,
+    },
+    termsCheckboxChecked: {
+        backgroundColor: Colors.primary,
+    },
+    termsAcceptanceText: {
+        flex: 1,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
+        fontWeight: Typography.fontWeight.semibold,
+    },
+    rulesLinkButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        paddingLeft: 32,
+    },
+    rulesLinkText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
+        textDecorationLine: 'underline',
+    },
+    legalModalOverlay: {
+        flex: 1,
+        justifyContent: 'flex-end',
+        backgroundColor: 'rgba(8, 19, 37, 0.55)',
+    },
+    legalModalCard: {
+        maxHeight: '88%',
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xxl,
+        borderTopRightRadius: BorderRadius.xxl,
+        padding: Spacing.xl,
+    },
+    legalModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: Spacing.md,
+    },
+    legalModalTitleWrap: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    legalModalTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    legalModalContent: {
+        gap: Spacing.md,
+        paddingBottom: Spacing.lg,
+    },
+    legalIntro: {
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 21,
+    },
+    legalRuleRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.sm,
+    },
+    legalRuleNumber: {
+        width: 26,
+        height: 26,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '14',
+    },
+    legalRuleNumberText: {
+        color: Colors.primary,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    legalRuleText: {
+        flex: 1,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+        lineHeight: 21,
+    },
+    legalContact: {
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.xs,
+        lineHeight: 18,
+        paddingTop: Spacing.sm,
+    },
+    legalAcceptButton: {
+        minHeight: 52,
+        borderRadius: BorderRadius.xl,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary,
+    },
+    legalAcceptButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
     },
     inputGroup: {
         gap: Spacing.sm,

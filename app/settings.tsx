@@ -4,6 +4,7 @@
 
 import { useStyledAlert } from '@/components/ui/useStyledAlert';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
+import { COMMUNITY_RULES, EULA_INTRO, SUPPORT_EMAIL } from '@/constants/legal';
 import { useAuth } from '@/hooks/useAuth';
 import { OTP_DISABLED } from '@/utils/featureFlags';
 import { Ionicons } from '@expo/vector-icons';
@@ -241,7 +242,13 @@ export default function SettingsScreen() {
                     label: "Conditions d'utilisation",
                     subtitle: 'Lire les conditions',
                     gradient: Gradients.cool,
-                    onPress: showComingSoon,
+                    onPress: () =>
+                        showStyledAlert(
+                            "Conditions d'utilisation et communaute",
+                            `${EULA_INTRO}\n\n${COMMUNITY_RULES.map((rule, index) => `${index + 1}. ${rule}`).join('\n\n')}\n\nContact: ${SUPPORT_EMAIL}`,
+                            undefined,
+                            'info',
+                        ),
                 },
                 {
                     kind: 'action',
