@@ -22,6 +22,7 @@ import {
     useGetCommentsForAnnouncementQuery,
 } from '@/store/api/commentsApi';
 import { useCreateContactRequestMutation } from '@/store/api/contactRequestsApi';
+import { useBlockUserMutation, useCreateModerationReportMutation } from '@/store/api/moderationApi';
 import { useLazyReverseGeocodeQuery } from '@/store/api/googleMapsApi';
 import {
     useCreateConversationMutation,
@@ -32,12 +33,15 @@ import { cacheDirectOrderProduct } from '@/utils/directOrderDraft';
 import { getAvailableQuantity } from '@/utils/productAvailability';
 import { normalizePhoneNumberForApi } from '@/utils/phone';
 import { normalizeTextInputValue } from '@/utils/textInput';
+import { blockUserLocally, getContentOwnerId, useBlockedUserIds } from '@/utils/blockedUsers';
+import { checkUserGeneratedText, OBJECTIONABLE_CONTENT_MESSAGE } from '@/utils/contentModeration';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useRef, useState } from 'react';
 import {
     ActivityIndicator,
+    Alert,
     Animated,
     Dimensions,
     Image,
@@ -55,6 +59,21 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const CONTENT_REPORT_REASONS = [
+    'Contenu offensant ou haineux',
+    'Arnaque ou contenu trompeur',
+    'Contenu sexuel ou violent',
+    'Harcelement ou comportement abusif',
+    'Autre infraction',
+];
+
+type ReportTarget = {
+    targetType: 'announcement' | 'comment';
+    targetId: string;
+    reportedUserId: string;
+    label: string;
+};
 
 const SENSITIVE_ATTRIBUTE_KEYWORDS = [
     'password',
@@ -76,7 +95,7 @@ const SENSITIVE_ATTRIBUTE_KEYWORDS = [
     'apikey',
 ];
 
-const REPORT_REASONS = [
+const ANNOUNCEMENT_REPORT_REASONS = [
     {
         value: 'contenu_trompeur',
         label: 'Annonce trompeuse',
@@ -99,7 +118,7 @@ const REPORT_REASONS = [
     },
 ];
 
-const BLOCK_REASONS = [
+const SELLER_BLOCK_REASONS = [
     {
         value: 'spam',
         label: 'Spam',
@@ -184,7 +203,7 @@ export default function ProductDetailScreen() {
     const product = trackedProduct ?? publicProduct;
     const isLoading = isAuthenticated ? isLoadingTrackedProduct : isLoadingPublicProduct;
     const {
-        data: comments = [],
+        data: rawComments = [],
         isLoading: isLoadingComments,
         isFetching: isFetchingComments,
     } = useGetCommentsForAnnouncementQuery(announcementId, {
@@ -203,7 +222,17 @@ export default function ProductDetailScreen() {
     const [createConversation, { isLoading: isCreatingConversation }] = useCreateConversationMutation();
     const [sendChatMessage, { isLoading: isSendingChatMessage }] = useSendChatMessageMutation();
     const [createContactRequest, { isLoading: isCreatingContactRequest }] = useCreateContactRequestMutation();
+    const [createModerationReport, { isLoading: isReporting }] = useCreateModerationReportMutation();
+    const [blockUser] = useBlockUserMutation();
     const [triggerReverseGeocode] = useLazyReverseGeocodeQuery();
+    const blockedUserIds = useBlockedUserIds();
+    const comments = React.useMemo(
+        () => rawComments.filter((comment) => {
+            const authorId = getContentOwnerId(comment);
+            return !authorId || !blockedUserIds.has(authorId);
+        }),
+        [blockedUserIds, rawComments],
+    );
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
@@ -214,8 +243,12 @@ export default function ProductDetailScreen() {
     const [showReviewModal, setShowReviewModal] = useState(false);
     const [showSafetyActionsModal, setShowSafetyActionsModal] = useState(false);
     const [moderationMode, setModerationMode] = useState<'report' | 'block' | null>(null);
-    const [moderationReason, setModerationReason] = useState(REPORT_REASONS[0].value);
+    const [moderationReason, setModerationReason] = useState(ANNOUNCEMENT_REPORT_REASONS[0].value);
     const [moderationDetails, setModerationDetails] = useState('');
+    const [showReportModal, setShowReportModal] = useState(false);
+    const [reportTarget, setReportTarget] = useState<ReportTarget | null>(null);
+    const [reportReason, setReportReason] = useState(CONTENT_REPORT_REASONS[0]);
+    const [reportDetails, setReportDetails] = useState('');
     const [quantity, setQuantity] = useState(1);
     const [resolvedPickupLocationAddress, setResolvedPickupLocationAddress] = useState('');
     const [isResolvingPickupLocation, setIsResolvingPickupLocation] = useState(false);
@@ -699,7 +732,7 @@ export default function ProductDetailScreen() {
     }, [product?.seller, product?.shop, product?.user]);
     const isOwnAnnouncement = Boolean(currentUserId && sellerUserId && currentUserId === sellerUserId);
     const isModerationSubmitting = isReportingAnnouncement || isBlockingSellerFromAnnouncement;
-    const moderationReasons = moderationMode === 'block' ? BLOCK_REASONS : REPORT_REASONS;
+    const moderationReasons = moderationMode === 'block' ? SELLER_BLOCK_REASONS : ANNOUNCEMENT_REPORT_REASONS;
     const moderationTitle =
         moderationMode === 'block' ? 'Bloquer ce vendeur' : "Signaler l'annonce";
     const moderationSubmitLabel =
@@ -711,6 +744,83 @@ export default function ProductDetailScreen() {
 
         return product.category.transactionMode === 'contact';
     }, [product?.category]);
+    const openReportModal = (target: ReportTarget) => {
+        setReportTarget(target);
+        setReportReason(CONTENT_REPORT_REASONS[0]);
+        setReportDetails('');
+        setShowReportModal(true);
+    };
+
+    const handleSubmitReport = async () => {
+        if (!reportTarget) return;
+
+        try {
+            await createModerationReport({
+                targetType: reportTarget.targetType,
+                targetId: reportTarget.targetId,
+                reportedUserId: reportTarget.reportedUserId,
+                reason: reportReason,
+                details: reportDetails.trim() || undefined,
+            }).unwrap();
+            setShowReportModal(false);
+            setReportTarget(null);
+            setReportDetails('');
+            showAlert(
+                'Signalement envoye',
+                'Merci. Notre equipe de moderation examinera ce signalement dans les 24 heures.',
+                'success',
+            );
+        } catch (error: any) {
+            showAlert(
+                'Signalement impossible',
+                parseError(error, 'Le signalement n a pas pu etre transmis. Reessayez.'),
+                'error',
+            );
+        }
+    };
+
+    const confirmBlockUser = (
+        blockedId: string,
+        sourceTargetType: 'announcement' | 'comment',
+        sourceTargetId: string,
+    ) => {
+        if (!blockedId || !sourceTargetId) return;
+
+        Alert.alert(
+            'Bloquer cet utilisateur ?',
+            'Ses annonces et commentaires disparaitront immediatement de votre experience Uty. Le blocage sera aussi transmis a la moderation.',
+            [
+                { text: 'Annuler', style: 'cancel' },
+                {
+                    text: 'Bloquer',
+                    style: 'destructive',
+                    onPress: () => {
+                        void blockUserLocally(blockedId).then(() => {
+                            if (sourceTargetType === 'announcement') {
+                                router.replace('/(tabs)' as any);
+                            }
+                        });
+                        void Promise.allSettled([
+                            blockUser({
+                                userId: blockedId,
+                                sourceTargetType,
+                                sourceTargetId,
+                                reason: `Blocage initié depuis ${sourceTargetType === 'comment' ? 'un commentaire' : 'une annonce'}`,
+                            }).unwrap(),
+                            createModerationReport({
+                                targetType: 'user',
+                                targetId: blockedId,
+                                reportedUserId: blockedId,
+                                reason: 'Utilisateur bloque pour comportement abusif',
+                                details: `Blocage depuis ${sourceTargetType} ${sourceTargetId}`,
+                            }).unwrap(),
+                        ]);
+                    },
+                },
+            ],
+        );
+    };
+
     const openContactModal = React.useCallback(() => {
         if (requireAuth('Vous devez être connecté pour contacter le vendeur')) {
             setShowContactModal(true);
@@ -885,6 +995,11 @@ export default function ProductDetailScreen() {
             return;
         }
 
+        if (!checkUserGeneratedText(content).allowed) {
+            showAlert('Contenu refuse', OBJECTIONABLE_CONTENT_MESSAGE, 'warning');
+            return;
+        }
+
         if (!product?._id) {
             showAlert('Erreur', 'Annonce introuvable.', 'error');
             return;
@@ -938,6 +1053,11 @@ export default function ProductDetailScreen() {
 
         if (!reviewText.trim()) {
             showAlert('Erreur', 'Veuillez entrer un commentaire', 'warning');
+            return;
+        }
+
+        if (!checkUserGeneratedText(reviewText).allowed) {
+            showAlert('Contenu refuse', OBJECTIONABLE_CONTENT_MESSAGE, 'warning');
             return;
         }
 
@@ -1011,7 +1131,9 @@ export default function ProductDetailScreen() {
                 return;
             }
 
-            const defaultReason = mode === 'block' ? BLOCK_REASONS[0].value : REPORT_REASONS[0].value;
+            const defaultReason = mode === 'block'
+                ? SELLER_BLOCK_REASONS[0].value
+                : ANNOUNCEMENT_REPORT_REASONS[0].value;
             setShowSafetyActionsModal(false);
             setModerationMode(mode);
             setModerationReason(defaultReason);
@@ -1412,20 +1534,12 @@ export default function ProductDetailScreen() {
                                     </Text>
                                 </View>
                             </View>
-                            <View style={styles.sellerActions}>
-                                <TouchableOpacity
-                                    style={styles.sellerSafetyButton}
-                                    onPress={openSafetyActions}
-                                >
-                                    <Ionicons name="shield-outline" size={18} color={Colors.primary} />
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    style={styles.contactSellerButton}
-                                    onPress={openContactModal}
-                                >
-                                    <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
-                                </TouchableOpacity>
-                            </View>
+                            <TouchableOpacity
+                                style={styles.contactSellerButton}
+                                onPress={openContactModal}
+                            >
+                                <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
+                            </TouchableOpacity>
                         </View>
                         <Text style={styles.sellerSecurityNote}>
                             Echangez avec le vendeur uniquement via la messagerie integree.
@@ -1513,6 +1627,43 @@ export default function ProductDetailScreen() {
                                                 )}
                                             </View>
                                             <Text style={styles.reviewCommentText}>{comment.text}</Text>
+                                            {(() => {
+                                                const commentAuthorId = getContentOwnerId(comment);
+                                                const canModerateComment = Boolean(
+                                                    isAuthenticated &&
+                                                        commentAuthorId &&
+                                                        commentAuthorId !== currentUserId,
+                                                );
+                                                if (!canModerateComment) return null;
+
+                                                return (
+                                                    <View style={styles.commentModerationActions}>
+                                                        <TouchableOpacity
+                                                            style={styles.commentModerationButton}
+                                                            onPress={() =>
+                                                                openReportModal({
+                                                                    targetType: 'comment',
+                                                                    targetId: comment._id,
+                                                                    reportedUserId: commentAuthorId,
+                                                                    label: 'ce commentaire',
+                                                                })
+                                                            }
+                                                        >
+                                                            <Ionicons name="flag-outline" size={14} color={Colors.error} />
+                                                            <Text style={styles.commentModerationText}>Signaler</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity
+                                                            style={styles.commentModerationButton}
+                                                            onPress={() =>
+                                                                confirmBlockUser(commentAuthorId, 'comment', comment._id)
+                                                            }
+                                                        >
+                                                            <Ionicons name="ban-outline" size={14} color={Colors.error} />
+                                                            <Text style={styles.commentModerationText}>Bloquer</Text>
+                                                        </TouchableOpacity>
+                                                    </View>
+                                                );
+                                            })()}
                                         </View>
                                     );
                                 })}
@@ -1981,6 +2132,82 @@ export default function ProductDetailScreen() {
                             </TouchableOpacity>
                         </View>
                     </KeyboardAvoidingView>
+                </View>
+            </Modal>
+
+            {/* Modal de signalement */}
+            <Modal
+                animationType="slide"
+                transparent
+                visible={showReportModal}
+                onRequestClose={() => {
+                    setShowReportModal(false);
+                    setReportTarget(null);
+                }}
+                statusBarTranslucent
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.reportModal, { paddingBottom: Math.max(insets.bottom, Spacing.lg) }]}>
+                        <View style={styles.reportModalHeader}>
+                            <View>
+                                <Text style={styles.reportModalTitle}>
+                                    Signaler {reportTarget?.label || 'ce contenu'}
+                                </Text>
+                                <Text style={styles.reportModalSubtitle}>
+                                    La moderation examinera le signalement sous 24 heures.
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.sheetCloseButton}
+                                onPress={() => {
+                                    setShowReportModal(false);
+                                    setReportTarget(null);
+                                }}
+                            >
+                                <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            <View style={styles.reportReasons}>
+                                {CONTENT_REPORT_REASONS.map((reason) => {
+                                    const selected = reason === reportReason;
+                                    return (
+                                        <TouchableOpacity
+                                            key={reason}
+                                            style={[styles.reportReason, selected && styles.reportReasonSelected]}
+                                            onPress={() => setReportReason(reason)}
+                                        >
+                                            <Ionicons
+                                                name={selected ? 'radio-button-on' : 'radio-button-off'}
+                                                size={20}
+                                                color={selected ? Colors.error : Colors.gray400}
+                                            />
+                                            <Text style={styles.reportReasonText}>{reason}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                            <TextInput
+                                style={styles.reportDetailsInput}
+                                value={reportDetails}
+                                onChangeText={(text) => setReportDetails(normalizeTextInputValue(text))}
+                                placeholder="Details utiles (facultatif)"
+                                placeholderTextColor={Colors.gray400}
+                                multiline
+                                maxLength={500}
+                            />
+                        </ScrollView>
+                        <TouchableOpacity
+                            style={[styles.submitReportButton, isReporting && styles.sendMessageButtonDisabled]}
+                            onPress={() => void handleSubmitReport()}
+                            disabled={isReporting}
+                        >
+                            <Ionicons name="flag" size={18} color={Colors.white} />
+                            <Text style={styles.submitReportButtonText}>
+                                {isReporting ? 'Envoi...' : 'Envoyer le signalement'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
             </Modal>
 
@@ -2649,6 +2876,76 @@ const styles = StyleSheet.create({
         color: Colors.textSecondary,
         lineHeight: 18,
     },
+    reportModal: {
+        maxHeight: '82%',
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xxl,
+        borderTopRightRadius: BorderRadius.xxl,
+        padding: Spacing.xl,
+        gap: Spacing.lg,
+    },
+    reportModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: Spacing.md,
+    },
+    reportModalTitle: {
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.lg,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
+    reportModalSubtitle: {
+        color: Colors.textSecondary,
+        fontSize: Typography.fontSize.xs,
+        marginTop: 4,
+    },
+    reportReasons: {
+        gap: Spacing.sm,
+    },
+    reportReason: {
+        minHeight: 48,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        paddingHorizontal: Spacing.md,
+    },
+    reportReasonSelected: {
+        borderColor: Colors.error + '77',
+        backgroundColor: Colors.error + '08',
+    },
+    reportReasonText: {
+        flex: 1,
+        color: Colors.textPrimary,
+        fontSize: Typography.fontSize.sm,
+    },
+    reportDetailsInput: {
+        minHeight: 92,
+        marginTop: Spacing.md,
+        padding: Spacing.md,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        borderRadius: BorderRadius.lg,
+        color: Colors.textPrimary,
+        textAlignVertical: 'top',
+    },
+    submitReportButton: {
+        minHeight: 52,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        borderRadius: BorderRadius.xl,
+        backgroundColor: Colors.error,
+    },
+    submitReportButtonText: {
+        color: Colors.white,
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+    },
     reviewsHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -2751,6 +3048,27 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.sm,
         color: Colors.textSecondary,
         lineHeight: 20,
+    },
+    commentModerationActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        gap: Spacing.md,
+        marginTop: Spacing.sm,
+        paddingTop: Spacing.sm,
+        borderTopWidth: 1,
+        borderTopColor: Colors.gray100,
+    },
+    commentModerationButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.xs,
+        minHeight: 32,
+        paddingHorizontal: Spacing.xs,
+    },
+    commentModerationText: {
+        color: Colors.error,
+        fontSize: Typography.fontSize.xs,
+        fontWeight: Typography.fontWeight.bold,
     },
     emptyReviews: {
         fontSize: Typography.fontSize.base,

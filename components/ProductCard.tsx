@@ -6,6 +6,7 @@ import { BorderRadius, Colors, Shadows, Spacing, Typography } from '@/constants/
 import { Announcement } from '@/types/announcement';
 import { formatCurrencyAmount } from '@/utils/currency';
 import { getAvailableQuantity, isOutOfStockQuantity, requiresSellerContact } from '@/utils/productAvailability';
+import { getContentOwnerId, useBlockedUserIds } from '@/utils/blockedUsers';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -26,7 +27,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({
     isInWishlist = false,
 }) => {
     const router = useRouter();
+    const blockedUserIds = useBlockedUserIds();
     const scaleAnim = useRef(new Animated.Value(1)).current;
+    const ownerId = getContentOwnerId(product);
+    const isBlocked = Boolean(ownerId && blockedUserIds.has(ownerId));
 
     const imageUrl = (product.images && product.images.length > 0)
         ? product.images[0]
@@ -51,6 +55,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({
             useNativeDriver: true,
         }).start();
     };
+
+    if (isBlocked) return null;
 
     return (
         <TouchableOpacity

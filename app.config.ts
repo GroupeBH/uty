@@ -210,6 +210,23 @@ export default ({ config }: ConfigContext): ExpoConfig => {
                 },
             },
         ],
+        [
+            'expo-image-picker',
+            {
+                photosPermission:
+                    'Uty accède à votre photothèque pour vous permettre de sélectionner et publier des photos, par exemple la photo d’une annonce, de votre profil ou de votre boutique.',
+                cameraPermission:
+                    'Uty utilise l’appareil photo pour vous permettre de prendre une photo, par exemple pour une annonce, votre profil ou la vérification de votre identité.',
+                microphonePermission: false,
+            },
+        ],
+        [
+            'expo-location',
+            {
+                locationWhenInUsePermission:
+                    'Uty utilise votre position lorsque vous choisissez « Ma position », par exemple pour placer un point de retrait ou suivre une livraison en cours.',
+            },
+        ],
     ];
 
     if (hasFirebaseApp) {
@@ -238,7 +255,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
             'react-native-vision-camera',
             {
                 cameraPermissionText:
-                    'Nous avons besoin de la camera pour verifier votre identite.',
+                    'Uty utilise l’appareil photo pour capturer votre selfie et votre pièce d’identité pendant la vérification de votre compte.',
                 enableMicrophonePermission: false,
             },
         ]);
@@ -257,6 +274,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         ios: {
             bundleIdentifier: 'com.gbh.uty',
             supportsTablet: true,
+            infoPlist: {
+                ITSAppUsesNonExemptEncryption: false,
+                NSPhotoLibraryUsageDescription:
+                    'Uty accède à votre photothèque pour vous permettre de sélectionner et publier des photos, par exemple la photo d’une annonce, de votre profil ou de votre boutique.',
+                NSCameraUsageDescription:
+                    'Uty utilise l’appareil photo pour vous permettre de prendre une photo, par exemple pour une annonce, votre profil ou la vérification de votre identité.',
+                NSLocationWhenInUseUsageDescription:
+                    'Uty utilise votre position lorsque vous choisissez « Ma position », par exemple pour placer un point de retrait ou suivre une livraison en cours.',
+            },
             ...(hasAppleAuthentication ? { usesAppleSignIn: true } : {}),
             ...(hasFirebaseApp ? { googleServicesFile: iosGoogleServicesFile } : {}),
             config: {
