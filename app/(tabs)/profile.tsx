@@ -192,6 +192,13 @@ export default function ProfileScreen() {
                     onPress: () => router.push('/messages' as any),
                 },
                 {
+                    icon: 'shield-outline',
+                    label: 'Vendeurs bloques',
+                    subtitle: 'Gerer les vendeurs masques',
+                    gradient: Gradients.cool,
+                    onPress: () => router.push('/blocked-sellers' as any),
+                },
+                {
                     icon: 'settings-outline',
                     label: 'Paramètres',
                     subtitle: 'Préférences et confidentialité',

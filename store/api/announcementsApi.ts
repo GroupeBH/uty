@@ -57,6 +57,51 @@ export interface AnnouncementViewsByUserResponse {
     viewsByUser: AnnouncementViewByUserRow[];
 }
 
+export interface ModerationPayload {
+    reason?: string;
+    details?: string;
+}
+
+export interface AnnouncementReportResponse {
+    reported: boolean;
+    created: boolean;
+    report: {
+        id: string;
+        announcement: string | any;
+        reporter: string | any;
+        seller: string | any;
+        reason: string;
+        details?: string;
+        status: string;
+        reportCount: number;
+        lastReportedAt?: string;
+        createdAt?: string;
+        updatedAt?: string;
+    };
+}
+
+export interface SellerBlock {
+    id: string;
+    blocker: string | any;
+    seller: string | any;
+    announcement?: string | any;
+    reason?: string;
+    details?: string;
+    isActive: boolean;
+    blockedAt?: string;
+    unblockedAt?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+}
+
+export interface SellerBlockResponse {
+    blocked: boolean;
+    alreadyBlocked?: boolean;
+    sellerId: string;
+    announcementId?: string | null;
+    block: SellerBlock | null;
+}
+
 export const announcementsApi = baseApi.injectEndpoints({
     overrideExisting: true,
     endpoints: (builder) => ({
@@ -137,6 +182,55 @@ export const announcementsApi = baseApi.injectEndpoints({
             query: (id) => `/announcements/${id}/views/by-user`,
             providesTags: (result, error, id) => [{ type: 'Announcement', id }],
         }),
+        reportAnnouncement: builder.mutation<
+            AnnouncementReportResponse,
+            { announcementId: string; data?: ModerationPayload }
+        >({
+            query: ({ announcementId, data }) => ({
+                url: `/announcements/${announcementId}/report`,
+                method: 'POST',
+                body: data || {},
+            }),
+        }),
+        blockSellerFromAnnouncement: builder.mutation<
+            SellerBlockResponse,
+            { announcementId: string; data?: ModerationPayload }
+        >({
+            query: ({ announcementId, data }) => ({
+                url: `/announcements/${announcementId}/block-seller`,
+                method: 'POST',
+                body: data || {},
+            }),
+            invalidatesTags: (result, error, { announcementId }) => [
+                'Announcement',
+                'SellerBlock',
+                'Messaging',
+                'ContactRequest',
+                { type: 'Announcement', id: announcementId },
+            ],
+        }),
+        blockSeller: builder.mutation<
+            SellerBlockResponse,
+            { sellerId: string; data?: ModerationPayload }
+        >({
+            query: ({ sellerId, data }) => ({
+                url: `/announcements/blocked-sellers/${sellerId}`,
+                method: 'POST',
+                body: data || {},
+            }),
+            invalidatesTags: ['Announcement', 'SellerBlock', 'Messaging', 'ContactRequest'],
+        }),
+        getMyBlockedSellers: builder.query<SellerBlock[], void>({
+            query: () => '/announcements/blocked-sellers/me',
+            providesTags: ['SellerBlock'],
+        }),
+        unblockSeller: builder.mutation<SellerBlockResponse, string>({
+            query: (sellerId) => ({
+                url: `/announcements/blocked-sellers/${sellerId}`,
+                method: 'DELETE',
+            }),
+            invalidatesTags: ['Announcement', 'SellerBlock', 'Messaging', 'ContactRequest'],
+        }),
     }),
 });
 
@@ -151,4 +245,9 @@ export const {
     useGetMyAnnouncementsQuery,
     useGetMyFavoritesQuery,
     useGetAnnouncementViewsByUserQuery,
+    useReportAnnouncementMutation,
+    useBlockSellerFromAnnouncementMutation,
+    useBlockSellerMutation,
+    useGetMyBlockedSellersQuery,
+    useUnblockSellerMutation,
 } = announcementsApi;

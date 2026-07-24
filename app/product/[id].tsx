@@ -9,8 +9,10 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner';
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import {
+    useBlockSellerFromAnnouncementMutation,
     useGetAnnouncementByIdQuery,
     useGetAnnouncementByIdWithTrackedViewQuery,
+    useReportAnnouncementMutation,
     useToggleLikeMutation,
 } from '@/store/api/announcementsApi';
 import { useAddToCartMutation, useGetCartQuery, useRemoveFromCartMutation, useUpdateCartItemMutation } from '@/store/api/cartApi';
@@ -72,6 +74,52 @@ const SENSITIVE_ATTRIBUTE_KEYWORDS = [
     'googleid',
     'fcm',
     'apikey',
+];
+
+const REPORT_REASONS = [
+    {
+        value: 'contenu_trompeur',
+        label: 'Annonce trompeuse',
+        description: 'Prix, description ou photos incoherents.',
+    },
+    {
+        value: 'contenu_interdit',
+        label: 'Contenu interdit',
+        description: 'Produit, service ou image non autorise.',
+    },
+    {
+        value: 'fraude',
+        label: 'Suspicion de fraude',
+        description: 'Arnaque, usurpation ou demande suspecte.',
+    },
+    {
+        value: 'autre',
+        label: 'Autre motif',
+        description: 'Un autre probleme a verifier.',
+    },
+];
+
+const BLOCK_REASONS = [
+    {
+        value: 'spam',
+        label: 'Spam',
+        description: 'Messages ou annonces repetitifs.',
+    },
+    {
+        value: 'harcelement',
+        label: 'Comportement abusif',
+        description: 'Echanges insistants ou inappropries.',
+    },
+    {
+        value: 'fraude',
+        label: 'Suspicion de fraude',
+        description: 'Profil ou transaction suspecte.',
+    },
+    {
+        value: 'autre',
+        label: 'Autre motif',
+        description: 'Ne plus voir ce vendeur.',
+    },
 ];
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
@@ -144,6 +192,11 @@ export default function ProductDetailScreen() {
     });
     const [createComment, { isLoading: isSubmittingReview }] = useCreateCommentMutation();
     const [toggleLike, { isLoading: isTogglingLike }] = useToggleLikeMutation();
+    const [reportAnnouncement, { isLoading: isReportingAnnouncement }] = useReportAnnouncementMutation();
+    const [
+        blockSellerFromAnnouncement,
+        { isLoading: isBlockingSellerFromAnnouncement },
+    ] = useBlockSellerFromAnnouncementMutation();
     const [addToCart] = useAddToCartMutation();
     const [removeFromCart] = useRemoveFromCartMutation();
     const [updateCartItem] = useUpdateCartItemMutation();
@@ -159,6 +212,10 @@ export default function ProductDetailScreen() {
     const [showImageModal, setShowImageModal] = useState(false);
     const [showContactModal, setShowContactModal] = useState(false);
     const [showReviewModal, setShowReviewModal] = useState(false);
+    const [showSafetyActionsModal, setShowSafetyActionsModal] = useState(false);
+    const [moderationMode, setModerationMode] = useState<'report' | 'block' | null>(null);
+    const [moderationReason, setModerationReason] = useState(REPORT_REASONS[0].value);
+    const [moderationDetails, setModerationDetails] = useState('');
     const [quantity, setQuantity] = useState(1);
     const [resolvedPickupLocationAddress, setResolvedPickupLocationAddress] = useState('');
     const [isResolvingPickupLocation, setIsResolvingPickupLocation] = useState(false);
@@ -175,6 +232,7 @@ export default function ProductDetailScreen() {
         title: string;
         message: string;
         type: 'success' | 'error' | 'info' | 'warning';
+        onConfirm?: () => void;
     }>({
         visible: false,
         title: '',
@@ -196,18 +254,20 @@ export default function ProductDetailScreen() {
     const isOutOfStock = stock !== undefined && stock <= 0;
     const productImages = React.useMemo(() => product?.images || [], [product?.images]);
     const selectedImageUri = productImages[selectedImageIndex] || 'https://via.placeholder.com/400';
-    const showAlert = (
+    const showAlert = React.useCallback((
         title: string,
         message: string,
         type: 'success' | 'error' | 'info' | 'warning' = 'info',
+        onConfirm?: () => void,
     ) => {
         setAlertState({
             visible: true,
             title,
             message,
             type,
+            onConfirm,
         });
-    };
+    }, []);
     const parseError = (error: any, fallback: string) => {
         const nestedMessage = error?.data?.message;
         if (typeof nestedMessage === 'string' && nestedMessage.trim().length > 0) {
@@ -637,6 +697,13 @@ export default function ProductDetailScreen() {
             toIdString(product?.user)
         );
     }, [product?.seller, product?.shop, product?.user]);
+    const isOwnAnnouncement = Boolean(currentUserId && sellerUserId && currentUserId === sellerUserId);
+    const isModerationSubmitting = isReportingAnnouncement || isBlockingSellerFromAnnouncement;
+    const moderationReasons = moderationMode === 'block' ? BLOCK_REASONS : REPORT_REASONS;
+    const moderationTitle =
+        moderationMode === 'block' ? 'Bloquer ce vendeur' : "Signaler l'annonce";
+    const moderationSubmitLabel =
+        moderationMode === 'block' ? 'Bloquer le vendeur' : "Envoyer le signalement";
     const requiresSellerContact = React.useMemo(() => {
         if (!product?.category || typeof product.category !== 'object') {
             return false;
@@ -915,6 +982,115 @@ export default function ProductDetailScreen() {
         }
     };
 
+    const openSafetyActions = React.useCallback(() => {
+        if (!product?._id) {
+            return;
+        }
+        setShowSafetyActionsModal(true);
+    }, [product?._id]);
+
+    const openModerationModal = React.useCallback(
+        (mode: 'report' | 'block') => {
+            if (!requireAuth('Connectez-vous pour continuer.')) {
+                return;
+            }
+            if (!product?._id) {
+                showAlert('Erreur', 'Annonce introuvable.', 'error');
+                return;
+            }
+            if (!sellerUserId) {
+                showAlert('Erreur', 'Vendeur indisponible pour cette annonce.', 'error');
+                return;
+            }
+            if (isOwnAnnouncement) {
+                showAlert(
+                    'Action indisponible',
+                    'Vous ne pouvez pas signaler ou bloquer votre propre annonce.',
+                    'info',
+                );
+                return;
+            }
+
+            const defaultReason = mode === 'block' ? BLOCK_REASONS[0].value : REPORT_REASONS[0].value;
+            setShowSafetyActionsModal(false);
+            setModerationMode(mode);
+            setModerationReason(defaultReason);
+            setModerationDetails('');
+        },
+        [isOwnAnnouncement, product?._id, requireAuth, sellerUserId, showAlert],
+    );
+
+    const closeModerationModal = React.useCallback(() => {
+        if (isModerationSubmitting) {
+            return;
+        }
+        setModerationMode(null);
+        setModerationDetails('');
+    }, [isModerationSubmitting]);
+
+    const handleSubmitModeration = async () => {
+        if (!moderationMode || !product?._id) {
+            return;
+        }
+        if (!requireAuth('Connectez-vous pour continuer.')) {
+            return;
+        }
+        if (isOwnAnnouncement) {
+            showAlert(
+                'Action indisponible',
+                'Vous ne pouvez pas signaler ou bloquer votre propre annonce.',
+                'info',
+            );
+            return;
+        }
+
+        const payload = {
+            reason: moderationReason,
+            details: moderationDetails.trim() || undefined,
+        };
+
+        try {
+            if (moderationMode === 'report') {
+                await reportAnnouncement({
+                    announcementId: product._id,
+                    data: payload,
+                }).unwrap();
+                setModerationMode(null);
+                setModerationDetails('');
+                showAlert(
+                    'Signalement envoye',
+                    'Merci. Notre equipe va verifier cette annonce.',
+                    'success',
+                );
+                return;
+            }
+
+            await blockSellerFromAnnouncement({
+                announcementId: product._id,
+                data: payload,
+            }).unwrap();
+            setModerationMode(null);
+            setModerationDetails('');
+            showAlert(
+                'Vendeur bloque',
+                'Vous ne verrez plus les annonces de ce vendeur et il ne pourra plus echanger avec vous.',
+                'success',
+                safeBack,
+            );
+        } catch (error: any) {
+            showAlert(
+                'Erreur',
+                parseError(
+                    error,
+                    moderationMode === 'block'
+                        ? 'Impossible de bloquer ce vendeur.'
+                        : "Impossible d'envoyer le signalement.",
+                ),
+                'error',
+            );
+        }
+    };
+
     if (isLoading) {
         return <LoadingSpinner fullScreen />;
     }
@@ -956,6 +1132,12 @@ export default function ProductDetailScreen() {
                         </TouchableOpacity>
                         <Text style={styles.headerTitle} numberOfLines={1}>{product.name}</Text>
                         <TouchableOpacity
+                            onPress={openSafetyActions}
+                            style={styles.headerButton}
+                        >
+                            <Ionicons name="shield-outline" size={22} color={Colors.white} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
                             onPress={handleToggleFavorite}
                             style={styles.headerButton}
                             disabled={isTogglingLike}
@@ -975,17 +1157,25 @@ export default function ProductDetailScreen() {
                 <TouchableOpacity onPress={() => safeBack()} style={styles.floatingButton}>
                     <Ionicons name="arrow-back" size={24} color={Colors.white} />
                 </TouchableOpacity>
-                <TouchableOpacity
-                    onPress={handleToggleFavorite}
-                    style={styles.floatingButton}
-                    disabled={isTogglingLike}
-                >
-                    <Ionicons 
-                        name={isFavorite ? "heart" : "heart-outline"} 
-                        size={24} 
-                        color={isFavorite ? Colors.error : Colors.white} 
-                    />
-                </TouchableOpacity>
+                <View style={styles.topButtonsRight}>
+                    <TouchableOpacity
+                        onPress={openSafetyActions}
+                        style={styles.floatingButton}
+                    >
+                        <Ionicons name="shield-outline" size={22} color={Colors.white} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={handleToggleFavorite}
+                        style={styles.floatingButton}
+                        disabled={isTogglingLike}
+                    >
+                        <Ionicons 
+                            name={isFavorite ? "heart" : "heart-outline"} 
+                            size={24} 
+                            color={isFavorite ? Colors.error : Colors.white} 
+                        />
+                    </TouchableOpacity>
+                </View>
             </SafeAreaView>
 
             <Animated.ScrollView
@@ -1222,12 +1412,20 @@ export default function ProductDetailScreen() {
                                     </Text>
                                 </View>
                             </View>
-                            <TouchableOpacity
-                                style={styles.contactSellerButton}
-                                onPress={openContactModal}
-                            >
-                                <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
-                            </TouchableOpacity>
+                            <View style={styles.sellerActions}>
+                                <TouchableOpacity
+                                    style={styles.sellerSafetyButton}
+                                    onPress={openSafetyActions}
+                                >
+                                    <Ionicons name="shield-outline" size={18} color={Colors.primary} />
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={styles.contactSellerButton}
+                                    onPress={openContactModal}
+                                >
+                                    <Ionicons name="chatbubble-outline" size={20} color={Colors.white} />
+                                </TouchableOpacity>
+                            </View>
                         </View>
                         <Text style={styles.sellerSecurityNote}>
                             Echangez avec le vendeur uniquement via la messagerie integree.
@@ -1415,6 +1613,214 @@ export default function ProductDetailScreen() {
                     </View>
                 </SafeAreaView>
             </View>
+
+            {/* Modal Actions de securite */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={showSafetyActionsModal}
+                onRequestClose={() => setShowSafetyActionsModal(false)}
+                statusBarTranslucent
+            >
+                <View style={styles.modalOverlay}>
+                    <View
+                        style={[
+                            styles.safetyActionsModal,
+                            { paddingBottom: Spacing.xl + Math.max(insets.bottom, Spacing.xs) },
+                        ]}
+                    >
+                        <View style={styles.contactModalHeader}>
+                            <View>
+                                <Text style={styles.contactModalTitle}>Securite</Text>
+                                <Text style={styles.safetyModalSubtitle}>
+                                    Signaler une annonce ou masquer ce vendeur de votre compte.
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                style={styles.sheetCloseButton}
+                                onPress={() => setShowSafetyActionsModal(false)}
+                            >
+                                <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.safetyActionList}>
+                            <TouchableOpacity
+                                style={styles.safetyActionItem}
+                                onPress={() => openModerationModal('report')}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.safetyActionIcon, styles.safetyActionIconReport]}>
+                                    <Ionicons name="flag-outline" size={20} color={Colors.warning} />
+                                </View>
+                                <View style={styles.safetyActionTextWrap}>
+                                    <Text style={styles.safetyActionTitle}>Signaler l&apos;annonce</Text>
+                                    <Text style={styles.safetyActionSubtitle}>
+                                        Envoyer cette annonce a la moderation.
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={Colors.gray400} />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.safetyActionItem}
+                                onPress={() => openModerationModal('block')}
+                                activeOpacity={0.85}
+                            >
+                                <View style={[styles.safetyActionIcon, styles.safetyActionIconBlock]}>
+                                    <Ionicons name="ban-outline" size={20} color={Colors.error} />
+                                </View>
+                                <View style={styles.safetyActionTextWrap}>
+                                    <Text style={styles.safetyActionTitle}>Bloquer ce vendeur</Text>
+                                    <Text style={styles.safetyActionSubtitle}>
+                                        Masquer ses annonces et bloquer les echanges.
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={Colors.gray400} />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={styles.safetyActionItem}
+                                onPress={() => {
+                                    setShowSafetyActionsModal(false);
+                                    router.push('/blocked-sellers' as any);
+                                }}
+                                activeOpacity={0.85}
+                            >
+                                <View style={styles.safetyActionIcon}>
+                                    <Ionicons name="list-outline" size={20} color={Colors.primary} />
+                                </View>
+                                <View style={styles.safetyActionTextWrap}>
+                                    <Text style={styles.safetyActionTitle}>Vendeurs bloques</Text>
+                                    <Text style={styles.safetyActionSubtitle}>
+                                        Voir et debloquer les vendeurs masques.
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={18} color={Colors.gray400} />
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Modal Signalement / Blocage */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={Boolean(moderationMode)}
+                onRequestClose={closeModerationModal}
+                statusBarTranslucent
+            >
+                <View style={styles.modalOverlay}>
+                    <KeyboardAvoidingView
+                        style={styles.sheetKeyboardWrap}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    >
+                        <View
+                            style={[
+                                styles.safetyFormModal,
+                                { paddingBottom: Spacing.xl + Math.max(insets.bottom, Spacing.xs) },
+                            ]}
+                        >
+                            <View style={styles.contactModalHeader}>
+                                <View>
+                                    <Text style={styles.contactModalTitle}>{moderationTitle}</Text>
+                                    <Text style={styles.safetyModalSubtitle}>
+                                        {moderationMode === 'block'
+                                            ? 'Ce vendeur sera masque de votre experience Uty.'
+                                            : 'Votre signalement aide a garder Uty plus fiable.'}
+                                    </Text>
+                                </View>
+                                <TouchableOpacity
+                                    style={styles.sheetCloseButton}
+                                    onPress={closeModerationModal}
+                                    disabled={isModerationSubmitting}
+                                >
+                                    <Ionicons name="close" size={20} color={Colors.textPrimary} />
+                                </TouchableOpacity>
+                            </View>
+
+                            <Text style={styles.moderationLabel}>Motif</Text>
+                            <View style={styles.moderationReasonList}>
+                                {moderationReasons.map((reason) => {
+                                    const selected = moderationReason === reason.value;
+                                    return (
+                                        <TouchableOpacity
+                                            key={reason.value}
+                                            style={[
+                                                styles.moderationReasonItem,
+                                                selected && styles.moderationReasonItemSelected,
+                                            ]}
+                                            onPress={() => setModerationReason(reason.value)}
+                                            activeOpacity={0.85}
+                                        >
+                                            <View style={styles.moderationReasonTextWrap}>
+                                                <Text
+                                                    style={[
+                                                        styles.moderationReasonTitle,
+                                                        selected && styles.moderationReasonTitleSelected,
+                                                    ]}
+                                                >
+                                                    {reason.label}
+                                                </Text>
+                                                <Text style={styles.moderationReasonDescription}>
+                                                    {reason.description}
+                                                </Text>
+                                            </View>
+                                            <Ionicons
+                                                name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+                                                size={20}
+                                                color={selected ? Colors.primary : Colors.gray300}
+                                            />
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            <Text style={styles.moderationLabel}>Details optionnels</Text>
+                            <TextInput
+                                style={styles.moderationInput}
+                                placeholder="Ajoutez un contexte utile pour la moderation..."
+                                placeholderTextColor={Colors.gray400}
+                                multiline
+                                maxLength={1000}
+                                value={moderationDetails}
+                                onChangeText={(text) => setModerationDetails(normalizeTextInputValue(text))}
+                                textAlignVertical="top"
+                            />
+
+                            <TouchableOpacity
+                                style={[
+                                    styles.submitModerationButton,
+                                    isModerationSubmitting && styles.submitModerationButtonDisabled,
+                                ]}
+                                onPress={() => void handleSubmitModeration()}
+                                disabled={isModerationSubmitting}
+                            >
+                                <LinearGradient
+                                    colors={moderationMode === 'block' ? Gradients.warm : Gradients.primary}
+                                    style={styles.submitModerationGradient}
+                                >
+                                    {isModerationSubmitting ? (
+                                        <LoadingSpinner size="small" color={Colors.white} fullScreen={false} />
+                                    ) : (
+                                        <>
+                                            <Ionicons
+                                                name={moderationMode === 'block' ? 'ban-outline' : 'flag-outline'}
+                                                size={20}
+                                                color={Colors.white}
+                                            />
+                                            <Text style={styles.submitModerationText}>
+                                                {moderationSubmitLabel}
+                                            </Text>
+                                        </>
+                                    )}
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
+                    </KeyboardAvoidingView>
+                </View>
+            </Modal>
 
             {/* Modal Galerie d'images */}
             <Modal
@@ -1676,7 +2082,11 @@ export default function ProductDetailScreen() {
                 title={alertState.title}
                 message={alertState.message}
                 type={alertState.type}
-                onConfirm={() => setAlertState((prev) => ({ ...prev, visible: false }))}
+                onConfirm={() => {
+                    const callback = alertState.onConfirm;
+                    setAlertState((prev) => ({ ...prev, visible: false, onConfirm: undefined }));
+                    callback?.();
+                }}
                 confirmText="OK"
             />
         </View>
@@ -1727,6 +2137,11 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         paddingHorizontal: Spacing.lg,
         zIndex: 50,
+    },
+    topButtonsRight: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
     },
     floatingButton: {
         width: 44,
@@ -2213,6 +2628,21 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         ...Shadows.md,
     },
+    sellerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.sm,
+    },
+    sellerSafetyButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: Colors.primary + '10',
+        borderWidth: 1,
+        borderColor: Colors.primary + '24',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     sellerSecurityNote: {
         marginTop: Spacing.sm,
         fontSize: Typography.fontSize.xs,
@@ -2513,6 +2943,26 @@ const styles = StyleSheet.create({
         padding: Spacing.xl,
         maxHeight: '88%',
     },
+    safetyActionsModal: {
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xxxl,
+        borderTopRightRadius: BorderRadius.xxxl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
+        padding: Spacing.xl,
+        maxHeight: '88%',
+        width: '100%',
+    },
+    safetyFormModal: {
+        backgroundColor: Colors.white,
+        borderTopLeftRadius: BorderRadius.xxxl,
+        borderTopRightRadius: BorderRadius.xxxl,
+        borderWidth: 1,
+        borderColor: Colors.primary + '16',
+        padding: Spacing.xl,
+        maxHeight: '92%',
+        width: '100%',
+    },
     contactModalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -2523,6 +2973,130 @@ const styles = StyleSheet.create({
         fontSize: Typography.fontSize.xxl,
         fontWeight: Typography.fontWeight.extrabold,
         color: Colors.textPrimary,
+    },
+    safetyModalSubtitle: {
+        marginTop: Spacing.xs,
+        maxWidth: SCREEN_WIDTH - 116,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.textSecondary,
+        lineHeight: 19,
+    },
+    safetyActionList: {
+        gap: Spacing.sm,
+    },
+    safetyActionItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        paddingVertical: Spacing.md,
+        paddingHorizontal: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
+    },
+    safetyActionItemDisabled: {
+        opacity: 0.45,
+    },
+    safetyActionIcon: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+    },
+    safetyActionIconReport: {
+        backgroundColor: Colors.warning + '14',
+    },
+    safetyActionIconBlock: {
+        backgroundColor: Colors.error + '12',
+    },
+    safetyActionTextWrap: {
+        flex: 1,
+    },
+    safetyActionTitle: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    safetyActionSubtitle: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        lineHeight: 17,
+    },
+    moderationLabel: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+        marginBottom: Spacing.sm,
+    },
+    moderationReasonList: {
+        gap: Spacing.sm,
+        marginBottom: Spacing.lg,
+    },
+    moderationReasonItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: Spacing.md,
+        borderRadius: BorderRadius.lg,
+        borderWidth: 1,
+        borderColor: Colors.gray100,
+        backgroundColor: Colors.white,
+        padding: Spacing.md,
+    },
+    moderationReasonItemSelected: {
+        borderColor: Colors.primary + '44',
+        backgroundColor: Colors.primary + '08',
+    },
+    moderationReasonTextWrap: {
+        flex: 1,
+    },
+    moderationReasonTitle: {
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+        color: Colors.textPrimary,
+    },
+    moderationReasonTitleSelected: {
+        color: Colors.primary,
+    },
+    moderationReasonDescription: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.xs,
+        color: Colors.textSecondary,
+        lineHeight: 16,
+    },
+    moderationInput: {
+        minHeight: 118,
+        borderRadius: BorderRadius.xl,
+        borderWidth: 1,
+        borderColor: Colors.gray200,
+        backgroundColor: Colors.gray50,
+        padding: Spacing.lg,
+        fontSize: Typography.fontSize.base,
+        color: Colors.textPrimary,
+        marginBottom: Spacing.lg,
+    },
+    submitModerationButton: {
+        borderRadius: BorderRadius.xl,
+        overflow: 'hidden',
+        ...Shadows.md,
+    },
+    submitModerationButtonDisabled: {
+        opacity: 0.72,
+    },
+    submitModerationGradient: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: Spacing.lg,
+        gap: Spacing.sm,
+    },
+    submitModerationText: {
+        fontSize: Typography.fontSize.md,
+        fontWeight: Typography.fontWeight.extrabold,
+        color: Colors.white,
     },
     contactOptions: {
         gap: Spacing.sm,

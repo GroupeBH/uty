@@ -147,6 +147,14 @@ export default function SettingsScreen() {
                     gradient: Gradients.cool,
                     onPress: () => router.push('/forgot-pin'),
                 },
+                {
+                    kind: 'action',
+                    icon: 'shield-outline',
+                    label: 'Vendeurs bloques',
+                    subtitle: 'Gerer les vendeurs masques',
+                    gradient: Gradients.primary,
+                    onPress: () => router.push('/blocked-sellers' as any),
+                },
             ],
         },
         {

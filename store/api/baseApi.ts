@@ -133,6 +133,7 @@ export const baseApi = createApi({
         'Notification',
         'Messaging',
         'ContactRequest',
+        'SellerBlock',
     ],
     endpoints: () => ({}),
 });
