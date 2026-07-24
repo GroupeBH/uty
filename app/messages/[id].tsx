@@ -17,6 +17,7 @@ import {
     getCachedDirectOrderProduct,
 } from '@/utils/directOrderDraft';
 import { normalizeTextInputValue } from '@/utils/textInput';
+import { checkUserGeneratedText, OBJECTIONABLE_CONTENT_MESSAGE } from '@/utils/contentModeration';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
@@ -189,6 +190,11 @@ export default function MessageThreadScreen() {
 
         const content = composerText.trim();
         if (!content || !conversationId) {
+            return;
+        }
+
+        if (!checkUserGeneratedText(content).allowed) {
+            setLocalError(OBJECTIONABLE_CONTENT_MESSAGE);
             return;
         }
 
