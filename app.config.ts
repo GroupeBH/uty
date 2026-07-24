@@ -100,7 +100,10 @@ const withIosDeploymentTarget: ConfigPlugin = (expoConfig) =>
 const withIosSimulatorArchitectures: ConfigPlugin = (expoConfig) =>
     withPodfile(expoConfig, (modConfig) => {
         const patchName = 'uty_ios_simulator_architectures';
-        const googleUtilitiesPod = "  pod 'GoogleUtilities', :modular_headers => true";
+        const modularHeaderPods = [
+            "  pod 'GoogleUtilities', :modular_headers => true",
+            "  pod 'RecaptchaInterop', :modular_headers => true",
+        ];
         const helper = `
 def ${patchName}(installer)
   Dir.glob(File.join(Pod::Config.instance.installation_root.to_s, 'Pods', 'Target Support Files', '**', '*.xcconfig')).each do |xcconfig_path|
@@ -142,10 +145,15 @@ end
             );
         }
 
-        if (!modConfig.modResults.contents.includes("pod 'GoogleUtilities'")) {
+        for (const podLine of modularHeaderPods) {
+            const podName = podLine.match(/pod '([^']+)'/)?.[1];
+            if (!podName || modConfig.modResults.contents.includes(`pod '${podName}'`)) {
+                continue;
+            }
+
             modConfig.modResults.contents = modConfig.modResults.contents.replace(
                 '  use_expo_modules!',
-                `  use_expo_modules!\n\n${googleUtilitiesPod}`
+                `  use_expo_modules!\n\n${podLine}`
             );
         }
 
@@ -187,6 +195,10 @@ export default ({ config }: ConfigContext): ExpoConfig => {
                     extraPods: [
                         {
                             name: 'GoogleUtilities',
+                            modular_headers: true,
+                        },
+                        {
+                            name: 'RecaptchaInterop',
                             modular_headers: true,
                         },
                     ],
