@@ -10,7 +10,6 @@ import { CategoryIcon } from './CategoryIcon';
 interface CategoryCardProps {
     name: string;
     icon: unknown;
-    gradient: readonly [string, string, ...string[]];
     count?: number;
     onPress?: () => void;
 }
@@ -30,7 +29,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({
             <View style={styles.iconContainer}>
                 <CategoryIcon
                     icon={icon}
-                    size={54}
+                    size={64}
                     textStyle={styles.iconText}
                     imageStyle={styles.iconImage}
                 />
@@ -48,18 +47,30 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         width: 85,
         marginRight: Spacing.md,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderColor: 'transparent',
     },
     iconText: {
         fontSize: 28,
         color: Colors.white,
     },
     iconImage: {
-        borderRadius: 0,
+        borderRadius: BorderRadius.md,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderColor: 'transparent',
+        resizeMode: 'contain',
     },
     iconContainer: {
         width: 72,
         height: 72,
         borderRadius: 0,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        borderColor: 'transparent',
+        elevation: 0,
+        shadowOpacity: 0,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: Spacing.sm,
@@ -88,4 +99,3 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
 });
-

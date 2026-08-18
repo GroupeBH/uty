@@ -448,17 +448,77 @@ export default function DriverDeliveriesPoolScreen({
     if (!hasDriverRole) {
         return (
             <SafeAreaView style={styles.emptyRoleContainer} edges={['top', 'bottom']}>
-                <Ionicons name="bicycle-outline" size={54} color={Colors.primary} />
-                <Text style={styles.emptyRoleTitle}>Acces livreur requis</Text>
-                <Text style={styles.emptyRoleText}>
-                    Activez votre profil livreur pour voir et accepter les livraisons disponibles.
-                </Text>
-                <TouchableOpacity
-                    style={styles.primaryButton}
-                    onPress={() => router.push('/become-delivery')}
+                <ScrollView
+                    contentContainerStyle={styles.emptyRoleContent}
+                    showsVerticalScrollIndicator={false}
                 >
-                    <Text style={styles.primaryButtonText}>Devenir livreur</Text>
-                </TouchableOpacity>
+                    <View style={styles.emptyRoleIcon}>
+                        <Ionicons name="bicycle-outline" size={38} color={Colors.primary} />
+                    </View>
+                    <Text style={styles.emptyRoleTitle}>
+                        Veuillez completer vos informations pour devenir livreur
+                    </Text>
+                    <Text style={styles.emptyRoleText}>
+                        Avant de voir et d accepter des livraisons, nous devons verifier votre
+                        identite et votre moyen de transport, si vous en avez un.
+                    </Text>
+
+                    <View style={styles.requirementsCard}>
+                        <View style={styles.requirementRow}>
+                            <View style={styles.requirementIcon}>
+                                <Ionicons name="shield-checkmark-outline" size={20} color={Colors.primary} />
+                            </View>
+                            <View style={styles.requirementCopy}>
+                                <Text style={styles.requirementTitle}>Verifier votre identite</Text>
+                                <Text style={styles.requirementText}>
+                                    Completez la verification KYC pour securiser les livraisons.
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={styles.requirementRow}>
+                            <View style={styles.requirementIcon}>
+                                <Ionicons name="camera-outline" size={20} color={Colors.primary} />
+                            </View>
+                            <View style={styles.requirementCopy}>
+                                <Text style={styles.requirementTitle}>Ajouter une photo</Text>
+                                <Text style={styles.requirementText}>
+                                    Fournissez une photo de profil claire pour confirmer votre identite.
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={styles.requirementRow}>
+                            <View style={styles.requirementIcon}>
+                                <Ionicons name="car-outline" size={20} color={Colors.primary} />
+                            </View>
+                            <View style={styles.requirementCopy}>
+                                <Text style={styles.requirementTitle}>Indiquer votre moyen de transport</Text>
+                                <Text style={styles.requirementText}>
+                                    Le vehicule est facultatif. Vous pouvez aussi livrer sans vehicule.
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    <Text style={styles.emptyRoleNote}>
+                        Une fois ces informations validees, vous pourrez consulter et accepter les
+                        livraisons disponibles.
+                    </Text>
+
+                    <TouchableOpacity
+                        style={styles.primaryButton}
+                        onPress={() => router.push('/become-delivery')}
+                    >
+                        <Text style={styles.primaryButtonText}>Completer mes informations</Text>
+                        <Ionicons name="arrow-forward" size={18} color={Colors.white} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={styles.homeButton}
+                        onPress={() => router.replace('/(tabs)' as any)}
+                    >
+                        <Ionicons name="home-outline" size={18} color={Colors.primary} />
+                        <Text style={styles.homeButtonText}>Revenir a l accueil</Text>
+                    </TouchableOpacity>
+                </ScrollView>
             </SafeAreaView>
         );
     }
@@ -866,16 +926,29 @@ const styles = StyleSheet.create({
     },
     emptyRoleContainer: {
         flex: 1,
+        backgroundColor: Colors.backgroundSecondary,
+    },
+    emptyRoleContent: {
+        flexGrow: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: Colors.backgroundSecondary,
         paddingHorizontal: Spacing.xl,
+        paddingVertical: Spacing.xxl,
+    },
+    emptyRoleIcon: {
+        width: 76,
+        height: 76,
+        borderRadius: BorderRadius.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '12',
     },
     emptyRoleTitle: {
         marginTop: Spacing.md,
-        fontSize: Typography.fontSize.lg,
+        fontSize: Typography.fontSize.xl,
         color: Colors.primary,
         fontWeight: Typography.fontWeight.extrabold,
+        textAlign: 'center',
     },
     emptyRoleText: {
         marginTop: Spacing.xs,
@@ -884,15 +957,81 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         lineHeight: 20,
     },
+    requirementsCard: {
+        width: '100%',
+        marginTop: Spacing.xl,
+        padding: Spacing.lg,
+        gap: Spacing.lg,
+        borderRadius: BorderRadius.lg,
+        backgroundColor: Colors.white,
+        ...Shadows.sm,
+    },
+    requirementRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: Spacing.md,
+    },
+    requirementIcon: {
+        width: 38,
+        height: 38,
+        borderRadius: BorderRadius.full,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: Colors.primary + '10',
+    },
+    requirementCopy: {
+        flex: 1,
+    },
+    requirementTitle: {
+        fontSize: Typography.fontSize.base,
+        color: Colors.primary,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    requirementText: {
+        marginTop: 2,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        lineHeight: 18,
+    },
+    emptyRoleNote: {
+        marginTop: Spacing.lg,
+        fontSize: Typography.fontSize.sm,
+        color: Colors.gray600,
+        textAlign: 'center',
+        lineHeight: 19,
+    },
     primaryButton: {
         marginTop: Spacing.lg,
+        width: '100%',
         borderRadius: BorderRadius.full,
-        paddingVertical: Spacing.sm,
+        paddingVertical: Spacing.md,
         paddingHorizontal: Spacing.xl,
         backgroundColor: Colors.primary,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
     },
     primaryButtonText: {
         color: Colors.white,
+        fontSize: Typography.fontSize.sm,
+        fontWeight: Typography.fontWeight.bold,
+    },
+    homeButton: {
+        marginTop: Spacing.sm,
+        width: '100%',
+        borderRadius: BorderRadius.full,
+        borderWidth: 1,
+        borderColor: Colors.primary + '33',
+        paddingVertical: Spacing.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: Spacing.sm,
+        backgroundColor: Colors.white,
+    },
+    homeButtonText: {
+        color: Colors.primary,
         fontSize: Typography.fontSize.sm,
         fontWeight: Typography.fontWeight.bold,
     },
