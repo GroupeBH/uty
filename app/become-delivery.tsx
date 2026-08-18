@@ -46,7 +46,7 @@ const DELIVERY_ROLE_KEYS = ['driver', 'delivery_person', 'deliveryperson', 'deli
 const DELIVERY_STEPS = [
     { id: 1, title: 'KYC', icon: 'shield-checkmark-outline' as const },
     { id: 2, title: 'Photo', icon: 'camera-outline' as const },
-    { id: 3, title: 'Vehicule', icon: 'bicycle-outline' as const },
+    { id: 3, title: 'Transport', icon: 'bicycle-outline' as const },
 ];
 
 const resolveKycFullName = (account: any) => {
@@ -70,6 +70,7 @@ export default function BecomeDeliveryScreen() {
     const [model, setModel] = React.useState('');
     const [licensePlate, setLicensePlate] = React.useState('');
     const [vehicleType, setVehicleType] = React.useState<VehicleType>('motorcycle');
+    const [hasVehicle, setHasVehicle] = React.useState(false);
     const [isAvailable, setIsAvailable] = React.useState(true);
     const [step, setStep] = React.useState(1);
     const [profileImageUrl, setProfileImageUrl] = React.useState<string>((user?.image || '').trim());
@@ -180,12 +181,12 @@ export default function BecomeDeliveryScreen() {
             return false;
         }
 
-        if (step === 3 && !model.trim()) {
+        if (step === 3 && hasVehicle && !model.trim()) {
             showAlert('Modele requis', 'Veuillez saisir le modele de votre vehicule.', 'warning');
             return false;
         }
 
-        if (step === 3 && !licensePlate.trim()) {
+        if (step === 3 && hasVehicle && !licensePlate.trim()) {
             showAlert('Plaque requise', 'Veuillez saisir le numero de plaque.', 'warning');
             return false;
         }
@@ -372,11 +373,15 @@ export default function BecomeDeliveryScreen() {
         try {
             await becomeDeliveryPerson({
                 profileImageUrl: resolvedProfileImage,
-                vehicle: {
-                    model: model.trim(),
-                    licensePlate: licensePlate.trim().toUpperCase(),
-                    type: vehicleType,
-                },
+                ...(hasVehicle
+                    ? {
+                        vehicle: {
+                            model: model.trim(),
+                            licensePlate: licensePlate.trim().toUpperCase(),
+                            type: vehicleType,
+                        },
+                    }
+                    : {}),
                 isAvailable,
             }).unwrap();
 
@@ -513,60 +518,79 @@ export default function BecomeDeliveryScreen() {
 
         return (
             <>
-                <Text style={styles.sectionTitle}>Etape 3: Informations vehicule</Text>
+                <Text style={styles.sectionTitle}>Etape 3: Moyen de transport</Text>
                 <Text style={styles.sectionHint}>
-                    Renseignez votre vehicule pour recevoir vos missions de livraison.
+                    Vous pouvez devenir livreur avec ou sans vehicule.
                 </Text>
 
-                <Text style={styles.label}>Type de vehicule *</Text>
-                <View style={styles.vehicleTypesRow}>
-                    {VEHICLE_OPTIONS.map((option) => {
-                        const selected = vehicleType === option.value;
-                        return (
-                            <TouchableOpacity
-                                key={option.value}
-                                style={[
-                                    styles.vehicleChip,
-                                    selected && styles.vehicleChipSelected,
-                                ]}
-                                onPress={() => setVehicleType(option.value)}
-                            >
-                                <Ionicons
-                                    name={option.icon}
-                                    size={16}
-                                    color={selected ? Colors.white : Colors.gray500}
-                                />
-                                <Text
-                                    style={[
-                                        styles.vehicleChipText,
-                                        selected && styles.vehicleChipTextSelected,
-                                    ]}
-                                >
-                                    {option.label}
-                                </Text>
-                            </TouchableOpacity>
-                        );
-                    })}
+                <View style={styles.switchRow}>
+                    <View style={styles.switchCopy}>
+                        <Text style={styles.switchTitle}>J ai un vehicule</Text>
+                        <Text style={styles.switchHint}>
+                            Desactivez cette option si vous effectuez les livraisons sans vehicule.
+                        </Text>
+                    </View>
+                    <Switch
+                        value={hasVehicle}
+                        onValueChange={setHasVehicle}
+                        trackColor={{ false: Colors.gray300, true: Colors.primary + '70' }}
+                        thumbColor={hasVehicle ? Colors.primary : Colors.gray500}
+                    />
                 </View>
 
-                <Text style={styles.label}>Modele *</Text>
-                <TextInput
-                    value={model}
-                    onChangeText={setModel}
-                    style={styles.input}
-                    placeholder={KINSHASA_VEHICLE_MODEL_EXAMPLE}
-                    placeholderTextColor={Colors.gray400}
-                />
+                {hasVehicle ? (
+                    <>
+                        <Text style={styles.label}>Type de vehicule *</Text>
+                        <View style={styles.vehicleTypesRow}>
+                            {VEHICLE_OPTIONS.map((option) => {
+                                const selected = vehicleType === option.value;
+                                return (
+                                    <TouchableOpacity
+                                        key={option.value}
+                                        style={[
+                                            styles.vehicleChip,
+                                            selected && styles.vehicleChipSelected,
+                                        ]}
+                                        onPress={() => setVehicleType(option.value)}
+                                    >
+                                        <Ionicons
+                                            name={option.icon}
+                                            size={16}
+                                            color={selected ? Colors.white : Colors.gray500}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.vehicleChipText,
+                                                selected && styles.vehicleChipTextSelected,
+                                            ]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
 
-                <Text style={styles.label}>Plaque d immatriculation *</Text>
-                <TextInput
-                    value={licensePlate}
-                    onChangeText={setLicensePlate}
-                    style={styles.input}
-                    placeholder={KINSHASA_PLATE_EXAMPLE}
-                    autoCapitalize="characters"
-                    placeholderTextColor={Colors.gray400}
-                />
+                        <Text style={styles.label}>Modele *</Text>
+                        <TextInput
+                            value={model}
+                            onChangeText={setModel}
+                            style={styles.input}
+                            placeholder={KINSHASA_VEHICLE_MODEL_EXAMPLE}
+                            placeholderTextColor={Colors.gray400}
+                        />
+
+                        <Text style={styles.label}>Plaque d immatriculation *</Text>
+                        <TextInput
+                            value={licensePlate}
+                            onChangeText={setLicensePlate}
+                            style={styles.input}
+                            placeholder={KINSHASA_PLATE_EXAMPLE}
+                            autoCapitalize="characters"
+                            placeholderTextColor={Colors.gray400}
+                        />
+                    </>
+                ) : null}
 
                 <View style={styles.switchRow}>
                     <View style={styles.switchCopy}>

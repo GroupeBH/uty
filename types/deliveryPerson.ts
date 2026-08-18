@@ -8,7 +8,7 @@ export interface DeliveryVehicle {
 
 export interface BecomeDeliveryPersonRequest {
     profileImageUrl: string;
-    vehicle: DeliveryVehicle;
+    vehicle?: DeliveryVehicle;
     isAvailable?: boolean;
 }
 
@@ -20,7 +20,7 @@ export interface DeliveryPersonLocation {
 export interface DeliveryPerson {
     _id: string;
     userId: string;
-    vehicle: DeliveryVehicle;
+    vehicle?: DeliveryVehicle;
     isAvailable: boolean;
     location?: DeliveryPersonLocation;
     rating?: number;
