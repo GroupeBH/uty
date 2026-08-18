@@ -6,7 +6,7 @@ import { ProductCardSkeleton, QuickActionSkeleton } from '@/components/SkeletonL
 import { BorderRadius, Colors, Gradients, Shadows, Spacing, Typography } from '@/constants/theme';
 import { useAuth } from '@/hooks/useAuth';
 import { useGetAnnouncementsQuery, useToggleLikeMutation } from '@/store/api/announcementsApi';
-import { useGetCategoriesQuery } from '@/store/api/categoriesApi';
+import { useGetCategoriesByParentQuery } from '@/store/api/categoriesApi';
 import { useGetMyNotificationsQuery } from '@/store/api/notificationsApi';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -72,16 +72,6 @@ const AnnouncementPairRow = ({ pair, onAddToCart, onToggleWishlist, isInWishlist
         )}
     </View>
 );
-
-const CATEGORY_GRADIENTS = [
-    Gradients.cool,
-    Gradients.warm,
-    Gradients.success,
-    Gradients.accent,
-    Gradients.primary,
-    Gradients.sunset,
-    Gradients.ocean,
-];
 
 const toIdString = (value: any): string | null => {
     if (!value) return null;
@@ -189,7 +179,7 @@ export default function HomeScreen() {
         data: categoriesData = [],
         isLoading: isCategoriesLoading,
         refetch: refetchCategories,
-    } = useGetCategoriesQuery();
+    } = useGetCategoriesByParentQuery(null);
     const { data: myNotifications = [] } = useGetMyNotificationsQuery(
         { limit: 50 },
         { skip: !isAuthenticated },
@@ -348,17 +338,15 @@ export default function HomeScreen() {
     }, [announcements]);
 
     const homeCategories = useMemo(() => {
-        const activeCategories = categoriesData.filter((category: any) => category?.isActive !== false);
-        const topLevel = activeCategories.filter((category: any) => !category?.parentId);
-        const source = topLevel.length > 0 ? topLevel : activeCategories;
-
-        return source.slice(0, 10).map((category: any, index: number) => ({
-            id: String(category._id),
-            name: category.name || 'Categorie',
-            icon: category.icon,
-            gradient: CATEGORY_GRADIENTS[index % CATEGORY_GRADIENTS.length],
-            count: categoryCounts.get(String(category._id)) || 0,
-        }));
+        return categoriesData
+            .filter((category) => category.isActive !== false && !category.parentId)
+            .slice(0, 10)
+            .map((category) => ({
+                id: String(category._id),
+                name: category.name || 'Categorie',
+                icon: category.icon,
+                count: categoryCounts.get(String(category._id)) || 0,
+            }));
     }, [categoriesData, categoryCounts]);
 
     const onRefresh = async () => {
@@ -669,7 +657,6 @@ export default function HomeScreen() {
                                     key={category.id}
                                     name={category.name}
                                     icon={category.icon}
-                                    gradient={category.gradient}
                                     count={category.count}
                                     onPress={() =>
                                         router.push({

@@ -10,7 +10,6 @@ import { CategoryIcon } from './CategoryIcon';
 interface CategoryCardProps {
     name: string;
     icon: unknown;
-    gradient: readonly [string, string, ...string[]];
     count?: number;
     onPress?: () => void;
 }
@@ -48,6 +47,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         width: 85,
         marginRight: Spacing.md,
+        backgroundColor: 'transparent',
     },
     iconText: {
         fontSize: 28,
@@ -55,11 +55,16 @@ const styles = StyleSheet.create({
     },
     iconImage: {
         borderRadius: 0,
+        backgroundColor: 'transparent',
     },
     iconContainer: {
         width: 72,
         height: 72,
         borderRadius: 0,
+        backgroundColor: 'transparent',
+        borderWidth: 0,
+        elevation: 0,
+        shadowOpacity: 0,
         alignItems: 'center',
         justifyContent: 'center',
         marginBottom: Spacing.sm,
