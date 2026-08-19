@@ -236,6 +236,7 @@ export default function ProductDetailScreen() {
     const { data: cart } = useGetCartQuery(undefined, { skip: !isAuthenticated });
     
     const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+    const moderationTransitionTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const [isMainImageLoading, setIsMainImageLoading] = useState(true);
     const [thumbnailLoadingByUri, setThumbnailLoadingByUri] = useState<Record<string, boolean>>({});
     const [showImageModal, setShowImageModal] = useState(false);
@@ -1135,11 +1136,29 @@ export default function ProductDetailScreen() {
                 ? SELLER_BLOCK_REASONS[0].value
                 : ANNOUNCEMENT_REPORT_REASONS[0].value;
             setShowSafetyActionsModal(false);
-            setModerationMode(mode);
             setModerationReason(defaultReason);
             setModerationDetails('');
+
+            // Sur iOS, attendre la fermeture du premier Modal natif avant
+            // de presenter le formulaire de moderation.
+            if (moderationTransitionTimerRef.current) {
+                clearTimeout(moderationTransitionTimerRef.current);
+            }
+            moderationTransitionTimerRef.current = setTimeout(() => {
+                setModerationMode(mode);
+                moderationTransitionTimerRef.current = null;
+            }, Platform.OS === 'ios' ? 400 : 50);
         },
         [isOwnAnnouncement, product?._id, requireAuth, sellerUserId, showAlert],
+    );
+
+    React.useEffect(
+        () => () => {
+            if (moderationTransitionTimerRef.current) {
+                clearTimeout(moderationTransitionTimerRef.current);
+            }
+        },
+        [],
     );
 
     const closeModerationModal = React.useCallback(() => {
